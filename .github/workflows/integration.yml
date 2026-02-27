@@ -90,13 +90,23 @@ jobs:
 
       - name: Run Mint tests
         run: |
+          mkdir -p /tmp/mint-logs
           docker run --rm --network host \
             -e SERVER_ENDPOINT=127.0.0.1:4566 \
             -e ACCESS_KEY=test \
             -e SECRET_KEY=test \
             -e ENABLE_HTTPS=0 \
-            minio/mint:latest
-        continue-on-error: true
+            -v /tmp/mint-logs:/mint/log \
+            minio/mint:latest 2>&1 | tee /tmp/mint-logs/mint-output.txt || true
+
+          # Count FAIL lines from Mint output. Allow up to 3 failures
+          # (presigned POST in 2 SDKs + S3 Select are known out-of-scope).
+          FAIL_COUNT=$(grep -c '"status": "FAIL"' /tmp/mint-logs/mint-output.txt || true)
+          echo "Mint failures: $FAIL_COUNT"
+          if [ "$FAIL_COUNT" -gt 3 ]; then
+            echo "::error::Too many Mint failures ($FAIL_COUNT > 3 threshold)"
+            exit 1
+          fi
 
       - name: Upload Mint logs
         if: always()

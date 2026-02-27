@@ -158,11 +158,19 @@ impl RustStackS3 {
             let store = bucket.objects.read();
             let obj = if let Some(ref version_id) = version_id_param {
                 store.get_version(&key, version_id).ok_or_else(|| {
-                    S3ServiceError::NoSuchVersion {
-                        key: key.clone(),
-                        version_id: version_id.clone(),
+                    // Check if the version is a delete marker.
+                    if store.is_delete_marker(&key, version_id) {
+                        S3ServiceError::MethodNotAllowed
+                            .into_s3_error()
+                            .with_header("x-amz-delete-marker", "true")
+                            .with_header("x-amz-version-id", version_id.clone())
+                    } else {
+                        S3ServiceError::NoSuchVersion {
+                            key: key.clone(),
+                            version_id: version_id.clone(),
+                        }
+                        .into_s3_error()
                     }
-                    .into_s3_error()
                 })?
             } else {
                 store
@@ -290,11 +298,18 @@ impl RustStackS3 {
         let store = bucket.objects.read();
         let obj = if let Some(ref version_id) = version_id_param {
             store.get_version(&key, version_id).ok_or_else(|| {
-                S3ServiceError::NoSuchVersion {
-                    key: key.clone(),
-                    version_id: version_id.clone(),
+                if store.is_delete_marker(&key, version_id) {
+                    S3ServiceError::MethodNotAllowed
+                        .into_s3_error()
+                        .with_header("x-amz-delete-marker", "true")
+                        .with_header("x-amz-version-id", version_id.clone())
+                } else {
+                    S3ServiceError::NoSuchVersion {
+                        key: key.clone(),
+                        version_id: version_id.clone(),
+                    }
+                    .into_s3_error()
                 }
-                .into_s3_error()
             })?
         } else {
             store

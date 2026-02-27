@@ -22,6 +22,25 @@ use crate::utils::{decode_continuation_token, encode_continuation_token};
 /// Default maximum number of keys returned in a single listing response.
 const DEFAULT_MAX_KEYS: i32 = 1000;
 
+/// Validate the `max_keys` parameter, rejecting negative values.
+///
+/// # Errors
+///
+/// Returns [`S3Error`] with [`S3ErrorCode::InvalidArgument`] if `max_keys` is negative.
+#[allow(clippy::result_large_err)]
+fn validate_max_keys(max_keys: Option<i32>) -> Result<i32, S3Error> {
+    let value = max_keys.unwrap_or(DEFAULT_MAX_KEYS);
+    if value < 0 {
+        return Err(S3ServiceError::InvalidArgument {
+            message: format!(
+                "Argument max-keys must be an integer between 0 and {DEFAULT_MAX_KEYS}"
+            ),
+        }
+        .into_s3_error());
+    }
+    Ok(value)
+}
+
 /// Convert an internal [`crate::state::object::S3Object`] to a model [`Object`].
 #[allow(clippy::cast_possible_wrap)]
 fn to_model_object(obj: &crate::state::object::S3Object) -> Object {
@@ -84,7 +103,7 @@ impl RustStackS3 {
         let prefix = input.prefix.as_deref().unwrap_or("");
         let delimiter = input.delimiter.as_deref().unwrap_or("");
         let marker = input.marker.as_deref().unwrap_or("");
-        let max_keys = input.max_keys.unwrap_or(DEFAULT_MAX_KEYS);
+        let max_keys = validate_max_keys(input.max_keys)?;
         let max_keys_usize = usize::try_from(max_keys).unwrap_or(1000);
 
         let store = bucket.objects.read();
@@ -138,7 +157,7 @@ impl RustStackS3 {
 
         let prefix = input.prefix.as_deref().unwrap_or("");
         let delimiter = input.delimiter.as_deref().unwrap_or("");
-        let max_keys = input.max_keys.unwrap_or(DEFAULT_MAX_KEYS);
+        let max_keys = validate_max_keys(input.max_keys)?;
         let max_keys_usize = usize::try_from(max_keys).unwrap_or(1000);
         let fetch_owner = input.fetch_owner.unwrap_or(false);
 
@@ -223,7 +242,7 @@ impl RustStackS3 {
         let delimiter = input.delimiter.as_deref().unwrap_or("");
         let key_marker = input.key_marker.as_deref().unwrap_or("");
         let version_id_marker = input.version_id_marker.as_deref().unwrap_or("");
-        let max_keys = input.max_keys.unwrap_or(DEFAULT_MAX_KEYS);
+        let max_keys = validate_max_keys(input.max_keys)?;
         let max_keys_usize = usize::try_from(max_keys).unwrap_or(1000);
 
         let store = bucket.objects.read();

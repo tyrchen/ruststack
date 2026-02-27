@@ -372,7 +372,9 @@ impl S3Serialize for ServerSideEncryptionRule {
             if let Some(ref default) = self.apply_server_side_encryption_by_default {
                 default.serialize_xml(w)?;
             }
-            write_optional_bool(w, "BucketKeyEnabled", self.bucket_key_enabled)?;
+            if self.bucket_key_enabled == Some(true) {
+                write_text_element(w, "BucketKeyEnabled", "true")?;
+            }
             Ok(())
         })?;
         Ok(())

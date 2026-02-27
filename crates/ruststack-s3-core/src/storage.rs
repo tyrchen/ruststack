@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
-use tokio::io::AsyncReadExt;
+use tokio::io::AsyncReadExt as _;
 use tracing::{debug, trace, warn};
 
 use crate::checksums;
@@ -122,14 +122,14 @@ impl StoredData {
                     ))
                 })?;
                 let capacity = usize::try_from(*size).unwrap_or(usize::MAX);
-                let mut buf = BytesMut::with_capacity(capacity);
-                file.read_buf(&mut buf).await.map_err(|e| {
+                let mut buf = Vec::with_capacity(capacity);
+                file.read_to_end(&mut buf).await.map_err(|e| {
                     S3ServiceError::Internal(anyhow::anyhow!(
                         "failed to read temp file {}: {e}",
                         path.display()
                     ))
                 })?;
-                Ok(buf.freeze())
+                Ok(Bytes::from(buf))
             }
         }
     }
@@ -1034,6 +1034,38 @@ mod tests {
             .await
             .unwrap_or_else(|e| panic!("read_part failed: {e}"));
         assert_eq!(read, data);
+    }
+
+    // -----------------------------------------------------------------------
+    // Large on-disk object read completeness
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_should_read_all_bytes_from_large_on_disk_object() {
+        // Use a 1 MiB object with a 64-byte threshold to force disk spillover.
+        // This verifies that read_all returns the complete data rather than
+        // only the bytes returned by a single read syscall.
+        const SIZE: usize = 1024 * 1024;
+        let storage = InMemoryStorage::new(TEST_THRESHOLD);
+        let data = Bytes::from(vec![0x42_u8; SIZE]);
+
+        storage
+            .write_object("bucket", "big-obj", "null", data.clone())
+            .await
+            .unwrap_or_else(|e| panic!("write failed: {e}"));
+
+        let read_data = storage
+            .read_object("bucket", "big-obj", "null", None)
+            .await
+            .unwrap_or_else(|e| panic!("read failed: {e}"));
+
+        assert_eq!(
+            read_data.len(),
+            SIZE,
+            "expected {SIZE} bytes, got {}",
+            read_data.len()
+        );
+        assert_eq!(read_data, data);
     }
 
     // -----------------------------------------------------------------------

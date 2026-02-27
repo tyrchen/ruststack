@@ -207,7 +207,12 @@ async fn collect_body(incoming: Incoming) -> Result<Bytes, hyper::Error> {
 /// Check if the request is a health check probe.
 fn is_health_check(method: &http::Method, path: &str) -> bool {
     *method == http::Method::GET
-        && (path == "/_localstack/health" || path == "/_health" || path == "/health")
+        && (path == "/_localstack/health"
+            || path == "/_health"
+            || path == "/health"
+            || path == "/minio/health/live"
+            || path == "/minio/health/ready"
+            || path == "/minio/health/cluster")
 }
 
 /// Produce a health check response.

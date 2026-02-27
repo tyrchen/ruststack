@@ -1026,16 +1026,23 @@ pub fn error_to_response(err: &S3Error, request_id: &str) -> http::Response<S3Re
     let body = S3ResponseBody::from_bytes(Bytes::from(xml_bytes));
 
     // Build the error response - this should not fail for valid status codes.
-    http::Response::builder()
+    let mut builder = http::Response::builder()
         .status(status)
-        .header("Content-Type", "application/xml")
-        .body(body)
-        .unwrap_or_else(|_| {
-            http::Response::builder()
-                .status(http::StatusCode::INTERNAL_SERVER_ERROR)
-                .body(S3ResponseBody::empty())
-                .expect("static response should be valid")
-        })
+        .header("Content-Type", "application/xml");
+
+    // Add any extra headers attached to the error (e.g. x-amz-delete-marker).
+    if let Some(ref headers) = err.headers {
+        for (name, value) in headers.iter() {
+            builder = builder.header(name.as_str(), value.as_str());
+        }
+    }
+
+    builder.body(body).unwrap_or_else(|_| {
+        http::Response::builder()
+            .status(http::StatusCode::INTERNAL_SERVER_ERROR)
+            .body(S3ResponseBody::empty())
+            .expect("static response should be valid")
+    })
 }
 
 #[cfg(test)]

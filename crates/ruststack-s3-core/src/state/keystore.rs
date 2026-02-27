@@ -111,6 +111,15 @@ impl ObjectStore {
         }
     }
 
+    /// Check if a specific version ID for a key is a delete marker.
+    #[must_use]
+    pub fn is_delete_marker(&self, key: &str, version_id: &str) -> bool {
+        match self {
+            Self::Unversioned(_) => false,
+            Self::Versioned(vs) => vs.is_delete_marker(key, version_id),
+        }
+    }
+
     /// Delete the object for a key (un-versioned semantics: removes the object).
     pub fn delete(&mut self, key: &str) -> Option<S3Object> {
         match self {
@@ -357,6 +366,20 @@ impl VersionedKeyStore {
                 .find(|v| v.version_id() == version_id)
                 .and_then(|v| v.as_object())
         })
+    }
+
+    /// Check if a specific version ID for a key is a delete marker.
+    #[must_use]
+    pub fn is_delete_marker(&self, key: &str, version_id: &str) -> bool {
+        self.objects
+            .get(key)
+            .and_then(|versions| {
+                versions
+                    .iter()
+                    .find(|v| v.version_id() == version_id)
+                    .map(ObjectVersion::is_delete_marker)
+            })
+            .unwrap_or(false)
     }
 
     /// Delete an object by inserting a delete marker at the front.

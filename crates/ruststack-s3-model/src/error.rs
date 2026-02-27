@@ -322,6 +322,10 @@ pub struct S3Error {
     pub status_code: http::StatusCode,
     /// The underlying source error, if any.
     pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    /// Extra HTTP headers to include in the error response.
+    ///
+    /// Boxed to minimize the size of `S3Error` on the common (header-free) path.
+    pub headers: Option<Box<Vec<(String, String)>>>,
 }
 
 impl fmt::Display for S3Error {
@@ -351,6 +355,7 @@ impl S3Error {
             request_id: None,
             status_code,
             source: None,
+            headers: None,
         }
     }
 
@@ -364,6 +369,7 @@ impl S3Error {
             resource: None,
             request_id: None,
             source: None,
+            headers: None,
         }
     }
 
@@ -385,6 +391,15 @@ impl S3Error {
     #[must_use]
     pub fn with_source(mut self, source: impl std::error::Error + Send + Sync + 'static) -> Self {
         self.source = Some(Box::new(source));
+        self
+    }
+
+    /// Add an extra HTTP header to the error response.
+    #[must_use]
+    pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers
+            .get_or_insert_with(|| Box::new(Vec::new()))
+            .push((name.into(), value.into()));
         self
     }
 
