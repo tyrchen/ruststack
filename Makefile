@@ -29,7 +29,11 @@ release:
 	@git push origin master
 	@cargo release push --execute
 
+codegen:
+	@cd codegen && cargo run
+	@cargo +nightly fmt -p ruststack-s3-model
+
 update-submodule:
 	@git submodule update --init --recursive --remote
 
-.PHONY: build check test fmt clippy audit deny run-s3 release update-submodule
+.PHONY: build check test fmt clippy audit deny run-s3 release update-submodule codegen

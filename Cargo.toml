@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/*", "apps/*", "tests/integration"]
+exclude = ["codegen"]
 resolver = "3"
 
 [workspace.package]
@@ -24,25 +25,39 @@ collapsible_if = "allow"
 [workspace.dependencies]
 # Internal crates
 ruststack-core = { path = "crates/ruststack-core" }
+ruststack-s3-auth = { path = "crates/ruststack-s3-auth" }
 ruststack-s3-core = { path = "crates/ruststack-s3-core" }
 
 # s3s ecosystem
-s3s = "0.11"
-s3s-aws = "0.11"
+s3s = "~0.11"
+s3s-aws = "~0.11"
 
 # Async runtime
-tokio = { version = "1.44", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "io-util", "fs", "net"] }
+tokio = { version = "1.49", features = [
+  "rt-multi-thread",
+  "macros",
+  "signal",
+  "sync",
+  "time",
+  "io-util",
+  "fs",
+  "net",
+] }
 
 # HTTP / networking
-hyper = { version = "1.6", features = ["server", "http1", "http2"] }
-hyper-util = { version = "0.1", features = ["tokio", "server-auto", "server-graceful"] }
-http = "1.2"
+hyper = { version = "1.8", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = [
+  "tokio",
+  "server-auto",
+  "server-graceful",
+] }
+http = "1.4"
 http-body-util = "0.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-quick-xml = "0.37"
+quick-xml = "0.39"
 
 # Error handling
 anyhow = "1.0"
@@ -56,17 +71,18 @@ parking_lot = "0.12"
 md-5 = "0.10"
 sha1 = "0.10"
 sha2 = "0.10"
-crc32fast = "1.4"
+crc32fast = "1.5"
 crc32c = "0.6"
 base64 = "0.22"
 hex = "0.4"
 hmac = "0.12"
-digest = "0.10"
+digest = "0.11"
+subtle = "2.6"
 
 # Time / IDs
 chrono = { version = "0.4", features = ["serde"] }
-time = "0.3"
-uuid = { version = "1.16", features = ["v4"] }
+time = "0.3.47"
+uuid = { version = "1.21", features = ["v4"] }
 
 # Logging / tracing
 tracing = "0.1"
@@ -78,16 +94,16 @@ async-trait = "0.1"
 # Utilities
 bytes = "1.11"
 rand = "0.9"
-tempfile = "3.19"
+tempfile = "3.26"
 percent-encoding = "2.3"
 mime = "0.3"
 futures = "0.3"
 pin-project-lite = "0.2"
-typed-builder = "0.20"
+typed-builder = "0.23"
 
 # Testing
 tokio-test = "0.4"
-aws-config = "1.6"
-aws-sdk-s3 = "1.82"
+aws-config = "1.8"
+aws-sdk-s3 = "1.124"
 aws-credential-types = "1.2"
-aws-smithy-runtime-api = "1.8"
+aws-smithy-runtime-api = "1.11"
