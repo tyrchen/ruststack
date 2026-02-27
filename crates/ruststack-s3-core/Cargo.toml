@@ -1,0 +1,69 @@
+[package]
+name = "ruststack-s3-core"
+description = "S3 service implementation for RustStack, built on s3s"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ruststack-core = { workspace = true }
+
+# s3s
+s3s = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# HTTP
+http = { workspace = true }
+hyper = { workspace = true }
+bytes = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+quick-xml = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Concurrent data structures
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+
+# Crypto / checksums
+md-5 = { workspace = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
+crc32fast = { workspace = true }
+crc32c = { workspace = true }
+base64 = { workspace = true }
+hex = { workspace = true }
+digest = { workspace = true }
+
+# Time / IDs
+chrono = { workspace = true }
+time = { workspace = true }
+uuid = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Utilities
+rand = { workspace = true }
+tempfile = { workspace = true }
+percent-encoding = { workspace = true }
+mime = { workspace = true }
+pin-project-lite = { workspace = true }
+typed-builder = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
