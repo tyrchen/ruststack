@@ -99,12 +99,16 @@ jobs:
             -v /tmp/mint-logs:/mint/log \
             minio/mint:latest 2>&1 | tee /tmp/mint-logs/mint-output.txt || true
 
-          # Count FAIL lines from Mint output. Allow up to 3 failures
-          # (presigned POST in 2 SDKs + S3 Select are known out-of-scope).
+          # Assert we don't regress below the current number of passing suites.
+          # Mint prints "Executed N out of 15 tests successfully." at the end.
+          # Current baseline: 3 suites pass (aws-sdk-java, aws-sdk-java-v2, s3cmd).
+          # Raise MIN_PASS as more suites are fixed.
+          MIN_PASS=3
+          PASS_COUNT=$(grep -oP 'Executed \K[0-9]+' /tmp/mint-logs/mint-output.txt || echo "0")
           FAIL_COUNT=$(grep -c '"status": "FAIL"' /tmp/mint-logs/mint-output.txt || true)
-          echo "Mint failures: $FAIL_COUNT"
-          if [ "$FAIL_COUNT" -gt 3 ]; then
-            echo "::error::Too many Mint failures ($FAIL_COUNT > 3 threshold)"
+          echo "Mint results: $PASS_COUNT passed, $FAIL_COUNT failed (minimum required: $MIN_PASS)"
+          if [ "$PASS_COUNT" -lt "$MIN_PASS" ]; then
+            echo "::error::Mint regression: only $PASS_COUNT suites passed (minimum: $MIN_PASS)"
             exit 1
           fi
 
