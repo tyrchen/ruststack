@@ -27,6 +27,7 @@ collapsible_if = "allow"
 ruststack-core = { path = "crates/ruststack-core" }
 ruststack-s3-auth = { path = "crates/ruststack-s3-auth" }
 ruststack-s3-core = { path = "crates/ruststack-s3-core" }
+ruststack-s3-http = { path = "crates/ruststack-s3-http" }
 
 # s3s ecosystem
 s3s = "~0.11"

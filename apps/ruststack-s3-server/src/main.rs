@@ -125,7 +125,9 @@ fn build_s3_service(config: &S3Config) -> Result<s3s::service::SharedS3Service> 
     let auth = RustStackAuth::new(config.s3_skip_signature_validation);
 
     let mut builder = S3ServiceBuilder::new(provider);
-    builder.set_auth(auth);
+    if !config.s3_skip_signature_validation {
+        builder.set_auth(auth);
+    }
 
     if config.s3_virtual_hosting {
         let host = s3s::host::SingleDomain::new(&config.s3_domain)

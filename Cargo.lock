@@ -2115,6 +2115,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruststack-s3-http"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "futures",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "ruststack-s3-auth",
+ "ruststack-s3-model",
+ "ruststack-s3-xml",
+ "thiserror",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "ruststack-s3-integration"
 version = "0.1.0"
 dependencies = [
@@ -2169,6 +2194,14 @@ dependencies = [
 [[package]]
 name = "ruststack-s3-xml"
 version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "quick-xml 0.39.2",
+ "ruststack-s3-model",
+ "thiserror",
+ "tracing",
+]
 
 [[package]]
 name = "rustversion"

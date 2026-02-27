@@ -1,0 +1,35 @@
+[package]
+name = "ruststack-s3-http"
+description = "S3 HTTP routing, request parsing, response serialization, and hyper service for RustStack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ruststack-s3-model = { path = "../ruststack-s3-model" }
+ruststack-s3-auth = { path = "../ruststack-s3-auth" }
+ruststack-s3-xml = { path = "../ruststack-s3-xml" }
+
+hyper = { version = "1.8", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "server-graceful"] }
+http = "1.4"
+http-body = "1.0"
+http-body-util = "0.1"
+bytes = "1.11"
+tokio = { version = "1.49", features = ["rt-multi-thread", "macros", "signal", "sync", "io-util"] }
+chrono = { version = "0.4", features = ["serde"] }
+percent-encoding = "2.3"
+tracing = "0.1"
+thiserror = "2.0"
+futures = "0.3"
+pin-project-lite = "0.2"
+uuid = { version = "1.21", features = ["v4"] }
+mime = "0.3"
+
+[dev-dependencies]
+tokio-test = "0.4"
