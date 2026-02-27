@@ -1,0 +1,103 @@
+name: nightly
+
+on:
+  schedule:
+    # Run at 06:00 UTC every day.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ceph-s3-tests:
+    name: Ceph s3-tests compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup toolchain install stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build server
+        run: cargo build --release -p ruststack-s3-server
+
+      - name: Start server in background
+        run: |
+          S3_SKIP_SIGNATURE_VALIDATION=true \
+          GATEWAY_LISTEN=0.0.0.0:4566 \
+          LOG_LEVEL=warn \
+          cargo run --release -p ruststack-s3-server &
+
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then
+              echo "Server is ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Server did not start within 30s"
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Install s3-tests dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip python3-venv
+          git clone --depth 1 https://github.com/ceph/s3-tests.git /tmp/s3-tests
+          cd /tmp/s3-tests
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
+
+      - name: Create s3-tests config
+        run: |
+          cat > /tmp/s3-tests/s3tests.conf <<'CONF'
+          [DEFAULT]
+          host = 127.0.0.1
+          port = 4566
+          is_secure = no
+
+          [fixtures]
+          bucket prefix = s3test-{random}-
+
+          [s3 main]
+          display_name = test
+          user_id = test
+          access_key = test
+          secret_key = test
+          endpoint = http://127.0.0.1:4566
+
+          [s3 alt]
+          display_name = test-alt
+          user_id = test-alt
+          access_key = test-alt
+          secret_key = test-alt
+          endpoint = http://127.0.0.1:4566
+          CONF
+
+      - name: Run s3-tests (core operations)
+        working-directory: /tmp/s3-tests
+        run: |
+          source venv/bin/activate
+          S3TEST_CONF=s3tests.conf python -m pytest \
+            s3tests_boto3/functional/test_s3.py \
+            -k "test_bucket_list or test_object_write or test_object_read or test_object_copy or test_object_delete or test_multipart" \
+            --tb=short \
+            -q \
+            --no-header \
+            2>&1 | tee /tmp/s3-tests-results.txt || true
+
+      - name: Upload s3-tests results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ceph-s3-tests-results
+          path: /tmp/s3-tests-results.txt
+          if-no-files-found: ignore
