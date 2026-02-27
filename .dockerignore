@@ -1,0 +1,8 @@
+target/
+vendors/
+.git/
+.github/
+docs/
+specs/
+*.md
+LICENSE

@@ -1,0 +1,89 @@
+name: "RustStack S3"
+description: "Start a high-performance S3-compatible server on localhost:4566 (drop-in replacement for LocalStack S3)"
+author: "Tyr Chen"
+
+branding:
+  icon: "database"
+  color: "orange"
+
+inputs:
+  image-tag:
+    description: "Docker image tag to use"
+    required: false
+    default: "latest"
+  port:
+    description: "Host port to bind the S3 service to"
+    required: false
+    default: "4566"
+  default-region:
+    description: "Default AWS region"
+    required: false
+    default: "us-east-1"
+  log-level:
+    description: "Log level (error, warn, info, debug, trace)"
+    required: false
+    default: "info"
+  wait-timeout:
+    description: "Seconds to wait for the service to become healthy"
+    required: false
+    default: "30"
+
+outputs:
+  endpoint:
+    description: "The S3 endpoint URL"
+    value: ${{ steps.start.outputs.endpoint }}
+  container-id:
+    description: "The Docker container ID (for advanced usage)"
+    value: ${{ steps.start.outputs.container_id }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Pull RustStack S3 image
+      shell: bash
+      run: |
+        docker pull "ghcr.io/tyrchen/ruststack-s3:${{ inputs.image-tag }}"
+
+    - name: Start RustStack S3
+      id: start
+      shell: bash
+      run: |
+        CONTAINER_ID=$(docker run -d \
+          --name ruststack-s3 \
+          -p "${{ inputs.port }}:4566" \
+          -e "DEFAULT_REGION=${{ inputs.default-region }}" \
+          -e "LOG_LEVEL=${{ inputs.log-level }}" \
+          "ghcr.io/tyrchen/ruststack-s3:${{ inputs.image-tag }}")
+
+        echo "container_id=$CONTAINER_ID" >> "$GITHUB_OUTPUT"
+        echo "endpoint=http://localhost:${{ inputs.port }}" >> "$GITHUB_OUTPUT"
+
+    - name: Wait for healthy
+      shell: bash
+      run: |
+        ENDPOINT="http://localhost:${{ inputs.port }}"
+        TIMEOUT=${{ inputs.wait-timeout }}
+        ELAPSED=0
+
+        echo "Waiting for RustStack S3 at $ENDPOINT ..."
+
+        until curl -sf "$ENDPOINT/_localstack/health" > /dev/null 2>&1; do
+          if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
+            echo "::error::RustStack S3 did not become healthy within ${TIMEOUT}s"
+            docker logs ruststack-s3
+            exit 1
+          fi
+          sleep 0.5
+          ELAPSED=$((ELAPSED + 1))
+        done
+
+        echo "RustStack S3 is ready at $ENDPOINT"
+
+    - name: Export environment
+      shell: bash
+      run: |
+        echo "AWS_ENDPOINT_URL=http://localhost:${{ inputs.port }}" >> "$GITHUB_ENV"
+        echo "LOCALSTACK_ENDPOINT=http://localhost:${{ inputs.port }}" >> "$GITHUB_ENV"
+        echo "AWS_DEFAULT_REGION=${{ inputs.default-region }}" >> "$GITHUB_ENV"
+        echo "AWS_ACCESS_KEY_ID=test" >> "$GITHUB_ENV"
+        echo "AWS_SECRET_ACCESS_KEY=test" >> "$GITHUB_ENV"

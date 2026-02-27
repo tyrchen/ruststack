@@ -184,8 +184,44 @@ async fn serve(listener: TcpListener, service: HealthCheckService) -> Result<()>
     Ok(())
 }
 
+/// Perform a health check by connecting to the gateway and requesting the health endpoint.
+///
+/// Exits with code 0 if healthy, 1 otherwise.
+async fn run_health_check(addr: &str) -> Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+
+    let stream = TcpStream::connect(addr)
+        .await
+        .with_context(|| format!("cannot connect to {addr}"))?;
+
+    let (mut reader, mut writer) = stream.into_split();
+
+    let request =
+        format!("GET /_localstack/health HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    writer.write_all(request.as_bytes()).await?;
+    writer.shutdown().await?;
+
+    let mut response = String::new();
+    reader.read_to_string(&mut response).await?;
+
+    if response.contains("200 OK") && response.contains("\"s3\":\"running\"") {
+        Ok(())
+    } else {
+        anyhow::bail!("unhealthy response from {addr}")
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Handle --health-check flag for Docker HEALTHCHECK.
+    if std::env::args().any(|a| a == "--health-check") {
+        let config = S3Config::from_env();
+        let addr = config.gateway_listen.replace("0.0.0.0", "127.0.0.1");
+        let healthy = run_health_check(&addr).await.is_ok();
+        std::process::exit(i32::from(!healthy));
+    }
+
     let config = S3Config::from_env();
 
     init_tracing(&config.log_level)?;
