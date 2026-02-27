@@ -535,11 +535,11 @@ mod tests {
         let provider = StaticCredentialProvider::new(vec![]);
         let empty_hash = hash_payload(b"");
 
-        let auth_value = format!(
+        let auth_value =
             "AWS4-HMAC-SHA256 Credential=UNKNOWN_KEY/20130524/us-east-1/s3/aws4_request,\
              SignedHeaders=host;x-amz-date,\
              Signature=abc123"
-        );
+                .to_owned();
 
         let (parts, _body) = http::Request::builder()
             .method("GET")
@@ -575,7 +575,7 @@ mod tests {
 
     #[test]
     fn test_should_build_signed_headers_string_from_parsed() {
-        let headers = vec![
+        let headers = [
             "host".to_owned(),
             "range".to_owned(),
             "x-amz-content-sha256".to_owned(),

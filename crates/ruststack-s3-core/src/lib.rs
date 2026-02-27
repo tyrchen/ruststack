@@ -1,17 +1,17 @@
-//! S3 service implementation for RustStack, built on the s3s crate.
+//! S3 service implementation for RustStack.
 //!
-//! This crate implements the [`s3s::S3`] trait to provide a fully-featured,
-//! in-memory S3 service compatible with LocalStack. It supports bucket CRUD,
-//! object CRUD, multipart uploads, versioning, CORS, tagging, ACLs, encryption
-//! metadata, checksums, object lock, and more.
+//! This crate implements the S3 business logic provider (`RustStackS3`) that can
+//! be plugged into the `ruststack-s3-http` service layer via the `S3Handler` trait.
+//! It supports bucket CRUD, object CRUD, multipart uploads, versioning, CORS,
+//! tagging, ACLs, encryption metadata, checksums, object lock, and more.
 //!
 //! # Architecture
 //!
 //! ```text
-//! s3s HTTP Layer (routing, XML, auth)
+//! ruststack-s3-http (routing, XML, auth)
 //!        |
 //!        v
-//! RustStackS3 (s3s::S3 trait impl)
+//! RustStackS3 (S3Handler trait impl in server)
 //!        |
 //!        v
 //!   S3ServiceState (buckets, global index)
@@ -25,7 +25,7 @@ pub mod checksums;
 pub mod config;
 pub mod cors;
 pub mod error;
-mod ops;
+pub mod ops;
 pub mod provider;
 pub mod state;
 pub mod storage;

@@ -2,32 +2,31 @@
 //!
 //! Defines [`S3ServiceError`], a domain-specific error enum covering all S3
 //! error codes that RustStack may produce. Each variant maps to a concrete
-//! [`s3s::S3ErrorCode`] and HTTP status code through the [`From`]
-//! implementation, making it easy to convert domain errors into s3s wire
-//! errors.
+//! [`ruststack_s3_model::error::S3ErrorCode`] and HTTP status code through
+//! the [`From`] implementation, making it easy to convert domain errors into
+//! wire errors.
 //!
 //! # Usage
 //!
 //! ```
 //! use ruststack_s3_core::error::S3ServiceError;
+//! use ruststack_s3_model::error::{S3Error, S3ErrorCode};
 //!
 //! let err = S3ServiceError::NoSuchBucket {
 //!     bucket: "my-bucket".to_owned(),
 //! };
-//! let s3_err: s3s::S3Error = err.into();
-//! assert_eq!(s3_err.code(), &s3s::S3ErrorCode::NoSuchBucket);
+//! let s3_err: S3Error = err.into();
+//! assert_eq!(s3_err.code, S3ErrorCode::NoSuchBucket);
 //! ```
 
-use std::str::FromStr;
-
-use s3s::{S3Error, S3ErrorCode};
+use ruststack_s3_model::error::{S3Error, S3ErrorCode};
 
 /// S3 service error type.
 ///
 /// Each variant corresponds to a well-known S3 error code. Converting to
-/// [`s3s::S3Error`] via [`From`] attaches the correct error code and a
-/// human-readable message; the HTTP status code is derived automatically by
-/// s3s from the error code.
+/// [`S3Error`] via [`From`] attaches the correct error code and a
+/// human-readable message; the HTTP status code is derived automatically from
+/// the error code.
 #[derive(Debug, thiserror::Error)]
 pub enum S3ServiceError {
     // -----------------------------------------------------------------------
@@ -171,6 +170,10 @@ pub enum S3ServiceError {
     #[error("The conditional request cannot be processed")]
     ConditionalRequestConflict,
 
+    /// The resource has not been modified (304).
+    #[error("Not Modified")]
+    NotModified,
+
     // -----------------------------------------------------------------------
     // Object state errors
     // -----------------------------------------------------------------------
@@ -257,9 +260,9 @@ pub enum S3ServiceError {
 }
 
 impl S3ServiceError {
-    /// Convert this error into an [`s3s::S3Error`].
+    /// Convert this error into an [`S3Error`].
     ///
-    /// This is equivalent to `s3s::S3Error::from(self)` but available as a
+    /// This is equivalent to `S3Error::from(self)` but available as a
     /// method for convenience in chained calls.
     #[must_use]
     pub fn into_s3_error(self) -> S3Error {
@@ -291,62 +294,47 @@ fn error_code(err: &S3ServiceError) -> S3ErrorCode {
         S3ServiceError::EntityTooSmall => S3ErrorCode::EntityTooSmall,
         S3ServiceError::EntityTooLarge => S3ErrorCode::EntityTooLarge,
         S3ServiceError::InvalidBucketName { .. } => S3ErrorCode::InvalidBucketName,
-        S3ServiceError::InvalidArgument { .. } => S3ErrorCode::InvalidArgument,
+        S3ServiceError::InvalidArgument { .. } | S3ServiceError::InvalidTag { .. } => {
+            S3ErrorCode::InvalidArgument
+        }
         S3ServiceError::InvalidRange => S3ErrorCode::InvalidRange,
-        S3ServiceError::InvalidTag { .. } => S3ErrorCode::InvalidTag,
         S3ServiceError::MalformedXml => S3ErrorCode::MalformedXML,
         S3ServiceError::AccessDenied => S3ErrorCode::AccessDenied,
         S3ServiceError::MethodNotAllowed => S3ErrorCode::MethodNotAllowed,
         S3ServiceError::NotImplemented => S3ErrorCode::NotImplemented,
         S3ServiceError::PreconditionFailed => S3ErrorCode::PreconditionFailed,
-        S3ServiceError::ConditionalRequestConflict => S3ErrorCode::ConditionalRequestConflict,
-        S3ServiceError::InvalidObjectState => S3ErrorCode::InvalidObjectState,
-        S3ServiceError::ObjectNotInActiveTierError => {
-            // s3s does not have a dedicated variant; use custom code via string parsing.
-            parse_error_code("ObjectNotInActiveTierError")
+        S3ServiceError::ConditionalRequestConflict => {
+            S3ErrorCode::Custom("ConditionalRequestConflict")
         }
+        S3ServiceError::NotModified => S3ErrorCode::Custom("NotModified"),
+        S3ServiceError::InvalidObjectState => S3ErrorCode::InvalidObjectState,
+        S3ServiceError::ObjectNotInActiveTierError => S3ErrorCode::ObjectNotInActiveTierError,
         S3ServiceError::InvalidDigest => S3ErrorCode::InvalidDigest,
-        S3ServiceError::BadDigest => S3ErrorCode::BadDigest,
+        S3ServiceError::BadDigest => S3ErrorCode::Custom("BadDigest"),
         S3ServiceError::MissingContentLength => S3ErrorCode::MissingContentLength,
         S3ServiceError::KeyTooLong => S3ErrorCode::KeyTooLongError,
-        S3ServiceError::MaxMessageLengthExceeded => S3ErrorCode::MaxMessageLengthExceeded,
+        S3ServiceError::MaxMessageLengthExceeded => S3ErrorCode::Custom("MaxMessageLengthExceeded"),
         S3ServiceError::NoSuchCorsConfiguration => S3ErrorCode::NoSuchCORSConfiguration,
         S3ServiceError::NoSuchTagSet => S3ErrorCode::NoSuchTagSet,
         S3ServiceError::NoSuchLifecycleConfiguration => S3ErrorCode::NoSuchLifecycleConfiguration,
         S3ServiceError::NoSuchBucketPolicy => S3ErrorCode::NoSuchBucketPolicy,
         S3ServiceError::NoSuchWebsiteConfiguration => S3ErrorCode::NoSuchWebsiteConfiguration,
         S3ServiceError::NoSuchPublicAccessBlockConfiguration => {
-            // s3s does not have a dedicated variant; use custom code via string parsing.
-            // FromStr for S3ErrorCode returns Infallible, so this always succeeds.
-            parse_error_code("NoSuchPublicAccessBlockConfiguration")
+            S3ErrorCode::Custom("NoSuchPublicAccessBlockConfiguration")
         }
         S3ServiceError::ServerSideEncryptionConfigurationNotFoundError => {
-            S3ErrorCode::ServerSideEncryptionConfigurationNotFoundError
+            S3ErrorCode::Custom("ServerSideEncryptionConfigurationNotFoundError")
         }
         S3ServiceError::ObjectLockConfigurationNotFoundError => {
-            S3ErrorCode::NoSuchObjectLockConfiguration
+            S3ErrorCode::Custom("NoSuchObjectLockConfiguration")
         }
         S3ServiceError::OwnershipControlsNotFoundError => {
-            S3ErrorCode::OwnershipControlsNotFoundError
+            S3ErrorCode::Custom("OwnershipControlsNotFoundError")
         }
         S3ServiceError::ReplicationConfigurationNotFoundError => {
-            S3ErrorCode::ReplicationConfigurationNotFoundError
+            S3ErrorCode::Custom("ReplicationConfigurationNotFoundError")
         }
         S3ServiceError::Internal(_) => S3ErrorCode::InternalError,
-    }
-}
-
-/// Parse an error code string into an [`S3ErrorCode`].
-///
-/// [`S3ErrorCode::from_str`] returns `Result<S3ErrorCode, Infallible>`, so
-/// this conversion can never fail. Unknown strings become
-/// `S3ErrorCode::Custom(...)`.
-fn parse_error_code(code: &str) -> S3ErrorCode {
-    // Infallible means this match arm is unreachable, but we handle it
-    // for completeness.
-    match S3ErrorCode::from_str(code) {
-        Ok(c) => c,
-        Err(infallible) => match infallible {},
     }
 }
 
@@ -363,8 +351,8 @@ mod tests {
             bucket: "my-bucket".to_owned(),
         };
         let s3_err: S3Error = err.into();
-        assert_eq!(s3_err.code(), &S3ErrorCode::NoSuchBucket);
-        assert!(s3_err.message().is_some_and(|m| m.contains("my-bucket")),);
+        assert_eq!(s3_err.code, S3ErrorCode::NoSuchBucket);
+        assert!(s3_err.message.contains("my-bucket"));
     }
 
     #[test]
@@ -373,7 +361,7 @@ mod tests {
             key: "path/to/obj".to_owned(),
         };
         let s3_err: S3Error = err.into();
-        assert_eq!(s3_err.code(), &S3ErrorCode::NoSuchKey);
+        assert_eq!(s3_err.code, S3ErrorCode::NoSuchKey);
     }
 
     #[test]
@@ -382,7 +370,7 @@ mod tests {
             bucket: "taken".to_owned(),
         };
         let s3_err: S3Error = err.into();
-        assert_eq!(s3_err.code(), &S3ErrorCode::BucketAlreadyExists);
+        assert_eq!(s3_err.code, S3ErrorCode::BucketAlreadyExists);
     }
 
     #[test]
@@ -391,7 +379,7 @@ mod tests {
             bucket: "mine".to_owned(),
         };
         let s3_err: S3Error = err.into();
-        assert_eq!(s3_err.code(), &S3ErrorCode::BucketAlreadyOwnedByYou);
+        assert_eq!(s3_err.code, S3ErrorCode::BucketAlreadyOwnedByYou);
     }
 
     #[test]
@@ -400,7 +388,7 @@ mod tests {
             bucket: "full".to_owned(),
         };
         let s3_err: S3Error = err.into();
-        assert_eq!(s3_err.code(), &S3ErrorCode::BucketNotEmpty);
+        assert_eq!(s3_err.code, S3ErrorCode::BucketNotEmpty);
     }
 
     #[test]
@@ -410,35 +398,35 @@ mod tests {
             reason: "uppercase".to_owned(),
         };
         let s3_err: S3Error = err.into();
-        assert_eq!(s3_err.code(), &S3ErrorCode::InvalidBucketName);
+        assert_eq!(s3_err.code, S3ErrorCode::InvalidBucketName);
     }
 
     #[test]
     fn test_should_convert_entity_too_small_to_s3_error() {
         let err = S3ServiceError::EntityTooSmall;
         let s3_err: S3Error = err.into();
-        assert_eq!(s3_err.code(), &S3ErrorCode::EntityTooSmall);
+        assert_eq!(s3_err.code, S3ErrorCode::EntityTooSmall);
     }
 
     #[test]
     fn test_should_convert_access_denied_to_s3_error() {
         let err = S3ServiceError::AccessDenied;
         let s3_err: S3Error = err.into();
-        assert_eq!(s3_err.code(), &S3ErrorCode::AccessDenied);
+        assert_eq!(s3_err.code, S3ErrorCode::AccessDenied);
     }
 
     #[test]
     fn test_should_convert_internal_error_to_s3_error() {
         let err = S3ServiceError::Internal(anyhow::anyhow!("disk I/O failure"));
         let s3_err: S3Error = err.into();
-        assert_eq!(s3_err.code(), &S3ErrorCode::InternalError);
+        assert_eq!(s3_err.code, S3ErrorCode::InternalError);
     }
 
     #[test]
     fn test_should_use_into_s3_error_method() {
         let err = S3ServiceError::InvalidRange;
         let s3_err = err.into_s3_error();
-        assert_eq!(s3_err.code(), &S3ErrorCode::InvalidRange);
+        assert_eq!(s3_err.code, S3ErrorCode::InvalidRange);
     }
 
     #[test]
@@ -447,14 +435,14 @@ mod tests {
             upload_id: "abc123".to_owned(),
         };
         let s3_err: S3Error = err.into();
-        assert_eq!(s3_err.code(), &S3ErrorCode::NoSuchUpload);
+        assert_eq!(s3_err.code, S3ErrorCode::NoSuchUpload);
     }
 
     #[test]
     fn test_should_convert_precondition_failed_to_s3_error() {
         let err = S3ServiceError::PreconditionFailed;
         let s3_err: S3Error = err.into();
-        assert_eq!(s3_err.code(), &S3ErrorCode::PreconditionFailed);
+        assert_eq!(s3_err.code, S3ErrorCode::PreconditionFailed);
     }
 
     #[test]
@@ -481,7 +469,7 @@ mod tests {
 
         for (err, expected_code) in cases {
             let s3_err: S3Error = err.into();
-            assert_eq!(s3_err.code(), &expected_code);
+            assert_eq!(s3_err.code, expected_code);
         }
     }
 }

@@ -5,20 +5,31 @@
 //! `put_object_retention`, `get_object_legal_hold`, `put_object_legal_hold`,
 //! and `get_object_attributes`.
 
-// The s3s DTO module contains dozens of types we reference; wildcard is clearer.
-#[allow(clippy::wildcard_imports)]
-use s3s::dto::*;
-use s3s::{S3Request, S3Response, S3Result};
+use ruststack_s3_model::error::S3Error;
+use ruststack_s3_model::input::{
+    DeleteObjectTaggingInput, GetObjectAclInput, GetObjectAttributesInput, GetObjectLegalHoldInput,
+    GetObjectRetentionInput, GetObjectTaggingInput, PutObjectAclInput, PutObjectLegalHoldInput,
+    PutObjectRetentionInput, PutObjectTaggingInput,
+};
+use ruststack_s3_model::output::{
+    DeleteObjectTaggingOutput, GetObjectAclOutput, GetObjectAttributesOutput,
+    GetObjectLegalHoldOutput, GetObjectRetentionOutput, GetObjectTaggingOutput, PutObjectAclOutput,
+    PutObjectLegalHoldOutput, PutObjectRetentionOutput, PutObjectTaggingOutput,
+};
+use ruststack_s3_model::types::{
+    GetObjectAttributesParts, Grant, Grantee, ObjectLockLegalHold, ObjectLockLegalHoldStatus,
+    ObjectLockRetention, ObjectLockRetentionMode, Permission, StorageClass, Tag, Type,
+};
 use tracing::debug;
 
 use crate::error::S3ServiceError;
 use crate::provider::RustStackS3;
 use crate::state::object::CannedAcl;
 
-use super::bucket::chrono_to_timestamp;
+use super::bucket::to_model_owner;
 
 // AWS S3 DTOs use signed integers (i32/i64) for inherently non-negative values.
-// These handler methods must remain async to match the s3s::S3 trait interface.
+// These handler methods must remain async for consistency.
 #[allow(
     clippy::cast_possible_wrap,
     clippy::cast_possible_truncation,
@@ -31,12 +42,12 @@ impl RustStackS3 {
     // -----------------------------------------------------------------------
 
     /// Get tags for an object.
-    pub(crate) async fn handle_get_object_tagging(
+    pub async fn handle_get_object_tagging(
         &self,
-        req: S3Request<GetObjectTaggingInput>,
-    ) -> S3Result<S3Response<GetObjectTaggingOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: GetObjectTaggingInput,
+    ) -> Result<GetObjectTaggingOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
 
         let bucket = self
             .state
@@ -44,7 +55,7 @@ impl RustStackS3 {
             .map_err(S3ServiceError::into_s3_error)?;
 
         let store = bucket.objects.read();
-        let obj = if let Some(version_id) = &req.input.version_id {
+        let obj = if let Some(version_id) = &input.version_id {
             store.get_version(&key, version_id).ok_or_else(|| {
                 S3ServiceError::NoSuchVersion {
                     key: key.clone(),
@@ -63,8 +74,8 @@ impl RustStackS3 {
             .tagging
             .iter()
             .map(|(k, v)| Tag {
-                key: Some(k.clone()),
-                value: Some(v.clone()),
+                key: k.clone(),
+                value: v.clone(),
             })
             .collect();
 
@@ -74,32 +85,31 @@ impl RustStackS3 {
             Some(obj.version_id.clone())
         };
 
-        let output = GetObjectTaggingOutput {
+        Ok(GetObjectTaggingOutput {
             tag_set,
             version_id,
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     /// Set tags for an object.
-    pub(crate) async fn handle_put_object_tagging(
+    pub async fn handle_put_object_tagging(
         &self,
-        req: S3Request<PutObjectTaggingInput>,
-    ) -> S3Result<S3Response<PutObjectTaggingOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: PutObjectTaggingInput,
+    ) -> Result<PutObjectTaggingOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
 
         let bucket = self
             .state
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
 
-        let tagging = req.input.tagging;
+        let tagging = input.tagging;
 
         let tags: Vec<(String, String)> = tagging
             .tag_set
             .into_iter()
-            .map(|t| (t.key.unwrap_or_default(), t.value.unwrap_or_default()))
+            .map(|t| (t.key, t.value))
             .collect();
 
         crate::validation::validate_tags(&tags).map_err(S3ServiceError::into_s3_error)?;
@@ -107,7 +117,7 @@ impl RustStackS3 {
         // We need mutable access to the object. Since ObjectStore wraps objects
         // immutably, we re-insert a modified copy.
         let mut store = bucket.objects.write();
-        let obj = if let Some(version_id) = &req.input.version_id {
+        let obj = if let Some(version_id) = &input.version_id {
             store.get_version(&key, version_id).ok_or_else(|| {
                 S3ServiceError::NoSuchVersion {
                     key: key.clone(),
@@ -127,20 +137,19 @@ impl RustStackS3 {
 
         debug!(bucket = %bucket_name, key = %key, "put_object_tagging completed");
 
-        let version_id_out = req.input.version_id.clone();
-        let output = PutObjectTaggingOutput {
+        let version_id_out = input.version_id;
+        Ok(PutObjectTaggingOutput {
             version_id: version_id_out,
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     /// Delete tags for an object.
-    pub(crate) async fn handle_delete_object_tagging(
+    pub async fn handle_delete_object_tagging(
         &self,
-        req: S3Request<DeleteObjectTaggingInput>,
-    ) -> S3Result<S3Response<DeleteObjectTaggingOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: DeleteObjectTaggingInput,
+    ) -> Result<DeleteObjectTaggingOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
 
         let bucket = self
             .state
@@ -148,7 +157,7 @@ impl RustStackS3 {
             .map_err(S3ServiceError::into_s3_error)?;
 
         let mut store = bucket.objects.write();
-        let obj = if let Some(version_id) = &req.input.version_id {
+        let obj = if let Some(version_id) = &input.version_id {
             store.get_version(&key, version_id).ok_or_else(|| {
                 S3ServiceError::NoSuchVersion {
                     key: key.clone(),
@@ -168,11 +177,10 @@ impl RustStackS3 {
 
         debug!(bucket = %bucket_name, key = %key, "delete_object_tagging completed");
 
-        let version_id_out = req.input.version_id.clone();
-        let output = DeleteObjectTaggingOutput {
+        let version_id_out = input.version_id;
+        Ok(DeleteObjectTaggingOutput {
             version_id: version_id_out,
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -180,12 +188,12 @@ impl RustStackS3 {
     // -----------------------------------------------------------------------
 
     /// Get the ACL for an object.
-    pub(crate) async fn handle_get_object_acl(
+    pub async fn handle_get_object_acl(
         &self,
-        req: S3Request<GetObjectAclInput>,
-    ) -> S3Result<S3Response<GetObjectAclOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: GetObjectAclInput,
+    ) -> Result<GetObjectAclOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
 
         let bucket = self
             .state
@@ -193,7 +201,7 @@ impl RustStackS3 {
             .map_err(S3ServiceError::into_s3_error)?;
 
         let store = bucket.objects.read();
-        let obj = if let Some(version_id) = &req.input.version_id {
+        let obj = if let Some(version_id) = &input.version_id {
             store.get_version(&key, version_id).ok_or_else(|| {
                 S3ServiceError::NoSuchVersion {
                     key: key.clone(),
@@ -207,48 +215,47 @@ impl RustStackS3 {
                 .ok_or_else(|| S3ServiceError::NoSuchKey { key: key.clone() }.into_s3_error())?
         };
 
-        let owner = super::bucket::to_s3_owner(&obj.owner);
+        let owner = to_model_owner(&obj.owner);
 
         let grant = Grant {
             grantee: Some(Grantee {
                 display_name: Some(obj.owner.display_name.clone()),
                 email_address: None,
                 id: Some(obj.owner.id.clone()),
-                type_: s3s::dto::Type::from_static("CanonicalUser"),
+                r#type: Type::CanonicalUser,
                 uri: None,
             }),
-            permission: Some(Permission::from_static("FULL_CONTROL")),
+            permission: Some(Permission::FullControl),
         };
 
-        let output = GetObjectAclOutput {
-            grants: Some(vec![grant]),
+        Ok(GetObjectAclOutput {
+            grants: vec![grant],
             owner: Some(owner),
             request_charged: None,
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     /// Set the ACL for an object.
-    pub(crate) async fn handle_put_object_acl(
+    pub async fn handle_put_object_acl(
         &self,
-        req: S3Request<PutObjectAclInput>,
-    ) -> S3Result<S3Response<PutObjectAclOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: PutObjectAclInput,
+    ) -> Result<PutObjectAclOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
 
         let bucket = self
             .state
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
 
-        if let Some(acl_str) = req.input.acl {
-            let acl: CannedAcl = acl_str
+        if let Some(acl_enum) = input.acl {
+            let acl: CannedAcl = acl_enum
                 .as_str()
                 .parse()
-                .map_err(|_| s3s::s3_error!(InvalidArgument, "Invalid canned ACL"))?;
+                .map_err(|_| S3Error::invalid_argument("Invalid canned ACL"))?;
 
             let mut store = bucket.objects.write();
-            let obj = if let Some(version_id) = &req.input.version_id {
+            let obj = if let Some(version_id) = &input.version_id {
                 store.get_version(&key, version_id).ok_or_else(|| {
                     S3ServiceError::NoSuchVersion {
                         key: key.clone(),
@@ -269,10 +276,9 @@ impl RustStackS3 {
 
         debug!(bucket = %bucket_name, key = %key, "put_object_acl completed");
 
-        let output = PutObjectAclOutput {
+        Ok(PutObjectAclOutput {
             request_charged: None,
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -280,12 +286,12 @@ impl RustStackS3 {
     // -----------------------------------------------------------------------
 
     /// Get the retention configuration for an object.
-    pub(crate) async fn handle_get_object_retention(
+    pub async fn handle_get_object_retention(
         &self,
-        req: S3Request<GetObjectRetentionInput>,
-    ) -> S3Result<S3Response<GetObjectRetentionOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: GetObjectRetentionInput,
+    ) -> Result<GetObjectRetentionOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
 
         let bucket = self
             .state
@@ -293,7 +299,7 @@ impl RustStackS3 {
             .map_err(S3ServiceError::into_s3_error)?;
 
         let store = bucket.objects.read();
-        let obj = if let Some(version_id) = &req.input.version_id {
+        let obj = if let Some(version_id) = &input.version_id {
             store.get_version(&key, version_id).ok_or_else(|| {
                 S3ServiceError::NoSuchVersion {
                     key: key.clone(),
@@ -312,40 +318,38 @@ impl RustStackS3 {
             obj.metadata.object_lock_retain_until,
         ) {
             (Some(mode), Some(until)) => Some(ObjectLockRetention {
-                mode: Some(ObjectLockRetentionMode::from(mode.clone())),
-                retain_until_date: Some(chrono_to_timestamp(until)),
+                mode: Some(ObjectLockRetentionMode::from(mode.as_str())),
+                retain_until_date: Some(until),
             }),
             _ => None,
         };
 
         if retention.is_none() {
-            return Err(s3s::s3_error!(
-                InvalidArgument,
-                "No retention configuration found"
+            return Err(S3Error::invalid_argument(
+                "No retention configuration found",
             ));
         }
 
-        let output = GetObjectRetentionOutput { retention };
-        Ok(S3Response::new(output))
+        Ok(GetObjectRetentionOutput { retention })
     }
 
     /// Set the retention configuration for an object.
-    pub(crate) async fn handle_put_object_retention(
+    pub async fn handle_put_object_retention(
         &self,
-        req: S3Request<PutObjectRetentionInput>,
-    ) -> S3Result<S3Response<PutObjectRetentionOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: PutObjectRetentionInput,
+    ) -> Result<PutObjectRetentionOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
 
         let bucket = self
             .state
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
 
-        let retention = req.input.retention;
+        let retention = input.retention;
 
         let mut store = bucket.objects.write();
-        let obj = if let Some(version_id) = &req.input.version_id {
+        let obj = if let Some(version_id) = &input.version_id {
             store.get_version(&key, version_id).ok_or_else(|| {
                 S3ServiceError::NoSuchVersion {
                     key: key.clone(),
@@ -362,11 +366,7 @@ impl RustStackS3 {
         let mut updated = obj.clone();
         if let Some(ret) = retention {
             updated.metadata.object_lock_mode = ret.mode.as_ref().map(|m| m.as_str().to_owned());
-            updated.metadata.object_lock_retain_until = ret.retain_until_date.and_then(|ts| {
-                let odt: time::OffsetDateTime = ts.into();
-                let unix_millis = odt.unix_timestamp() * 1000 + i64::from(odt.millisecond());
-                chrono::DateTime::from_timestamp_millis(unix_millis)
-            });
+            updated.metadata.object_lock_retain_until = ret.retain_until_date;
         } else {
             updated.metadata.object_lock_mode = None;
             updated.metadata.object_lock_retain_until = None;
@@ -375,10 +375,9 @@ impl RustStackS3 {
 
         debug!(bucket = %bucket_name, key = %key, "put_object_retention completed");
 
-        let output = PutObjectRetentionOutput {
+        Ok(PutObjectRetentionOutput {
             request_charged: None,
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -386,12 +385,12 @@ impl RustStackS3 {
     // -----------------------------------------------------------------------
 
     /// Get the legal hold status for an object.
-    pub(crate) async fn handle_get_object_legal_hold(
+    pub async fn handle_get_object_legal_hold(
         &self,
-        req: S3Request<GetObjectLegalHoldInput>,
-    ) -> S3Result<S3Response<GetObjectLegalHoldOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: GetObjectLegalHoldInput,
+    ) -> Result<GetObjectLegalHoldOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
 
         let bucket = self
             .state
@@ -399,7 +398,7 @@ impl RustStackS3 {
             .map_err(S3ServiceError::into_s3_error)?;
 
         let store = bucket.objects.read();
-        let obj = if let Some(version_id) = &req.input.version_id {
+        let obj = if let Some(version_id) = &input.version_id {
             store.get_version(&key, version_id).ok_or_else(|| {
                 S3ServiceError::NoSuchVersion {
                     key: key.clone(),
@@ -415,36 +414,35 @@ impl RustStackS3 {
 
         let is_on = obj.metadata.object_lock_legal_hold.unwrap_or(false);
         let status = if is_on {
-            ObjectLockLegalHoldStatus::from_static("ON")
+            ObjectLockLegalHoldStatus::On
         } else {
-            ObjectLockLegalHoldStatus::from_static("OFF")
+            ObjectLockLegalHoldStatus::Off
         };
 
-        let output = GetObjectLegalHoldOutput {
+        Ok(GetObjectLegalHoldOutput {
             legal_hold: Some(ObjectLockLegalHold {
                 status: Some(status),
             }),
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     /// Set the legal hold status for an object.
-    pub(crate) async fn handle_put_object_legal_hold(
+    pub async fn handle_put_object_legal_hold(
         &self,
-        req: S3Request<PutObjectLegalHoldInput>,
-    ) -> S3Result<S3Response<PutObjectLegalHoldOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: PutObjectLegalHoldInput,
+    ) -> Result<PutObjectLegalHoldOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
 
         let bucket = self
             .state
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
 
-        let legal_hold = req.input.legal_hold;
+        let legal_hold = input.legal_hold;
 
         let mut store = bucket.objects.write();
-        let obj = if let Some(version_id) = &req.input.version_id {
+        let obj = if let Some(version_id) = &input.version_id {
             store.get_version(&key, version_id).ok_or_else(|| {
                 S3ServiceError::NoSuchVersion {
                     key: key.clone(),
@@ -466,10 +464,9 @@ impl RustStackS3 {
 
         debug!(bucket = %bucket_name, key = %key, "put_object_legal_hold completed");
 
-        let output = PutObjectLegalHoldOutput {
+        Ok(PutObjectLegalHoldOutput {
             request_charged: None,
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -477,12 +474,12 @@ impl RustStackS3 {
     // -----------------------------------------------------------------------
 
     /// Get attributes for an object.
-    pub(crate) async fn handle_get_object_attributes(
+    pub async fn handle_get_object_attributes(
         &self,
-        req: S3Request<GetObjectAttributesInput>,
-    ) -> S3Result<S3Response<GetObjectAttributesOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: GetObjectAttributesInput,
+    ) -> Result<GetObjectAttributesOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
 
         let bucket = self
             .state
@@ -490,7 +487,7 @@ impl RustStackS3 {
             .map_err(S3ServiceError::into_s3_error)?;
 
         let store = bucket.objects.read();
-        let obj = if let Some(version_id) = &req.input.version_id {
+        let obj = if let Some(version_id) = &input.version_id {
             store.get_version(&key, version_id).ok_or_else(|| {
                 S3ServiceError::NoSuchVersion {
                     key: key.clone(),
@@ -510,24 +507,23 @@ impl RustStackS3 {
             Some(obj.version_id.clone())
         };
 
-        let output = GetObjectAttributesOutput {
+        Ok(GetObjectAttributesOutput {
             checksum: None,
             delete_marker: None,
             e_tag: Some(obj.etag.clone()),
-            last_modified: Some(chrono_to_timestamp(obj.last_modified)),
+            last_modified: Some(obj.last_modified),
             object_parts: obj.parts_count.map(|n| GetObjectAttributesParts {
                 is_truncated: None,
                 max_parts: None,
                 next_part_number_marker: None,
                 part_number_marker: None,
-                parts: None,
+                parts: Vec::new(),
                 total_parts_count: Some(n as i32),
             }),
             object_size: Some(obj.size as i64),
             request_charged: None,
-            storage_class: Some(StorageClass::from(obj.storage_class.clone())),
+            storage_class: Some(StorageClass::from(obj.storage_class.as_str())),
             version_id,
-        };
-        Ok(S3Response::new(output))
+        })
     }
 }

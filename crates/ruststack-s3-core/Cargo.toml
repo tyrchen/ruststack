@@ -1,6 +1,6 @@
 [package]
 name = "ruststack-s3-core"
-description = "S3 service implementation for RustStack, built on s3s"
+description = "S3 service implementation for RustStack"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,14 +12,11 @@ workspace = true
 
 [dependencies]
 ruststack-core = { workspace = true }
-
-# s3s
-s3s = { workspace = true }
+ruststack-s3-model = { path = "../ruststack-s3-model" }
+ruststack-s3-auth = { path = "../ruststack-s3-auth" }
 
 # Async
 tokio = { workspace = true }
-futures = { workspace = true }
-async-trait = { workspace = true }
 
 # HTTP
 http = { workspace = true }
@@ -51,7 +48,6 @@ digest = { workspace = true }
 
 # Time / IDs
 chrono = { workspace = true }
-time = { workspace = true }
 uuid = { workspace = true }
 
 # Logging
@@ -61,8 +57,6 @@ tracing = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
 percent-encoding = { workspace = true }
-mime = { workspace = true }
-pin-project-lite = { workspace = true }
 typed-builder = { workspace = true }
 
 [dev-dependencies]

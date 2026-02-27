@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_should_build_canonical_headers_sorted_and_lowercased() {
-        let headers = vec![
+        let headers = [
             ("Host", "examplebucket.s3.amazonaws.com"),
             ("Range", "bytes=0-9"),
             (
@@ -299,7 +299,7 @@ mod tests {
             ),
             ("x-amz-date", "20130524T000000Z"),
         ];
-        let signed = vec!["host", "range", "x-amz-content-sha256", "x-amz-date"];
+        let signed = ["host", "range", "x-amz-content-sha256", "x-amz-date"];
         let result = build_canonical_headers(
             &headers.iter().map(|(k, v)| (*k, *v)).collect::<Vec<_>>(),
             &signed,
@@ -321,8 +321,8 @@ mod tests {
 
     #[test]
     fn test_should_collapse_whitespace_in_header_values() {
-        let headers = vec![("Host", "  example.com  "), ("X-Custom", "a   b   c")];
-        let signed = vec!["host", "x-custom"];
+        let headers = [("Host", "  example.com  "), ("X-Custom", "a   b   c")];
+        let signed = ["host", "x-custom"];
         let result = build_canonical_headers(
             &headers.iter().map(|(k, v)| (*k, *v)).collect::<Vec<_>>(),
             &signed,
@@ -332,6 +332,8 @@ mod tests {
 
     #[test]
     fn test_should_build_canonical_request_matching_aws_example() {
+        use sha2::{Digest, Sha256};
+
         // AWS test vector: GET /test.txt from examplebucket
         let headers = vec![
             ("host", "examplebucket.s3.amazonaws.com"),
@@ -366,7 +368,6 @@ mod tests {
         assert_eq!(canonical, expected);
 
         // Verify the hash of the canonical request matches the AWS test vector
-        use sha2::{Digest, Sha256};
         let hash = hex::encode(Sha256::digest(canonical.as_bytes()));
         assert_eq!(
             hash,

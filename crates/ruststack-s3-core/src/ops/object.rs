@@ -3,13 +3,24 @@
 //! Implements `put_object`, `get_object`, `head_object`, `delete_object`,
 //! `delete_objects`, and `copy_object`.
 
-use bytes::{Bytes, BytesMut};
+use std::collections::HashMap;
+
+use bytes::Bytes;
 use chrono::Utc;
-use futures::TryStreamExt;
-// The s3s DTO module contains dozens of types we reference; wildcard is clearer.
-#[allow(clippy::wildcard_imports)]
-use s3s::dto::*;
-use s3s::{S3Request, S3Response, S3Result};
+use ruststack_s3_model::error::S3Error;
+use ruststack_s3_model::input::{
+    CopyObjectInput, DeleteObjectInput, DeleteObjectsInput, GetObjectInput, HeadObjectInput,
+    PutObjectInput,
+};
+use ruststack_s3_model::output::{
+    CopyObjectOutput, DeleteObjectOutput, DeleteObjectsOutput, GetObjectOutput, HeadObjectOutput,
+    PutObjectOutput,
+};
+use ruststack_s3_model::request::StreamingBlob;
+use ruststack_s3_model::types::{
+    CopyObjectResult, DeletedObject, MetadataDirective, ObjectCannedACL, ObjectLockLegalHoldStatus,
+    ObjectLockMode, ServerSideEncryption, StorageClass,
+};
 use tracing::debug;
 
 use crate::error::S3ServiceError;
@@ -17,14 +28,13 @@ use crate::provider::RustStackS3;
 use crate::state::object::{
     CannedAcl, ChecksumData, ObjectMetadata, Owner as InternalOwner, S3Object,
 };
-use crate::utils::{is_valid_if_match, is_valid_if_none_match};
+use crate::utils::{is_valid_if_match, is_valid_if_none_match, parse_range_header};
 use crate::validation::{validate_metadata, validate_object_key};
-
-use super::bucket::chrono_to_timestamp;
 
 // AWS S3 DTOs use signed integers (i32/i64) for inherently non-negative values
 // (sizes, part counts). Casting from u64/u32/usize is safe in practice.
-// These handler methods must remain async to match the s3s::S3 trait interface.
+// These handler methods must remain async because some operations involve
+// storage I/O.
 #[allow(
     clippy::cast_possible_wrap,
     clippy::cast_possible_truncation,
@@ -33,12 +43,12 @@ use super::bucket::chrono_to_timestamp;
 )]
 impl RustStackS3 {
     /// Put (upload) a new object.
-    pub(crate) async fn handle_put_object(
+    pub async fn handle_put_object(
         &self,
-        mut req: S3Request<PutObjectInput>,
-    ) -> S3Result<S3Response<PutObjectOutput>> {
-        let bucket_name = req.input.bucket.clone();
-        let key = req.input.key.clone();
+        mut input: PutObjectInput,
+    ) -> Result<PutObjectOutput, S3Error> {
+        let bucket_name = input.bucket.clone();
+        let key = input.key.clone();
 
         validate_object_key(&key).map_err(S3ServiceError::into_s3_error)?;
 
@@ -49,13 +59,10 @@ impl RustStackS3 {
             .map_err(S3ServiceError::into_s3_error)?;
 
         // Take the body out before borrowing other fields from input.
-        let body = req.input.body.take();
-
-        // Collect the body.
-        let body_data = collect_body(body).await?;
+        let body_data = input.body.take().map_or_else(Bytes::new, |b| b.data);
 
         // Extract metadata from the request.
-        let metadata = build_metadata(&req.input, &req.headers);
+        let metadata = build_metadata(&input);
         validate_metadata(&metadata.user_metadata).map_err(S3ServiceError::into_s3_error)?;
 
         // Determine version ID based on versioning status.
@@ -73,7 +80,7 @@ impl RustStackS3 {
             .map_err(|e| S3ServiceError::Internal(anyhow::anyhow!("{e}")).into_s3_error())?;
 
         // Extract checksum from the request, if provided.
-        let checksum = extract_checksum_from_put(&req.input);
+        let checksum = extract_checksum_from_put(&input);
 
         // Build the S3Object.
         let owner = InternalOwner::default();
@@ -83,11 +90,10 @@ impl RustStackS3 {
             etag: write_result.etag.clone(),
             size: write_result.size,
             last_modified: Utc::now(),
-            storage_class: req
-                .input
+            storage_class: input
                 .storage_class
                 .as_ref()
-                .map_or_else(|| "STANDARD".to_owned(), |s| s.as_str().to_owned()),
+                .map_or_else(|| "STANDARD".to_owned(), StorageClass::as_str_owned),
             metadata,
             owner,
             checksum,
@@ -109,36 +115,25 @@ impl RustStackS3 {
             Some(version_id)
         };
 
-        let output = PutObjectOutput {
-            bucket_key_enabled: None,
-            checksum_crc32: None,
-            checksum_crc32c: None,
-            checksum_crc64nvme: None,
-            checksum_sha1: None,
-            checksum_sha256: None,
-            checksum_type: None,
+        Ok(PutObjectOutput {
             e_tag: Some(write_result.etag),
-            expiration: None,
-            request_charged: None,
-            sse_customer_algorithm: None,
-            sse_customer_key_md5: None,
-            ssekms_encryption_context: None,
-            ssekms_key_id: None,
-            server_side_encryption: None,
-            size: None,
             version_id: real_version_id,
-        };
-        Ok(S3Response::new(output))
+            ..PutObjectOutput::default()
+        })
     }
 
     /// Get (download) an object.
     #[allow(clippy::too_many_lines)]
-    pub(crate) async fn handle_get_object(
+    pub async fn handle_get_object(
         &self,
-        req: S3Request<GetObjectInput>,
-    ) -> S3Result<S3Response<GetObjectOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: GetObjectInput,
+    ) -> Result<GetObjectOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
+        let version_id_param = input.version_id;
+        let if_match_param = input.if_match;
+        let if_none_match_param = input.if_none_match;
+        let range_param = input.range;
 
         // Look up the object and extract all needed data while holding the lock.
         // The lock must be dropped before any `.await` calls since parking_lot
@@ -159,7 +154,7 @@ impl RustStackS3 {
                 .map_err(S3ServiceError::into_s3_error)?;
 
             let store = bucket.objects.read();
-            let obj = if let Some(version_id) = &req.input.version_id {
+            let obj = if let Some(ref version_id) = version_id_param {
                 store.get_version(&key, version_id).ok_or_else(|| {
                     S3ServiceError::NoSuchVersion {
                         key: key.clone(),
@@ -174,14 +169,14 @@ impl RustStackS3 {
             };
 
             // Conditional request checks.
-            if let Some(ref if_match) = req.input.if_match {
+            if let Some(ref if_match) = if_match_param {
                 if !is_valid_if_match(&obj.etag, if_match) {
-                    return Err(s3s::s3_error!(PreconditionFailed));
+                    return Err(S3ServiceError::PreconditionFailed.into_s3_error());
                 }
             }
-            if let Some(ref if_none_match) = req.input.if_none_match {
+            if let Some(ref if_none_match) = if_none_match_param {
                 if !is_valid_if_none_match(&obj.etag, if_none_match) {
-                    return Err(s3s::s3_error!(NotModified));
+                    return Err(S3ServiceError::NotModified.into_s3_error());
                 }
             }
 
@@ -204,11 +199,10 @@ impl RustStackS3 {
         };
 
         // Parse range header if provided.
-        let range = if let Some(ref range_value) = req.input.range {
-            let std_range = range_value
-                .check(obj_size)
-                .map_err(|_| S3ServiceError::InvalidRange.into_s3_error())?;
-            Some((std_range.start, std_range.end - 1))
+        let range = if let Some(ref range_value) = range_param {
+            let (start, end) =
+                parse_range_header(range_value, obj_size).map_err(S3ServiceError::into_s3_error)?;
+            Some((start, end))
         } else {
             None
         };
@@ -223,82 +217,68 @@ impl RustStackS3 {
         let content_length = data.len() as i64;
 
         // Build the streaming body from the data bytes.
-        let body = StreamingBlob::wrap(futures::stream::once(async move {
-            Ok::<_, std::io::Error>(data)
-        }));
+        let body = StreamingBlob::new(data);
 
-        let content_range = if let Some((start, end)) = range {
-            Some(format!("bytes {start}-{end}/{obj_size}"))
+        let content_range = range.map(|(start, end)| format!("bytes {start}-{end}/{obj_size}"));
+
+        let content_type = Some(
+            obj_meta
+                .content_type
+                .clone()
+                .unwrap_or_else(|| "application/octet-stream".to_owned()),
+        );
+
+        let metadata = if obj_meta.user_metadata.is_empty() {
+            HashMap::default()
         } else {
-            None
+            obj_meta.user_metadata.clone()
         };
 
         let output = GetObjectOutput {
             accept_ranges: Some("bytes".to_owned()),
             body: Some(body),
-            bucket_key_enabled: None,
             cache_control: obj_meta.cache_control,
-            checksum_crc32: None,
-            checksum_crc32c: None,
-            checksum_crc64nvme: None,
-            checksum_sha1: None,
-            checksum_sha256: None,
-            checksum_type: None,
             content_disposition: obj_meta.content_disposition,
             content_encoding: obj_meta.content_encoding,
             content_language: obj_meta.content_language,
             content_length: Some(content_length),
             content_range,
-            content_type: Some(
-                obj_meta
-                    .content_type
-                    .as_deref()
-                    .unwrap_or("application/octet-stream")
-                    .parse::<mime::Mime>()
-                    .unwrap_or(mime::APPLICATION_OCTET_STREAM),
-            ),
-            delete_marker: None,
+            content_type,
             e_tag: Some(obj_etag),
-            expiration: None,
-            expires: None,
-            last_modified: Some(chrono_to_timestamp(obj_last_modified)),
-            metadata: if obj_meta.user_metadata.is_empty() {
-                None
-            } else {
-                Some(obj_meta.user_metadata)
-            },
-            missing_meta: None,
+            last_modified: Some(obj_last_modified),
+            metadata,
             object_lock_legal_hold_status: obj_meta
                 .object_lock_legal_hold
                 .filter(|&v| v)
-                .map(|_| ObjectLockLegalHoldStatus::from_static("ON")),
-            object_lock_mode: obj_meta.object_lock_mode.map(ObjectLockMode::from),
-            object_lock_retain_until_date: obj_meta
-                .object_lock_retain_until
-                .map(chrono_to_timestamp),
+                .map(|_| ObjectLockLegalHoldStatus::from("ON")),
+            object_lock_mode: obj_meta
+                .object_lock_mode
+                .as_deref()
+                .map(ObjectLockMode::from),
+            object_lock_retain_until_date: obj_meta.object_lock_retain_until,
             parts_count: obj_parts_count.map(|n| n as i32),
-            replication_status: None,
-            request_charged: None,
-            restore: None,
             sse_customer_algorithm: obj_meta.sse_customer_algorithm,
             sse_customer_key_md5: obj_meta.sse_customer_key_md5,
             ssekms_key_id: obj_meta.sse_kms_key_id,
-            server_side_encryption: obj_meta.sse_algorithm.map(ServerSideEncryption::from),
-            storage_class: Some(StorageClass::from(obj_storage_class)),
-            tag_count: None,
+            server_side_encryption: obj_meta
+                .sse_algorithm
+                .as_deref()
+                .map(ServerSideEncryption::from),
+            storage_class: Some(StorageClass::from(obj_storage_class.as_str())),
             version_id: obj_version_id,
-            website_redirect_location: None,
+            ..GetObjectOutput::default()
         };
-        Ok(S3Response::new(output))
+        Ok(output)
     }
 
     /// Head object (get metadata without body).
-    pub(crate) async fn handle_head_object(
+    pub async fn handle_head_object(
         &self,
-        req: S3Request<HeadObjectInput>,
-    ) -> S3Result<S3Response<HeadObjectOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: HeadObjectInput,
+    ) -> Result<HeadObjectOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
+        let version_id_param = input.version_id;
 
         let bucket = self
             .state
@@ -306,7 +286,7 @@ impl RustStackS3 {
             .map_err(S3ServiceError::into_s3_error)?;
 
         let store = bucket.objects.read();
-        let obj = if let Some(version_id) = &req.input.version_id {
+        let obj = if let Some(ref version_id) = version_id_param {
             store.get_version(&key, version_id).ok_or_else(|| {
                 S3ServiceError::NoSuchVersion {
                     key: key.clone(),
@@ -326,81 +306,64 @@ impl RustStackS3 {
             Some(obj.version_id.clone())
         };
 
+        let content_type = Some(
+            obj.metadata
+                .content_type
+                .clone()
+                .unwrap_or_else(|| "application/octet-stream".to_owned()),
+        );
+
+        let metadata = if obj.metadata.user_metadata.is_empty() {
+            HashMap::default()
+        } else {
+            obj.metadata.user_metadata.clone()
+        };
+
         let output = HeadObjectOutput {
             accept_ranges: Some("bytes".to_owned()),
-            archive_status: None,
-            bucket_key_enabled: None,
             cache_control: obj.metadata.cache_control.clone(),
-            checksum_crc32: None,
-            checksum_crc32c: None,
-            checksum_crc64nvme: None,
-            checksum_sha1: None,
-            checksum_sha256: None,
-            checksum_type: None,
             content_disposition: obj.metadata.content_disposition.clone(),
             content_encoding: obj.metadata.content_encoding.clone(),
             content_language: obj.metadata.content_language.clone(),
             content_length: Some(obj.size as i64),
-            content_range: None,
-            content_type: Some(
-                obj.metadata
-                    .content_type
-                    .as_deref()
-                    .unwrap_or("application/octet-stream")
-                    .parse::<mime::Mime>()
-                    .unwrap_or(mime::APPLICATION_OCTET_STREAM),
-            ),
-            delete_marker: None,
+            content_type,
             e_tag: Some(obj.etag.clone()),
-            expiration: None,
-            expires: None,
-            last_modified: Some(chrono_to_timestamp(obj.last_modified)),
-            metadata: if obj.metadata.user_metadata.is_empty() {
-                None
-            } else {
-                Some(obj.metadata.user_metadata.clone())
-            },
-            missing_meta: None,
+            last_modified: Some(obj.last_modified),
+            metadata,
             object_lock_legal_hold_status: obj
                 .metadata
                 .object_lock_legal_hold
                 .filter(|&v| v)
-                .map(|_| ObjectLockLegalHoldStatus::from_static("ON")),
+                .map(|_| ObjectLockLegalHoldStatus::from("ON")),
             object_lock_mode: obj
                 .metadata
                 .object_lock_mode
-                .clone()
+                .as_deref()
                 .map(ObjectLockMode::from),
-            object_lock_retain_until_date: obj
-                .metadata
-                .object_lock_retain_until
-                .map(chrono_to_timestamp),
+            object_lock_retain_until_date: obj.metadata.object_lock_retain_until,
             parts_count: obj.parts_count.map(|n| n as i32),
-            replication_status: None,
-            request_charged: None,
-            restore: None,
             sse_customer_algorithm: obj.metadata.sse_customer_algorithm.clone(),
             sse_customer_key_md5: obj.metadata.sse_customer_key_md5.clone(),
             ssekms_key_id: obj.metadata.sse_kms_key_id.clone(),
             server_side_encryption: obj
                 .metadata
                 .sse_algorithm
-                .clone()
+                .as_deref()
                 .map(ServerSideEncryption::from),
-            storage_class: Some(StorageClass::from(obj.storage_class.clone())),
+            storage_class: Some(StorageClass::from(obj.storage_class.as_str())),
             version_id: obj_version_id,
-            website_redirect_location: None,
+            ..HeadObjectOutput::default()
         };
-        Ok(S3Response::new(output))
+        Ok(output)
     }
 
     /// Delete a single object.
-    pub(crate) async fn handle_delete_object(
+    pub async fn handle_delete_object(
         &self,
-        req: S3Request<DeleteObjectInput>,
-    ) -> S3Result<S3Response<DeleteObjectOutput>> {
-        let bucket_name = req.input.bucket;
-        let key = req.input.key;
+        input: DeleteObjectInput,
+    ) -> Result<DeleteObjectOutput, S3Error> {
+        let bucket_name = input.bucket;
+        let key = input.key;
 
         let bucket = self
             .state
@@ -408,7 +371,7 @@ impl RustStackS3 {
             .map_err(S3ServiceError::into_s3_error)?;
 
         let (delete_marker_version_id, version_id_to_remove) =
-            if let Some(version_id) = &req.input.version_id {
+            if let Some(version_id) = &input.version_id {
                 // Delete a specific version.
                 let mut store = bucket.objects.write();
                 let removed = store.delete_version(&key, version_id);
@@ -433,7 +396,7 @@ impl RustStackS3 {
 
         debug!(bucket = %bucket_name, key = %key, "delete_object completed");
 
-        let output = DeleteObjectOutput {
+        Ok(DeleteObjectOutput {
             delete_marker: if delete_marker_version_id {
                 Some(true)
             } else {
@@ -441,35 +404,34 @@ impl RustStackS3 {
             },
             request_charged: None,
             version_id: version_id_to_remove,
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     /// Delete multiple objects (bulk delete).
-    pub(crate) async fn handle_delete_objects(
+    pub async fn handle_delete_objects(
         &self,
-        req: S3Request<DeleteObjectsInput>,
-    ) -> S3Result<S3Response<DeleteObjectsOutput>> {
-        let bucket_name = req.input.bucket;
+        input: DeleteObjectsInput,
+    ) -> Result<DeleteObjectsOutput, S3Error> {
+        let bucket_name = input.bucket;
 
         let bucket = self
             .state
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
 
-        let delete_request = req.input.delete;
+        let delete_request = input.delete;
 
         let objects = delete_request.objects;
         let quiet = delete_request.quiet.unwrap_or(false);
 
         let mut deleted: Vec<DeletedObject> = Vec::with_capacity(objects.len());
-        let errors: Vec<Error> = Vec::new();
+        let errors: Vec<ruststack_s3_model::types::Error> = Vec::new();
 
         for obj_id in objects {
             let key = obj_id.key;
             let version_id = obj_id.version_id;
 
-            if let Some(vid) = &version_id {
+            if let Some(ref vid) = version_id {
                 // Delete a specific version.
                 let mut store = bucket.objects.write();
                 let removed = store.delete_version(&key, vid);
@@ -509,46 +471,25 @@ impl RustStackS3 {
             "delete_objects completed"
         );
 
-        let output = DeleteObjectsOutput {
-            deleted: if quiet { None } else { Some(deleted) },
-            errors: if errors.is_empty() {
-                None
-            } else {
-                Some(errors)
-            },
+        Ok(DeleteObjectsOutput {
+            deleted: if quiet { Vec::new() } else { deleted },
+            errors,
             request_charged: None,
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     /// Copy an object from a source to a destination.
     #[allow(clippy::too_many_lines)]
-    pub(crate) async fn handle_copy_object(
+    pub async fn handle_copy_object(
         &self,
-        req: S3Request<CopyObjectInput>,
-    ) -> S3Result<S3Response<CopyObjectOutput>> {
-        let dst_bucket = req.input.bucket.clone();
-        let dst_key = req.input.key.clone();
+        input: CopyObjectInput,
+    ) -> Result<CopyObjectOutput, S3Error> {
+        let dst_bucket = input.bucket.clone();
+        let dst_key = input.key.clone();
 
         validate_object_key(&dst_key).map_err(S3ServiceError::into_s3_error)?;
 
-        let (src_bucket, src_key, src_version_id) = match &req.input.copy_source {
-            CopySource::Bucket {
-                bucket,
-                key,
-                version_id,
-            } => (
-                bucket.to_string(),
-                key.to_string(),
-                version_id.as_ref().map(std::string::ToString::to_string),
-            ),
-            CopySource::AccessPoint { .. } => {
-                return Err(s3s::s3_error!(
-                    NotImplemented,
-                    "AccessPoint copy source is not supported"
-                ));
-            }
-        };
+        let (src_bucket, src_key, src_version_id) = parse_copy_source(&input.copy_source)?;
 
         // Look up source object to get its metadata.
         // Keep this entire block synchronous -- no awaits while the lock is held.
@@ -609,22 +550,20 @@ impl RustStackS3 {
             .map_err(|e| S3ServiceError::Internal(anyhow::anyhow!("{e}")).into_s3_error())?;
 
         // Determine metadata: use source metadata unless MetadataDirective is REPLACE.
-        let metadata = if req
-            .input
+        let metadata = if input
             .metadata_directive
             .as_ref()
-            .is_some_and(|d| d.as_str() == "REPLACE")
+            .is_some_and(|d| *d == MetadataDirective::Replace)
         {
-            build_metadata_for_copy(&req.input, &req.headers)
+            build_metadata_for_copy(&input)
         } else {
             src_metadata
         };
 
-        let storage_class = req
-            .input
+        let storage_class = input
             .storage_class
             .as_ref()
-            .map_or_else(|| "STANDARD".to_owned(), |s| s.as_str().to_owned());
+            .map_or_else(|| "STANDARD".to_owned(), StorageClass::as_str_owned);
 
         let now = Utc::now();
         let dst_obj = S3Object {
@@ -666,30 +605,17 @@ impl RustStackS3 {
         };
 
         let copy_result = CopyObjectResult {
-            checksum_crc32: None,
-            checksum_crc32c: None,
-            checksum_crc64nvme: None,
-            checksum_sha1: None,
-            checksum_sha256: None,
-            checksum_type: None,
             e_tag: Some(write_result.etag),
-            last_modified: Some(chrono_to_timestamp(now)),
+            last_modified: Some(now),
+            ..CopyObjectResult::default()
         };
 
-        let output = CopyObjectOutput {
-            bucket_key_enabled: None,
+        Ok(CopyObjectOutput {
             copy_object_result: Some(copy_result),
             copy_source_version_id: src_version_id,
-            expiration: None,
-            request_charged: None,
-            sse_customer_algorithm: None,
-            sse_customer_key_md5: None,
-            ssekms_encryption_context: None,
-            ssekms_key_id: None,
-            server_side_encryption: None,
             version_id: real_version_id,
-        };
-        Ok(S3Response::new(output))
+            ..CopyObjectOutput::default()
+        })
     }
 }
 
@@ -697,63 +623,91 @@ impl RustStackS3 {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Collect a streaming body into a single [`Bytes`] buffer.
-pub(crate) async fn collect_body(body: Option<StreamingBlob>) -> S3Result<Bytes> {
-    match body {
-        Some(stream) => {
-            let mut buf = BytesMut::new();
-            let mut stream = stream;
-            while let Some(chunk) = stream.try_next().await.map_err(|e| {
-                let mut err = s3s::s3_error!(InternalError, "Failed to read body");
-                err.set_source(e);
-                err
-            })? {
-                buf.extend_from_slice(&chunk);
-            }
-            Ok(buf.freeze())
-        }
-        None => Ok(Bytes::new()),
+/// Parse the `x-amz-copy-source` header value into bucket, key, and optional
+/// version ID components.
+///
+/// The copy source header uses the format `/bucket/key` or `bucket/key`, with
+/// an optional `?versionId=<vid>` suffix.
+///
+/// # Errors
+///
+/// Returns [`S3Error`] with `InvalidArgument` code if the copy source string
+/// is empty or malformed.
+fn parse_copy_source(source: &str) -> Result<(String, String, Option<String>), S3Error> {
+    // Strip leading slash if present.
+    let source = source.strip_prefix('/').unwrap_or(source);
+
+    // Split off the versionId query parameter if present.
+    let (path, version_id) = if let Some((p, query)) = source.split_once('?') {
+        let vid = query
+            .split('&')
+            .find_map(|param| param.strip_prefix("versionId="))
+            .map(String::from);
+        (p, vid)
+    } else {
+        (source, None)
+    };
+
+    // Split into bucket and key at the first '/'.
+    let (bucket, key) = path.split_once('/').ok_or_else(|| {
+        S3Error::invalid_argument("Invalid copy source: must be in the format bucket/key")
+    })?;
+
+    if bucket.is_empty() || key.is_empty() {
+        return Err(S3Error::invalid_argument(
+            "Invalid copy source: bucket and key must not be empty",
+        ));
+    }
+
+    // URL-decode the key (copy source keys may be percent-encoded).
+    let decoded_key = percent_encoding::percent_decode_str(key)
+        .decode_utf8()
+        .map_err(|_| S3Error::invalid_argument("Invalid copy source: key contains invalid UTF-8"))?
+        .into_owned();
+
+    Ok((bucket.to_owned(), decoded_key, version_id))
+}
+
+/// Helper trait to get an owned string from a [`StorageClass`] reference.
+///
+/// This avoids closure type inference issues when calling `as_str()` through
+/// `Option::map_or_else`.
+trait AsStrOwned {
+    /// Return `as_str().to_owned()`.
+    fn as_str_owned(&self) -> String;
+}
+
+impl AsStrOwned for StorageClass {
+    fn as_str_owned(&self) -> String {
+        self.as_str().to_owned()
     }
 }
 
-/// Build [`ObjectMetadata`] from a `PutObjectInput` and request headers.
-fn build_metadata(input: &PutObjectInput, headers: &http::HeaderMap) -> ObjectMetadata {
-    let user_metadata = input.metadata.clone().unwrap_or_default();
+/// Build [`ObjectMetadata`] from a [`PutObjectInput`].
+fn build_metadata(input: &PutObjectInput) -> ObjectMetadata {
+    let user_metadata = input.metadata.clone();
 
     // Parse tagging from the x-amz-tagging header.
     let tagging = input
         .tagging
-        .as_ref()
-        .map(|t| parse_tagging_header(t.as_str()))
+        .as_deref()
+        .map(parse_tagging_header)
         .unwrap_or_default();
 
-    let acl = input
-        .acl
-        .as_ref()
-        .and_then(|a| a.as_str().parse::<CannedAcl>().ok())
-        .unwrap_or_default();
+    let acl = parse_acl(input.acl.as_ref());
 
     ObjectMetadata {
-        content_type: input
-            .content_type
-            .as_ref()
-            .map(std::string::ToString::to_string),
+        content_type: input.content_type.clone(),
         content_encoding: input.content_encoding.clone(),
         content_disposition: input.content_disposition.clone(),
         content_language: input.content_language.clone(),
         cache_control: input.cache_control.clone(),
-        expires: input.expires.as_ref().map(|_| {
-            headers
-                .get("expires")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("")
-                .to_owned()
-        }),
+        expires: input.expires.clone(),
         user_metadata,
         sse_algorithm: input
             .server_side_encryption
             .as_ref()
-            .map(|s| s.as_str().to_owned()),
+            .map(|sse: &ServerSideEncryption| sse.as_str().to_owned()),
         sse_kms_key_id: input.ssekms_key_id.clone(),
         sse_bucket_key_enabled: input.bucket_key_enabled,
         sse_customer_algorithm: input.sse_customer_algorithm.clone(),
@@ -763,40 +717,29 @@ fn build_metadata(input: &PutObjectInput, headers: &http::HeaderMap) -> ObjectMe
         object_lock_mode: input
             .object_lock_mode
             .as_ref()
-            .map(|m| m.as_str().to_owned()),
-        object_lock_retain_until: input.object_lock_retain_until_date.as_ref().and_then(|ts| {
-            let odt: time::OffsetDateTime = ts.clone().into();
-            let unix_millis = odt.unix_timestamp() * 1000 + i64::from(odt.millisecond());
-            chrono::DateTime::from_timestamp_millis(unix_millis)
-        }),
+            .map(|m: &ObjectLockMode| m.as_str().to_owned()),
+        object_lock_retain_until: input.object_lock_retain_until_date,
         object_lock_legal_hold: input
             .object_lock_legal_hold_status
             .as_ref()
-            .map(|s| s.as_str() == "ON"),
+            .map(|s: &ObjectLockLegalHoldStatus| s.as_str() == "ON"),
     }
 }
 
 /// Build [`ObjectMetadata`] for a copy operation with REPLACE directive.
-fn build_metadata_for_copy(input: &CopyObjectInput, _headers: &http::HeaderMap) -> ObjectMetadata {
-    let user_metadata = input.metadata.clone().unwrap_or_default();
+fn build_metadata_for_copy(input: &CopyObjectInput) -> ObjectMetadata {
+    let user_metadata = input.metadata.clone();
 
     let tagging = input
         .tagging
-        .as_ref()
-        .map(|t| parse_tagging_header(t.as_str()))
+        .as_deref()
+        .map(parse_tagging_header)
         .unwrap_or_default();
 
-    let acl = input
-        .acl
-        .as_ref()
-        .and_then(|a| a.as_str().parse::<CannedAcl>().ok())
-        .unwrap_or_default();
+    let acl = parse_acl(input.acl.as_ref());
 
     ObjectMetadata {
-        content_type: input
-            .content_type
-            .as_ref()
-            .map(std::string::ToString::to_string),
+        content_type: input.content_type.clone(),
         content_encoding: input.content_encoding.clone(),
         content_disposition: input.content_disposition.clone(),
         content_language: input.content_language.clone(),
@@ -806,7 +749,7 @@ fn build_metadata_for_copy(input: &CopyObjectInput, _headers: &http::HeaderMap) 
         sse_algorithm: input
             .server_side_encryption
             .as_ref()
-            .map(|s| s.as_str().to_owned()),
+            .map(|sse: &ServerSideEncryption| sse.as_str().to_owned()),
         sse_kms_key_id: input.ssekms_key_id.clone(),
         sse_bucket_key_enabled: input.bucket_key_enabled,
         sse_customer_algorithm: input.sse_customer_algorithm.clone(),
@@ -816,17 +759,19 @@ fn build_metadata_for_copy(input: &CopyObjectInput, _headers: &http::HeaderMap) 
         object_lock_mode: input
             .object_lock_mode
             .as_ref()
-            .map(|m| m.as_str().to_owned()),
-        object_lock_retain_until: input.object_lock_retain_until_date.as_ref().and_then(|ts| {
-            let odt: time::OffsetDateTime = ts.clone().into();
-            let unix_millis = odt.unix_timestamp() * 1000 + i64::from(odt.millisecond());
-            chrono::DateTime::from_timestamp_millis(unix_millis)
-        }),
+            .map(|m: &ObjectLockMode| m.as_str().to_owned()),
+        object_lock_retain_until: input.object_lock_retain_until_date,
         object_lock_legal_hold: input
             .object_lock_legal_hold_status
             .as_ref()
-            .map(|s| s.as_str() == "ON"),
+            .map(|s: &ObjectLockLegalHoldStatus| s.as_str() == "ON"),
     }
+}
+
+/// Parse an optional [`ObjectCannedACL`] into our internal [`CannedAcl`].
+fn parse_acl(acl: Option<&ObjectCannedACL>) -> CannedAcl {
+    acl.and_then(|a| a.as_str().parse::<CannedAcl>().ok())
+        .unwrap_or_default()
 }
 
 /// Parse the `x-amz-tagging` URL-encoded query string into tag pairs.
@@ -849,31 +794,120 @@ pub(super) fn parse_tagging_header(tagging: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Extract checksum data from a `PutObjectInput` if any checksum fields are set.
+/// Extract checksum data from a [`PutObjectInput`] if any checksum fields are
+/// set.
 fn extract_checksum_from_put(input: &PutObjectInput) -> Option<ChecksumData> {
-    if let Some(ref v) = input.checksum_crc32 {
+    if let Some(v) = &input.checksum_crc32 {
         return Some(ChecksumData {
             algorithm: "CRC32".to_owned(),
             value: v.clone(),
         });
     }
-    if let Some(ref v) = input.checksum_crc32c {
+    if let Some(v) = &input.checksum_crc32c {
         return Some(ChecksumData {
             algorithm: "CRC32C".to_owned(),
             value: v.clone(),
         });
     }
-    if let Some(ref v) = input.checksum_sha1 {
+    if let Some(v) = &input.checksum_sha1 {
         return Some(ChecksumData {
             algorithm: "SHA1".to_owned(),
             value: v.clone(),
         });
     }
-    if let Some(ref v) = input.checksum_sha256 {
+    if let Some(v) = &input.checksum_sha256 {
         return Some(ChecksumData {
             algorithm: "SHA256".to_owned(),
             value: v.clone(),
         });
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_parse_copy_source_simple() {
+        let (bucket, key, vid) = parse_copy_source("my-bucket/my-key").unwrap();
+        assert_eq!(bucket, "my-bucket");
+        assert_eq!(key, "my-key");
+        assert!(vid.is_none());
+    }
+
+    #[test]
+    fn test_should_parse_copy_source_with_leading_slash() {
+        let (bucket, key, vid) = parse_copy_source("/my-bucket/my-key").unwrap();
+        assert_eq!(bucket, "my-bucket");
+        assert_eq!(key, "my-key");
+        assert!(vid.is_none());
+    }
+
+    #[test]
+    fn test_should_parse_copy_source_with_version_id() {
+        let (bucket, key, vid) = parse_copy_source("/my-bucket/my-key?versionId=abc123").unwrap();
+        assert_eq!(bucket, "my-bucket");
+        assert_eq!(key, "my-key");
+        assert_eq!(vid.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn test_should_parse_copy_source_with_nested_key() {
+        let (bucket, key, vid) = parse_copy_source("bucket/path/to/key").unwrap();
+        assert_eq!(bucket, "bucket");
+        assert_eq!(key, "path/to/key");
+        assert!(vid.is_none());
+    }
+
+    #[test]
+    fn test_should_parse_copy_source_with_encoded_key() {
+        let (bucket, key, vid) = parse_copy_source("bucket/path%20to/key%2B1").unwrap();
+        assert_eq!(bucket, "bucket");
+        assert_eq!(key, "path to/key+1");
+        assert!(vid.is_none());
+    }
+
+    #[test]
+    fn test_should_reject_copy_source_no_key() {
+        assert!(parse_copy_source("bucket-only").is_err());
+    }
+
+    #[test]
+    fn test_should_reject_copy_source_empty_bucket() {
+        assert!(parse_copy_source("/").is_err());
+    }
+
+    #[test]
+    fn test_should_reject_copy_source_empty_key() {
+        assert!(parse_copy_source("bucket/").is_err());
+    }
+
+    #[test]
+    fn test_should_parse_tagging_header_basic() {
+        let tags = parse_tagging_header("key1=value1&key2=value2");
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0], ("key1".to_owned(), "value1".to_owned()));
+        assert_eq!(tags[1], ("key2".to_owned(), "value2".to_owned()));
+    }
+
+    #[test]
+    fn test_should_parse_tagging_header_encoded() {
+        let tags = parse_tagging_header("key%201=value%201");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0], ("key 1".to_owned(), "value 1".to_owned()));
+    }
+
+    #[test]
+    fn test_should_parse_tagging_header_empty() {
+        let tags = parse_tagging_header("");
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn test_should_parse_tagging_header_no_value() {
+        let tags = parse_tagging_header("key1");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0], ("key1".to_owned(), String::new()));
+    }
 }

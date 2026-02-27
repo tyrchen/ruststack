@@ -3,10 +3,14 @@
 //! Implements `create_bucket`, `delete_bucket`, `head_bucket`, `list_buckets`,
 //! and `get_bucket_location`.
 
-// The s3s DTO module contains dozens of types we reference; wildcard is clearer.
-#[allow(clippy::wildcard_imports)]
-use s3s::dto::*;
-use s3s::{S3Request, S3Response, S3Result};
+use ruststack_s3_model::error::S3Error;
+use ruststack_s3_model::input::{
+    CreateBucketInput, DeleteBucketInput, GetBucketLocationInput, HeadBucketInput, ListBucketsInput,
+};
+use ruststack_s3_model::output::{
+    CreateBucketOutput, GetBucketLocationOutput, HeadBucketOutput, ListBucketsOutput,
+};
+use ruststack_s3_model::types::{Bucket, BucketLocationConstraint, LocationType, Owner};
 use tracing::debug;
 
 use crate::error::S3ServiceError;
@@ -14,48 +18,40 @@ use crate::provider::RustStackS3;
 use crate::state::object::Owner as InternalOwner;
 use crate::validation::validate_bucket_name;
 
-/// Convert our internal [`InternalOwner`] to the s3s [`Owner`] DTO.
-pub(super) fn to_s3_owner(owner: &InternalOwner) -> Owner {
+/// Convert our internal [`InternalOwner`] to the model [`Owner`] type.
+pub(crate) fn to_model_owner(owner: &InternalOwner) -> Owner {
     Owner {
         display_name: Some(owner.display_name.clone()),
         id: Some(owner.id.clone()),
     }
 }
 
-// These handler methods must remain async to match the s3s::S3 trait interface,
-// even when the method body is synchronous.
+// These handler methods must remain async because some operations involve
+// storage I/O. Methods that are fully synchronous are allowed to be async
+// for consistency.
 #[allow(clippy::unused_async)]
 impl RustStackS3 {
     /// Create a new S3 bucket.
-    pub(crate) async fn handle_create_bucket(
+    pub async fn handle_create_bucket(
         &self,
-        req: S3Request<CreateBucketInput>,
-    ) -> S3Result<S3Response<CreateBucketOutput>> {
-        let bucket_name = req.input.bucket;
+        input: CreateBucketInput,
+    ) -> Result<CreateBucketOutput, S3Error> {
+        let bucket_name = input.bucket;
 
         validate_bucket_name(&bucket_name).map_err(S3ServiceError::into_s3_error)?;
 
-        let region = req
-            .input
+        let region = input
             .create_bucket_configuration
             .and_then(|c| c.location_constraint)
             .map_or_else(
                 || self.config.default_region.clone(),
-                |lc| lc.as_str().to_owned(),
+                |lc: BucketLocationConstraint| lc.as_str().to_owned(),
             );
 
-        let account_id = req
-            .credentials
-            .as_ref()
-            .map_or_else(|| InternalOwner::default().id, |c| c.access_key.clone());
-
-        let owner = InternalOwner {
-            id: account_id.clone(),
-            display_name: account_id,
-        };
+        let owner = InternalOwner::default();
 
         // Check if object lock is requested.
-        let object_lock_enabled = req.input.object_lock_enabled_for_bucket.unwrap_or(false);
+        let object_lock_enabled = input.object_lock_enabled_for_bucket.unwrap_or(false);
 
         self.state
             .create_bucket(bucket_name.clone(), region, owner)
@@ -72,18 +68,15 @@ impl RustStackS3 {
 
         debug!(bucket = %bucket_name, "create_bucket completed");
 
-        let output = CreateBucketOutput {
+        Ok(CreateBucketOutput {
+            bucket_arn: None,
             location: Some(format!("/{bucket_name}")),
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     /// Delete an S3 bucket.
-    pub(crate) async fn handle_delete_bucket(
-        &self,
-        req: S3Request<DeleteBucketInput>,
-    ) -> S3Result<S3Response<DeleteBucketOutput>> {
-        let bucket_name = req.input.bucket;
+    pub async fn handle_delete_bucket(&self, input: DeleteBucketInput) -> Result<(), S3Error> {
+        let bucket_name = input.bucket;
 
         // Clean up CORS rules for this bucket.
         self.cors_index.delete_rules(&bucket_name);
@@ -98,66 +91,63 @@ impl RustStackS3 {
 
         debug!(bucket = %bucket_name, "delete_bucket completed");
 
-        Ok(S3Response::new(DeleteBucketOutput {}))
+        Ok(())
     }
 
     /// Check if a bucket exists and is accessible (HEAD Bucket).
-    pub(crate) async fn handle_head_bucket(
+    pub async fn handle_head_bucket(
         &self,
-        req: S3Request<HeadBucketInput>,
-    ) -> S3Result<S3Response<HeadBucketOutput>> {
-        let bucket_name = req.input.bucket;
+        input: HeadBucketInput,
+    ) -> Result<HeadBucketOutput, S3Error> {
+        let bucket_name = input.bucket;
 
         let bucket = self
             .state
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
 
-        let output = HeadBucketOutput {
+        Ok(HeadBucketOutput {
             access_point_alias: None,
+            bucket_arn: None,
             bucket_location_name: Some(bucket.region.clone()),
-            bucket_location_type: Some(LocationType::from_static("Region")),
+            bucket_location_type: Some(LocationType::from("Region")),
             bucket_region: Some(bucket.region.clone()),
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     /// List all buckets.
-    pub(crate) async fn handle_list_buckets(
+    pub async fn handle_list_buckets(
         &self,
-        _req: S3Request<ListBucketsInput>,
-    ) -> S3Result<S3Response<ListBucketsOutput>> {
+        _input: ListBucketsInput,
+    ) -> Result<ListBucketsOutput, S3Error> {
         let bucket_list = self.state.list_buckets();
 
         let buckets: Vec<Bucket> = bucket_list
             .into_iter()
-            .map(|(name, creation_date)| {
-                let ts = chrono_to_timestamp(creation_date);
-                Bucket {
-                    name: Some(name),
-                    creation_date: Some(ts),
-                    bucket_region: None,
-                }
+            .map(|(name, creation_date)| Bucket {
+                bucket_arn: None,
+                name: Some(name),
+                creation_date: Some(creation_date),
+                bucket_region: None,
             })
             .collect();
 
-        let owner = to_s3_owner(&InternalOwner::default());
+        let owner = to_model_owner(&InternalOwner::default());
 
-        let output = ListBucketsOutput {
-            buckets: Some(buckets),
+        Ok(ListBucketsOutput {
+            buckets,
             continuation_token: None,
             owner: Some(owner),
             prefix: None,
-        };
-        Ok(S3Response::new(output))
+        })
     }
 
     /// Get the location (region) of a bucket.
-    pub(crate) async fn handle_get_bucket_location(
+    pub async fn handle_get_bucket_location(
         &self,
-        req: S3Request<GetBucketLocationInput>,
-    ) -> S3Result<S3Response<GetBucketLocationOutput>> {
-        let bucket_name = req.input.bucket;
+        input: GetBucketLocationInput,
+    ) -> Result<GetBucketLocationOutput, S3Error> {
+        let bucket_name = input.bucket;
 
         let bucket = self
             .state
@@ -168,21 +158,11 @@ impl RustStackS3 {
             // AWS returns null/empty for us-east-1.
             None
         } else {
-            Some(BucketLocationConstraint::from(bucket.region.clone()))
+            Some(BucketLocationConstraint::from(bucket.region.as_str()))
         };
 
-        let output = GetBucketLocationOutput {
+        Ok(GetBucketLocationOutput {
             location_constraint,
-        };
-        Ok(S3Response::new(output))
+        })
     }
-}
-
-/// Convert a `chrono::DateTime<Utc>` to an s3s [`Timestamp`].
-pub(crate) fn chrono_to_timestamp(dt: chrono::DateTime<chrono::Utc>) -> Timestamp {
-    let system_time = std::time::SystemTime::UNIX_EPOCH
-        + std::time::Duration::from_millis(
-            u64::try_from(dt.timestamp_millis()).unwrap_or_default(),
-        );
-    Timestamp::from(system_time)
 }

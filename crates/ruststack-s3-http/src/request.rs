@@ -1277,7 +1277,7 @@ mod tests {
             .uri("/?prefix=test&max-buckets=10")
             .body(())
             .expect("valid request");
-        let (parts, _) = req.into_parts();
+        let (parts, ()) = req.into_parts();
         let params = vec![
             ("prefix".to_owned(), "test".to_owned()),
             ("max-buckets".to_owned(), "10".to_owned()),
@@ -1301,7 +1301,7 @@ mod tests {
             .header("x-amz-storage-class", "STANDARD")
             .body(())
             .expect("valid request");
-        let (parts, _) = req.into_parts();
+        let (parts, ()) = req.into_parts();
 
         let input =
             PutObjectInput::from_s3_request(&parts, Some("mybucket"), Some("mykey"), &[], body)
@@ -1324,7 +1324,7 @@ mod tests {
             .header("If-Match", "\"etag123\"")
             .body(())
             .expect("valid request");
-        let (parts, _) = req.into_parts();
+        let (parts, ()) = req.into_parts();
         let params = vec![("versionId".to_owned(), "v1".to_owned())];
 
         let input = GetObjectInput::from_s3_request(
@@ -1353,7 +1353,7 @@ mod tests {
             .header("x-amz-not-meta", "ignored")
             .body(())
             .expect("valid request");
-        let (parts, _) = req.into_parts();
+        let (parts, ()) = req.into_parts();
 
         let metadata = collect_metadata(&parts);
         assert_eq!(metadata.len(), 2);
@@ -1368,7 +1368,7 @@ mod tests {
             .uri("/")
             .body(())
             .expect("valid request");
-        let (parts, _) = req.into_parts();
+        let (parts, ()) = req.into_parts();
 
         let err =
             DeleteBucketInput::from_s3_request(&parts, None, None, &[], Bytes::new()).unwrap_err();
@@ -1382,7 +1382,7 @@ mod tests {
             .uri("/mybucket")
             .body(())
             .expect("valid request");
-        let (parts, _) = req.into_parts();
+        let (parts, ()) = req.into_parts();
 
         let err =
             GetObjectInput::from_s3_request(&parts, Some("mybucket"), None, &[], Bytes::new())
@@ -1399,7 +1399,7 @@ mod tests {
             .header("Content-Length", "9")
             .body(())
             .expect("valid request");
-        let (parts, _) = req.into_parts();
+        let (parts, ()) = req.into_parts();
         let params = vec![
             ("partNumber".to_owned(), "3".to_owned()),
             ("uploadId".to_owned(), "upload123".to_owned()),

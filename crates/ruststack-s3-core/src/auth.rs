@@ -1,21 +1,15 @@
-//! S3 authentication via the `s3s::auth::S3Auth` trait.
+//! S3 authentication via the `CredentialProvider` trait.
 //!
-//! [`RustStackAuth`] implements the [`s3s::auth::S3Auth`] trait to provide
-//! authentication for the RustStack S3 service. When signature validation is
-//! skipped (the default for local development), any access key maps to an
-//! empty secret key, effectively disabling signature verification.
+//! [`RustStackAuth`] implements the [`ruststack_s3_auth::credentials::CredentialProvider`]
+//! trait to provide authentication for the RustStack S3 service. When signature
+//! validation is skipped (the default for local development), any access key maps
+//! to an empty secret key, effectively disabling signature verification.
 //!
 //! When validation is enabled, all access keys map to the secret key `"test"`,
 //! matching LocalStack's default behavior.
-//!
-//! # Object safety
-//!
-//! The [`s3s::auth::S3Auth`] trait uses `#[async_trait]` because it must be
-//! object-safe for dynamic dispatch (e.g. `Box<dyn S3Auth>`). We follow the
-//! same pattern here.
 
-use s3s::S3Result;
-use s3s::auth::SecretKey;
+use ruststack_s3_auth::credentials::CredentialProvider;
+use ruststack_s3_auth::error::AuthError;
 use tracing::debug;
 
 /// RustStack authentication provider.
@@ -50,16 +44,15 @@ impl RustStackAuth {
     }
 }
 
-#[async_trait::async_trait]
-impl s3s::auth::S3Auth for RustStackAuth {
-    async fn get_secret_key(&self, access_key: &str) -> S3Result<SecretKey> {
+impl CredentialProvider for RustStackAuth {
+    fn get_secret_key(&self, access_key_id: &str) -> Result<String, AuthError> {
         if self.skip_validation {
-            debug!(access_key, "Skipping signature validation");
-            return Ok(SecretKey::from(""));
+            debug!(access_key_id, "Skipping signature validation");
+            return Ok(String::new());
         }
 
-        debug!(access_key, "Returning default secret key for access key");
-        Ok(SecretKey::from("test"))
+        debug!(access_key_id, "Returning default secret key for access key");
+        Ok("test".to_owned())
     }
 }
 
@@ -79,27 +72,19 @@ mod tests {
         assert!(!auth.skip_validation());
     }
 
-    #[tokio::test]
-    async fn test_should_return_empty_key_when_skipping_validation() {
-        use s3s::auth::S3Auth;
-
+    #[test]
+    fn test_should_return_empty_key_when_skipping_validation() {
         let auth = RustStackAuth::new(true);
-        let key = auth
-            .get_secret_key("any-key")
-            .await
-            .expect("test get_secret_key");
-        assert_eq!(key.expose(), "");
+        let key = auth.get_secret_key("any-key").expect("test get_secret_key");
+        assert_eq!(key, "");
     }
 
-    #[tokio::test]
-    async fn test_should_return_test_key_when_validating() {
-        use s3s::auth::S3Auth;
-
+    #[test]
+    fn test_should_return_test_key_when_validating() {
         let auth = RustStackAuth::new(false);
         let key = auth
             .get_secret_key("AKIAIOSFODNN7EXAMPLE")
-            .await
             .expect("test get_secret_key");
-        assert_eq!(key.expose(), "test");
+        assert_eq!(key, "test");
     }
 }

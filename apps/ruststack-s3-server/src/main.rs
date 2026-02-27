@@ -1,7 +1,7 @@
 //! RustStack S3 Server - High-performance S3-compatible server.
 //!
-//! This binary provides a LocalStack-compatible S3 server built on the `s3s` crate.
-//! It handles S3 protocol translation, authentication, virtual-hosted-style addressing,
+//! This binary provides a LocalStack-compatible S3 server built on `ruststack-s3-http`.
+//! It handles S3 protocol translation, virtual-hosted-style addressing,
 //! and exposes health check endpoints for orchestration systems.
 //!
 //! # Usage
@@ -20,85 +20,24 @@
 //! | `LOG_LEVEL` | `info` | Log level filter |
 //! | `RUST_LOG` | *(unset)* | Fine-grained tracing filter (overrides `LOG_LEVEL`) |
 
-use std::future::Future;
+mod handler;
+
 use std::net::SocketAddr;
-use std::pin::Pin;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use bytes::Bytes;
-use hyper::body::Incoming;
-use hyper::service::Service;
-use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as HttpConnBuilder;
-use s3s::service::S3ServiceBuilder;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
-use ruststack_s3_core::auth::RustStackAuth;
 use ruststack_s3_core::{RustStackS3, S3Config};
+use ruststack_s3_http::service::{S3HttpConfig, S3HttpService};
+
+use crate::handler::RustStackHandler;
 
 /// Server version reported in health check responses.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// JSON health check response body.
-fn health_response_body() -> Bytes {
-    // Pre-format the JSON. This is a small, static response so allocation is fine.
-    Bytes::from(format!(
-        r#"{{"services":{{"s3":"running"}},"edition":"ruststack","version":"{VERSION}"}}"#,
-    ))
-}
-
-/// A wrapper service that intercepts health check paths before delegating to s3s.
-///
-/// Routes `/_localstack/health` and `/health` to a JSON health response.
-/// All other requests are forwarded to the inner `SharedS3Service`.
-#[derive(Debug, Clone)]
-struct HealthCheckService {
-    inner: s3s::service::SharedS3Service,
-    health_body: Arc<Bytes>,
-}
-
-impl HealthCheckService {
-    fn new(inner: s3s::service::SharedS3Service) -> Self {
-        Self {
-            inner,
-            health_body: Arc::new(health_response_body()),
-        }
-    }
-}
-
-impl Service<Request<Incoming>> for HealthCheckService {
-    type Response = Response<s3s::Body>;
-    type Error = s3s::S3Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn call(&self, req: Request<Incoming>) -> Self::Future {
-        let path = req.uri().path();
-
-        if path == "/_localstack/health" || path == "/health" {
-            let body = self.health_body.clone();
-            return Box::pin(async move {
-                let response = Response::builder()
-                    .status(StatusCode::OK)
-                    .header("content-type", "application/json")
-                    .body(s3s::Body::from((*body).clone()))
-                    .map_err(|e| {
-                        s3s::S3Error::with_source(
-                            s3s::S3ErrorCode::InternalError,
-                            Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
-                        )
-                    })?;
-                Ok(response)
-            });
-        }
-
-        // Delegate to the inner s3s service.
-        self.inner.call(req)
-    }
-}
 
 /// Initialize the tracing subscriber.
 ///
@@ -119,27 +58,21 @@ fn init_tracing(log_level: &str) -> Result<()> {
     Ok(())
 }
 
-/// Build the s3s service from configuration.
-fn build_s3_service(config: &S3Config) -> Result<s3s::service::SharedS3Service> {
-    let provider = RustStackS3::new(config.clone());
-    let auth = RustStackAuth::new(config.s3_skip_signature_validation);
-
-    let mut builder = S3ServiceBuilder::new(provider);
-    if !config.s3_skip_signature_validation {
-        builder.set_auth(auth);
+/// Build the [`S3HttpConfig`] from the application [`S3Config`].
+fn build_http_config(config: &S3Config) -> S3HttpConfig {
+    S3HttpConfig {
+        domain: config.s3_domain.clone(),
+        virtual_hosting: config.s3_virtual_hosting,
+        skip_signature_validation: config.s3_skip_signature_validation,
+        region: config.default_region.clone(),
     }
-
-    if config.s3_virtual_hosting {
-        let host = s3s::host::SingleDomain::new(&config.s3_domain)
-            .with_context(|| format!("invalid S3 domain: {}", config.s3_domain))?;
-        builder.set_host(host);
-    }
-
-    Ok(builder.build().into_shared())
 }
 
 /// Run the accept loop, serving connections until a shutdown signal is received.
-async fn serve(listener: TcpListener, service: HealthCheckService) -> Result<()> {
+async fn serve<H: ruststack_s3_http::dispatch::S3Handler>(
+    listener: TcpListener,
+    service: S3HttpService<H>,
+) -> Result<()> {
     let graceful = hyper_util::server::graceful::GracefulShutdown::new();
     let http = HttpConnBuilder::new(TokioExecutor::new());
 
@@ -237,8 +170,10 @@ async fn main() -> Result<()> {
         "starting RustStack S3 Server",
     );
 
-    let s3_service = build_s3_service(&config)?;
-    let service = HealthCheckService::new(s3_service);
+    let provider = RustStackS3::new(config.clone());
+    let handler = RustStackHandler(provider);
+    let http_config = build_http_config(&config);
+    let service = S3HttpService::new(handler, http_config);
 
     let addr: SocketAddr = config
         .gateway_listen
@@ -259,13 +194,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_should_produce_valid_health_json() {
-        let body = health_response_body();
-        let value: serde_json::Value =
-            serde_json::from_slice(&body).expect("health body should be valid JSON");
+    fn test_should_build_http_config_from_s3_config() {
+        let config = S3Config::from_env();
+        let http_config = build_http_config(&config);
 
-        assert_eq!(value["services"]["s3"], "running");
-        assert_eq!(value["edition"], "ruststack");
-        assert_eq!(value["version"], VERSION);
+        assert_eq!(http_config.domain, config.s3_domain);
+        assert_eq!(http_config.virtual_hosting, config.s3_virtual_hosting);
+        assert_eq!(
+            http_config.skip_signature_validation,
+            config.s3_skip_signature_validation
+        );
+        assert_eq!(http_config.region, config.default_region);
     }
 }

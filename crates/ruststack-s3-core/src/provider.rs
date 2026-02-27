@@ -1,14 +1,12 @@
-//! S3 provider implementing the `s3s::S3` trait.
+//! S3 provider that owns the business logic state.
 //!
 //! [`RustStackS3`] is the core S3 provider that owns all service state
 //! (buckets, objects, multipart uploads) and the storage backend.
 //! Individual S3 operations are implemented in the [`crate::ops`] submodules
-//! and wired together in the `impl S3 for RustStackS3` block.
+//! as `handle_*` methods on `RustStackS3`.
 //!
-//! # Object safety
-//!
-//! The [`s3s::S3`] trait uses `#[async_trait]` because it must be object-safe
-//! for dynamic dispatch (`Arc<dyn S3>`). We follow the same pattern here.
+//! The server binary implements the `S3Handler` trait (from `ruststack-s3-http`)
+//! for `RustStackS3`, bridging the HTTP layer to these handler methods.
 
 use std::sync::Arc;
 
@@ -17,7 +15,7 @@ use crate::cors::CorsIndex;
 use crate::state::service::S3ServiceState;
 use crate::storage::InMemoryStorage;
 
-/// The main S3 provider that implements the `s3s::S3` trait.
+/// The main S3 provider.
 ///
 /// All fields are `Arc`-wrapped for cheap cloning and shared ownership
 /// across handler tasks.
@@ -31,7 +29,7 @@ use crate::storage::InMemoryStorage;
 /// let provider = RustStackS3::new(S3Config::default());
 /// assert!(!provider.config().gateway_listen.is_empty());
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RustStackS3 {
     /// Bucket and object metadata state.
     pub(crate) state: Arc<S3ServiceState>,
@@ -117,6 +115,16 @@ mod tests {
         assert_eq!(
             provider.config().default_region,
             clone.config().default_region
+        );
+    }
+
+    #[test]
+    fn test_should_clone_provider() {
+        let provider = RustStackS3::new(S3Config::default());
+        let cloned = provider.clone();
+        assert_eq!(
+            provider.config().default_region,
+            cloned.config().default_region
         );
     }
 

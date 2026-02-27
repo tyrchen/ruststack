@@ -58,6 +58,15 @@ pub struct GetBucketLoggingOutput {
     pub logging_enabled: Option<LoggingEnabled>,
 }
 
+/// S3 GetBucketNotificationConfigurationOutput.
+///
+/// Returns the notification configuration for a bucket. The fields mirror
+/// the `NotificationConfiguration` structure from the AWS S3 model.
+#[derive(Debug, Clone, Default)]
+pub struct GetBucketNotificationConfigurationOutput {
+    // Notification configuration fields are opaque for now.
+}
+
 /// S3 GetBucketOwnershipControlsOutput.
 #[derive(Debug, Clone, Default)]
 pub struct GetBucketOwnershipControlsOutput {

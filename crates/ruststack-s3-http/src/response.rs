@@ -629,6 +629,7 @@ impl_xml_body_response!(GetBucketAclOutput);
 impl_xml_body_response!(GetBucketCorsOutput);
 impl_xml_body_response!(GetBucketEncryptionOutput);
 impl_xml_body_response!(GetBucketLoggingOutput);
+impl_xml_body_response!(GetBucketNotificationConfigurationOutput);
 impl_xml_body_response!(GetBucketOwnershipControlsOutput);
 impl_xml_body_response!(GetBucketPolicyStatusOutput);
 impl_xml_body_response!(GetBucketRequestPaymentOutput);

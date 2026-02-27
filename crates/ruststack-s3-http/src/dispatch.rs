@@ -92,7 +92,7 @@ mod tests {
             .uri("/mybucket")
             .body(())
             .expect("valid request");
-        let (parts, _) = req.into_parts();
+        let (parts, ()) = req.into_parts();
         let ctx = RoutingContext {
             bucket: Some("mybucket".to_owned()),
             key: None,
