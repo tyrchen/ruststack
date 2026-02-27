@@ -327,18 +327,25 @@ impl VersionedKeyStore {
     /// Insert an object, generating a new version ID and prepending to the
     /// version list.
     pub fn put(&mut self, mut object: S3Object) {
-        object.version_id = generate_version_id();
+        if object.version_id == "null" {
+            object.version_id = generate_version_id();
+        }
         debug!(key = %object.key, version = %object.version_id, "storing versioned object");
         let versions = self.objects.entry(object.key.clone()).or_default();
         versions.insert(0, ObjectVersion::Object(Box::new(object)));
     }
 
-    /// Get the latest non-delete-marker object for a key.
+    /// Get the current object for a key.
+    ///
+    /// Returns `None` if the key doesn't exist or if the latest version is a
+    /// delete marker (per S3 semantics, the object appears deleted).
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&S3Object> {
-        self.objects
-            .get(key)
-            .and_then(|versions| versions.iter().find_map(|v| v.as_object()))
+        self.objects.get(key).and_then(|versions| {
+            let latest = versions.first()?;
+            // If the latest version is a delete marker, the object is logically deleted.
+            latest.as_object()
+        })
     }
 
     /// Get a specific version of an object.
@@ -744,11 +751,10 @@ mod tests {
         assert!(dm_version.is_some());
         assert!(had_object);
 
-        // get() should skip the delete marker and still return the object.
-        // Wait - per S3 semantics, the latest is a delete marker, so get()
-        // which returns "latest non-DM" should still find the object underneath.
+        // Per S3 semantics, when the latest version is a delete marker,
+        // get() should return None (object appears deleted).
         let obj = vs.get("key1");
-        assert!(obj.is_some());
+        assert!(obj.is_none());
 
         // But len() counts keys whose latest is not a DM, so this key is "deleted".
         assert_eq!(vs.len(), 0);

@@ -10,8 +10,7 @@
 //! - **Streaming body**: `GetObject` passes through the body bytes.
 //! - **Mixed**: Operations like `CopyObject` return both XML body and response headers.
 //!
-//! XML serialization is delegated to `ruststack-s3-xml`. Until that crate has full
-//! serialization support, XML body responses return a placeholder or empty body.
+//! XML serialization is delegated to `ruststack-s3-xml`.
 
 use bytes::Bytes;
 use http::header::HeaderValue;
@@ -141,6 +140,16 @@ fn build_response(
         .map_err(|e| S3Error::internal_error(format!("failed to build HTTP response: {e}")))
 }
 
+/// Serialize a value to XML and wrap it in an `S3ResponseBody`.
+fn serialize_xml_body<T: ruststack_s3_xml::S3Serialize>(
+    root_element: &str,
+    value: &T,
+) -> Result<S3ResponseBody, S3Error> {
+    let xml_bytes = ruststack_s3_xml::to_xml(root_element, value)
+        .map_err(|e| S3Error::internal_error(format!("XML serialization failed: {e}")))?;
+    Ok(S3ResponseBody::from_bytes(Bytes::from(xml_bytes)))
+}
+
 // ---------------------------------------------------------------------------
 // Implementations
 // ---------------------------------------------------------------------------
@@ -209,11 +218,11 @@ impl IntoS3Response for GetBucketLocationOutput {
 
 impl IntoS3Response for ListBucketsOutput {
     fn into_s3_response(self) -> Result<http::Response<S3ResponseBody>, S3Error> {
-        // XML body serialization deferred to ruststack-s3-xml.
+        let body = serialize_xml_body("ListAllMyBucketsResult", &self)?;
         let builder = http::Response::builder()
             .status(http::StatusCode::OK)
             .header("Content-Type", "application/xml");
-        build_response(builder, S3ResponseBody::empty())
+        build_response(builder, body)
     }
 }
 
@@ -573,8 +582,12 @@ impl IntoS3Response for CopyObjectOutput {
         builder = set_optional_header(builder, "x-amz-version-id", self.version_id.as_deref());
         builder = builder.header("Content-Type", "application/xml");
 
-        // CopyObjectResult XML body - deferred to ruststack-s3-xml.
-        build_response(builder, S3ResponseBody::empty())
+        let body = if let Some(ref result) = self.copy_object_result {
+            serialize_xml_body("CopyObjectResult", result)?
+        } else {
+            S3ResponseBody::empty()
+        };
+        build_response(builder, body)
     }
 }
 
@@ -594,6 +607,7 @@ impl IntoS3Response for DeleteObjectOutput {
 
 impl IntoS3Response for DeleteObjectsOutput {
     fn into_s3_response(self) -> Result<http::Response<S3ResponseBody>, S3Error> {
+        let body = serialize_xml_body("DeleteResult", &self)?;
         let mut builder = http::Response::builder()
             .status(http::StatusCode::OK)
             .header("Content-Type", "application/xml");
@@ -602,50 +616,76 @@ impl IntoS3Response for DeleteObjectsOutput {
             "x-amz-request-charged",
             self.request_charged.as_ref(),
         );
-        // XML body deferred to ruststack-s3-xml.
-        build_response(builder, S3ResponseBody::empty())
+        build_response(builder, body)
     }
 }
 
 // --- Config GET operations (return XML) ---
 
-/// Macro for config GET outputs that just return XML body with a single header.
+/// Macro for config GET outputs that return an XML body with Content-Type header.
 macro_rules! impl_xml_body_response {
-    ($ty:ty) => {
+    ($ty:ty, $root:expr) => {
         impl IntoS3Response for $ty {
             fn into_s3_response(self) -> Result<http::Response<S3ResponseBody>, S3Error> {
+                let body = serialize_xml_body($root, &self)?;
                 let builder = http::Response::builder()
                     .status(http::StatusCode::OK)
                     .header("Content-Type", "application/xml");
-                // XML serialization deferred to ruststack-s3-xml.
-                build_response(builder, S3ResponseBody::empty())
+                build_response(builder, body)
             }
         }
     };
 }
 
-impl_xml_body_response!(GetBucketAccelerateConfigurationOutput);
-impl_xml_body_response!(GetBucketAclOutput);
-impl_xml_body_response!(GetBucketCorsOutput);
-impl_xml_body_response!(GetBucketEncryptionOutput);
-impl_xml_body_response!(GetBucketLoggingOutput);
-impl_xml_body_response!(GetBucketNotificationConfigurationOutput);
-impl_xml_body_response!(GetBucketOwnershipControlsOutput);
-impl_xml_body_response!(GetBucketPolicyStatusOutput);
-impl_xml_body_response!(GetBucketRequestPaymentOutput);
-impl_xml_body_response!(GetBucketTaggingOutput);
-impl_xml_body_response!(GetBucketVersioningOutput);
-impl_xml_body_response!(GetBucketWebsiteOutput);
-impl_xml_body_response!(GetObjectAclOutput);
-impl_xml_body_response!(GetObjectLegalHoldOutput);
-impl_xml_body_response!(GetObjectLockConfigurationOutput);
-impl_xml_body_response!(GetObjectRetentionOutput);
-impl_xml_body_response!(GetPublicAccessBlockOutput);
-impl_xml_body_response!(ListObjectsOutput);
-impl_xml_body_response!(ListObjectsV2Output);
-impl_xml_body_response!(ListObjectVersionsOutput);
-impl_xml_body_response!(ListMultipartUploadsOutput);
-impl_xml_body_response!(ListPartsOutput);
+impl_xml_body_response!(
+    GetBucketAccelerateConfigurationOutput,
+    "AccelerateConfiguration"
+);
+impl_xml_body_response!(GetBucketAclOutput, "AccessControlPolicy");
+impl_xml_body_response!(GetBucketCorsOutput, "CORSConfiguration");
+impl_xml_body_response!(
+    GetBucketEncryptionOutput,
+    "ServerSideEncryptionConfiguration"
+);
+impl_xml_body_response!(GetBucketLoggingOutput, "BucketLoggingStatus");
+impl_xml_body_response!(
+    GetBucketNotificationConfigurationOutput,
+    "NotificationConfiguration"
+);
+impl_xml_body_response!(GetBucketOwnershipControlsOutput, "OwnershipControls");
+impl_xml_body_response!(GetBucketPolicyStatusOutput, "PolicyStatus");
+impl_xml_body_response!(GetBucketRequestPaymentOutput, "RequestPaymentConfiguration");
+impl_xml_body_response!(GetBucketTaggingOutput, "Tagging");
+impl_xml_body_response!(GetBucketVersioningOutput, "VersioningConfiguration");
+impl_xml_body_response!(GetBucketWebsiteOutput, "WebsiteConfiguration");
+impl_xml_body_response!(GetObjectAclOutput, "AccessControlPolicy");
+impl_xml_body_response!(GetObjectLegalHoldOutput, "LegalHold");
+impl_xml_body_response!(GetObjectLockConfigurationOutput, "ObjectLockConfiguration");
+impl_xml_body_response!(GetObjectRetentionOutput, "Retention");
+impl_xml_body_response!(GetPublicAccessBlockOutput, "PublicAccessBlockConfiguration");
+impl_xml_body_response!(ListObjectVersionsOutput, "ListVersionsResult");
+impl_xml_body_response!(ListMultipartUploadsOutput, "ListMultipartUploadsResult");
+impl_xml_body_response!(ListPartsOutput, "ListPartsResult");
+
+impl IntoS3Response for ListObjectsOutput {
+    fn into_s3_response(self) -> Result<http::Response<S3ResponseBody>, S3Error> {
+        let body = serialize_xml_body("ListBucketResult", &self)?;
+        let builder = http::Response::builder()
+            .status(http::StatusCode::OK)
+            .header("Content-Type", "application/xml");
+        build_response(builder, body)
+    }
+}
+
+impl IntoS3Response for ListObjectsV2Output {
+    fn into_s3_response(self) -> Result<http::Response<S3ResponseBody>, S3Error> {
+        let body = serialize_xml_body("ListBucketResult", &self)?;
+        let builder = http::Response::builder()
+            .status(http::StatusCode::OK)
+            .header("Content-Type", "application/xml");
+        build_response(builder, body)
+    }
+}
 
 impl IntoS3Response for GetBucketPolicyOutput {
     fn into_s3_response(self) -> Result<http::Response<S3ResponseBody>, S3Error> {
@@ -663,6 +703,7 @@ impl IntoS3Response for GetBucketPolicyOutput {
 
 impl IntoS3Response for GetBucketLifecycleConfigurationOutput {
     fn into_s3_response(self) -> Result<http::Response<S3ResponseBody>, S3Error> {
+        let body = serialize_xml_body("LifecycleConfiguration", &self)?;
         let mut builder = http::Response::builder()
             .status(http::StatusCode::OK)
             .header("Content-Type", "application/xml");
@@ -671,24 +712,24 @@ impl IntoS3Response for GetBucketLifecycleConfigurationOutput {
             "x-amz-transition-default-minimum-object-size",
             self.transition_default_minimum_object_size.as_ref(),
         );
-        // XML serialization deferred to ruststack-s3-xml.
-        build_response(builder, S3ResponseBody::empty())
+        build_response(builder, body)
     }
 }
 
 impl IntoS3Response for GetObjectTaggingOutput {
     fn into_s3_response(self) -> Result<http::Response<S3ResponseBody>, S3Error> {
+        let body = serialize_xml_body("Tagging", &self)?;
         let mut builder = http::Response::builder()
             .status(http::StatusCode::OK)
             .header("Content-Type", "application/xml");
         builder = set_optional_header(builder, "x-amz-version-id", self.version_id.as_deref());
-        // XML serialization deferred to ruststack-s3-xml.
-        build_response(builder, S3ResponseBody::empty())
+        build_response(builder, body)
     }
 }
 
 impl IntoS3Response for GetObjectAttributesOutput {
     fn into_s3_response(self) -> Result<http::Response<S3ResponseBody>, S3Error> {
+        let body = serialize_xml_body("GetObjectAttributesOutput", &self)?;
         let mut builder = http::Response::builder()
             .status(http::StatusCode::OK)
             .header("Content-Type", "application/xml");
@@ -701,8 +742,7 @@ impl IntoS3Response for GetObjectAttributesOutput {
             self.request_charged.as_ref(),
         );
         builder = set_optional_header(builder, "x-amz-version-id", self.version_id.as_deref());
-        // XML body deferred to ruststack-s3-xml.
-        build_response(builder, S3ResponseBody::empty())
+        build_response(builder, body)
     }
 }
 
@@ -809,8 +849,8 @@ impl IntoS3Response for CreateMultipartUploadOutput {
             "x-amz-server-side-encryption",
             self.server_side_encryption.as_ref(),
         );
-        // XML body with InitiateMultipartUploadResult - deferred.
-        build_response(builder, S3ResponseBody::empty())
+        let body = serialize_xml_body("InitiateMultipartUploadResult", &self)?;
+        build_response(builder, body)
     }
 }
 
@@ -841,8 +881,8 @@ impl IntoS3Response for CompleteMultipartUploadOutput {
             self.server_side_encryption.as_ref(),
         );
         builder = set_optional_header(builder, "x-amz-version-id", self.version_id.as_deref());
-        // XML body deferred.
-        build_response(builder, S3ResponseBody::empty())
+        let body = serialize_xml_body("CompleteMultipartUploadResult", &self)?;
+        build_response(builder, body)
     }
 }
 
@@ -961,8 +1001,12 @@ impl IntoS3Response for UploadPartCopyOutput {
             "x-amz-server-side-encryption",
             self.server_side_encryption.as_ref(),
         );
-        // XML body (CopyPartResult) deferred.
-        build_response(builder, S3ResponseBody::empty())
+        let body = if let Some(ref result) = self.copy_part_result {
+            serialize_xml_body("CopyPartResult", result)?
+        } else {
+            S3ResponseBody::empty()
+        };
+        build_response(builder, body)
     }
 }
 

@@ -18,7 +18,15 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use ruststack_s3_model::error::{S3Error, S3ErrorCode};
 use ruststack_s3_model::request::StreamingBlob;
-use ruststack_s3_model::types::{Delete, Tagging};
+use ruststack_s3_model::types::{
+    AccelerateConfiguration, AccessControlPolicy, BucketLifecycleConfiguration,
+    BucketLoggingStatus, CORSConfiguration, CompletedMultipartUpload, CreateBucketConfiguration,
+    Delete, NotificationConfiguration, ObjectLockConfiguration, ObjectLockLegalHold,
+    ObjectLockRetention, OwnershipControls, PublicAccessBlockConfiguration,
+    RequestPaymentConfiguration, ServerSideEncryptionConfiguration, Tagging,
+    VersioningConfiguration, WebsiteConfiguration,
+};
+use ruststack_s3_xml::from_xml;
 
 /// Trait for extracting an S3 input struct from HTTP request components.
 ///
@@ -186,6 +194,11 @@ where
         .unwrap_or_default()
 }
 
+/// Parse an XML body into a typed value, returning an `S3Error` on failure.
+fn parse_xml_body<T: ruststack_s3_xml::S3Deserialize>(body: &Bytes) -> Result<T, S3Error> {
+    from_xml(body).map_err(|e| S3Error::malformed_xml(format!("Failed to parse XML body: {e}")))
+}
+
 // ---------------------------------------------------------------------------
 // Macro to reduce boilerplate for simple bucket-only inputs
 // ---------------------------------------------------------------------------
@@ -299,14 +312,16 @@ impl FromS3Request for CreateBucketInput {
         bucket: Option<&str>,
         _key: Option<&str>,
         _query_params: &[(String, String)],
-        _body: Bytes,
+        body: Bytes,
     ) -> Result<Self, S3Error> {
         Ok(Self {
             acl: header_enum(parts, "x-amz-acl"),
             bucket: require_bucket(bucket)?,
-            // XML body for CreateBucketConfiguration is optional; skip for now
-            // until ruststack-s3-xml has full deserialization support.
-            create_bucket_configuration: None,
+            create_bucket_configuration: if body.is_empty() {
+                None
+            } else {
+                Some(parse_xml_body::<CreateBucketConfiguration>(&body)?)
+            },
             grant_full_control: header_str(parts, "x-amz-grant-full-control"),
             grant_read: header_str(parts, "x-amz-grant-read"),
             grant_read_acp: header_str(parts, "x-amz-grant-read-acp"),
@@ -703,14 +718,13 @@ impl FromS3Request for DeleteObjectsInput {
         bucket: Option<&str>,
         _key: Option<&str>,
         _query_params: &[(String, String)],
-        _body: Bytes,
+        body: Bytes,
     ) -> Result<Self, S3Error> {
-        // XML body (Delete) deserialization deferred to ruststack-s3-xml.
         Ok(Self {
             bucket: require_bucket(bucket)?,
             bypass_governance_retention: header_bool(parts, "x-amz-bypass-governance-retention"),
             checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
-            delete: Delete::default(),
+            delete: parse_xml_body::<Delete>(&body)?,
             expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
             mfa: header_str(parts, "x-amz-mfa"),
             request_payer: header_enum(parts, "x-amz-request-payer"),
@@ -986,7 +1000,7 @@ impl FromS3Request for CompleteMultipartUploadInput {
         bucket: Option<&str>,
         key: Option<&str>,
         query_params: &[(String, String)],
-        _body: Bytes,
+        body: Bytes,
     ) -> Result<Self, S3Error> {
         let upload_id = query_param(query_params, "uploadId").ok_or_else(|| {
             S3Error::with_message(
@@ -995,7 +1009,6 @@ impl FromS3Request for CompleteMultipartUploadInput {
             )
         })?;
 
-        // XML body (CompletedMultipartUpload) deserialization deferred to ruststack-s3-xml.
         Ok(Self {
             bucket: require_bucket(bucket)?,
             checksum_crc32: header_str(parts, "x-amz-checksum-crc32"),
@@ -1009,7 +1022,11 @@ impl FromS3Request for CompleteMultipartUploadInput {
             if_none_match: header_str(parts, "If-None-Match"),
             key: require_key(key)?,
             mpu_object_size: header_parse(parts, "x-amz-mp-object-size"),
-            multipart_upload: None,
+            multipart_upload: if body.is_empty() {
+                None
+            } else {
+                Some(parse_xml_body::<CompletedMultipartUpload>(&body)?)
+            },
             request_payer: header_enum(parts, "x-amz-request-payer"),
             sse_customer_algorithm: header_str(
                 parts,
@@ -1112,45 +1129,287 @@ impl FromS3Request for ListMultipartUploadsInput {
 }
 
 // --- Config PUT operations (bucket config with XML body) ---
-// These all require XML body deserialization from ruststack-s3-xml.
-// For now, we extract headers and set the body payload to default.
 
-macro_rules! impl_bucket_config_put_input {
-    ($ty:ty) => {
-        impl FromS3Request for $ty {
-            fn from_s3_request(
-                parts: &http::request::Parts,
-                bucket: Option<&str>,
-                _key: Option<&str>,
-                _query_params: &[(String, String)],
-                _body: Bytes,
-            ) -> Result<Self, S3Error> {
-                Ok(Self {
-                    bucket: require_bucket(bucket)?,
-                    expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
-                    ..Self::default()
-                })
-            }
-        }
-    };
+impl FromS3Request for PutBucketAccelerateConfigurationInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            accelerate_configuration: parse_xml_body::<AccelerateConfiguration>(&body)?,
+            bucket: require_bucket(bucket)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+        })
+    }
 }
 
-impl_bucket_config_put_input!(PutBucketAccelerateConfigurationInput);
-impl_bucket_config_put_input!(PutBucketCorsInput);
-impl_bucket_config_put_input!(PutBucketEncryptionInput);
-impl_bucket_config_put_input!(PutBucketLifecycleConfigurationInput);
-impl_bucket_config_put_input!(PutBucketLoggingInput);
-impl_bucket_config_put_input!(PutBucketNotificationConfigurationInput);
-impl_bucket_config_put_input!(PutBucketOwnershipControlsInput);
-impl_bucket_config_put_input!(PutBucketPolicyInput);
-impl_bucket_config_put_input!(PutBucketRequestPaymentInput);
-impl_bucket_config_put_input!(PutBucketTaggingInput);
-impl_bucket_config_put_input!(PutBucketVersioningInput);
-impl_bucket_config_put_input!(PutBucketWebsiteInput);
-impl_bucket_config_put_input!(PutPublicAccessBlockInput);
+impl FromS3Request for PutBucketCorsInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            bucket: require_bucket(bucket)?,
+            cors_configuration: parse_xml_body::<CORSConfiguration>(&body)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            content_md5: header_str(parts, "Content-MD5"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+        })
+    }
+}
+
+impl FromS3Request for PutBucketEncryptionInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            bucket: require_bucket(bucket)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            content_md5: header_str(parts, "Content-MD5"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+            server_side_encryption_configuration: parse_xml_body::<
+                ServerSideEncryptionConfiguration,
+            >(&body)?,
+        })
+    }
+}
+
+impl FromS3Request for PutBucketLifecycleConfigurationInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            bucket: require_bucket(bucket)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+            lifecycle_configuration: if body.is_empty() {
+                None
+            } else {
+                Some(parse_xml_body::<BucketLifecycleConfiguration>(&body)?)
+            },
+            transition_default_minimum_object_size: header_enum(
+                parts,
+                "x-amz-transition-default-minimum-object-size",
+            ),
+        })
+    }
+}
+
+impl FromS3Request for PutBucketLoggingInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            bucket: require_bucket(bucket)?,
+            bucket_logging_status: parse_xml_body::<BucketLoggingStatus>(&body)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            content_md5: header_str(parts, "Content-MD5"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+        })
+    }
+}
+
+impl FromS3Request for PutBucketNotificationConfigurationInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            bucket: require_bucket(bucket)?,
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+            notification_configuration: parse_xml_body::<NotificationConfiguration>(&body)?,
+            skip_destination_validation: header_bool(parts, "x-amz-skip-destination-validation"),
+        })
+    }
+}
+
+impl FromS3Request for PutBucketOwnershipControlsInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            bucket: require_bucket(bucket)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            content_md5: header_str(parts, "Content-MD5"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+            ownership_controls: parse_xml_body::<OwnershipControls>(&body)?,
+        })
+    }
+}
+
+impl FromS3Request for PutBucketPolicyInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        let policy = String::from_utf8(body.to_vec()).map_err(|e| {
+            S3Error::malformed_xml(format!("Failed to parse policy body as UTF-8: {e}"))
+        })?;
+        Ok(Self {
+            bucket: require_bucket(bucket)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            confirm_remove_self_bucket_access: header_bool(
+                parts,
+                "x-amz-confirm-remove-self-bucket-access",
+            ),
+            content_md5: header_str(parts, "Content-MD5"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+            policy,
+        })
+    }
+}
+
+impl FromS3Request for PutBucketRequestPaymentInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            bucket: require_bucket(bucket)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            content_md5: header_str(parts, "Content-MD5"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+            request_payment_configuration: parse_xml_body::<RequestPaymentConfiguration>(&body)?,
+        })
+    }
+}
+
+impl FromS3Request for PutBucketTaggingInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            bucket: require_bucket(bucket)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            content_md5: header_str(parts, "Content-MD5"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+            tagging: parse_xml_body::<Tagging>(&body)?,
+        })
+    }
+}
+
+impl FromS3Request for PutBucketVersioningInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            bucket: require_bucket(bucket)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            content_md5: header_str(parts, "Content-MD5"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+            mfa: header_str(parts, "x-amz-mfa"),
+            versioning_configuration: parse_xml_body::<VersioningConfiguration>(&body)?,
+        })
+    }
+}
+
+impl FromS3Request for PutBucketWebsiteInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            bucket: require_bucket(bucket)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            content_md5: header_str(parts, "Content-MD5"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+            website_configuration: parse_xml_body::<WebsiteConfiguration>(&body)?,
+        })
+    }
+}
+
+impl FromS3Request for PutPublicAccessBlockInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            bucket: require_bucket(bucket)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            content_md5: header_str(parts, "Content-MD5"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+            public_access_block_configuration: parse_xml_body::<PublicAccessBlockConfiguration>(
+                &body,
+            )?,
+        })
+    }
+}
 
 // --- ACL PUT operations ---
-impl_bucket_config_put_input!(PutBucketAclInput);
+
+impl FromS3Request for PutBucketAclInput {
+    fn from_s3_request(
+        parts: &http::request::Parts,
+        bucket: Option<&str>,
+        _key: Option<&str>,
+        _query_params: &[(String, String)],
+        body: Bytes,
+    ) -> Result<Self, S3Error> {
+        Ok(Self {
+            acl: header_enum(parts, "x-amz-acl"),
+            access_control_policy: if body.is_empty() {
+                None
+            } else {
+                Some(parse_xml_body::<AccessControlPolicy>(&body)?)
+            },
+            bucket: require_bucket(bucket)?,
+            checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
+            content_md5: header_str(parts, "Content-MD5"),
+            expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
+            grant_full_control: header_str(parts, "x-amz-grant-full-control"),
+            grant_read: header_str(parts, "x-amz-grant-read"),
+            grant_read_acp: header_str(parts, "x-amz-grant-read-acp"),
+            grant_write: header_str(parts, "x-amz-grant-write"),
+            grant_write_acp: header_str(parts, "x-amz-grant-write-acp"),
+        })
+    }
+}
 
 impl FromS3Request for PutObjectAclInput {
     fn from_s3_request(
@@ -1158,11 +1417,15 @@ impl FromS3Request for PutObjectAclInput {
         bucket: Option<&str>,
         key: Option<&str>,
         query_params: &[(String, String)],
-        _body: Bytes,
+        body: Bytes,
     ) -> Result<Self, S3Error> {
         Ok(Self {
             acl: header_enum(parts, "x-amz-acl"),
-            access_control_policy: None,
+            access_control_policy: if body.is_empty() {
+                None
+            } else {
+                Some(parse_xml_body::<AccessControlPolicy>(&body)?)
+            },
             bucket: require_bucket(bucket)?,
             checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
             content_md5: header_str(parts, "Content-MD5"),
@@ -1185,9 +1448,8 @@ impl FromS3Request for PutObjectTaggingInput {
         bucket: Option<&str>,
         key: Option<&str>,
         query_params: &[(String, String)],
-        _body: Bytes,
+        body: Bytes,
     ) -> Result<Self, S3Error> {
-        // XML body (Tagging) deserialization deferred to ruststack-s3-xml.
         Ok(Self {
             bucket: require_bucket(bucket)?,
             checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
@@ -1195,7 +1457,7 @@ impl FromS3Request for PutObjectTaggingInput {
             expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
             key: require_key(key)?,
             request_payer: header_enum(parts, "x-amz-request-payer"),
-            tagging: Tagging::default(),
+            tagging: parse_xml_body::<Tagging>(&body)?,
             version_id: query_param(query_params, "versionId"),
         })
     }
@@ -1207,7 +1469,7 @@ impl FromS3Request for PutObjectLegalHoldInput {
         bucket: Option<&str>,
         key: Option<&str>,
         query_params: &[(String, String)],
-        _body: Bytes,
+        body: Bytes,
     ) -> Result<Self, S3Error> {
         Ok(Self {
             bucket: require_bucket(bucket)?,
@@ -1215,7 +1477,11 @@ impl FromS3Request for PutObjectLegalHoldInput {
             content_md5: header_str(parts, "Content-MD5"),
             expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
             key: require_key(key)?,
-            legal_hold: None,
+            legal_hold: if body.is_empty() {
+                None
+            } else {
+                Some(parse_xml_body::<ObjectLockLegalHold>(&body)?)
+            },
             request_payer: header_enum(parts, "x-amz-request-payer"),
             version_id: query_param(query_params, "versionId"),
         })
@@ -1228,14 +1494,18 @@ impl FromS3Request for PutObjectLockConfigurationInput {
         bucket: Option<&str>,
         _key: Option<&str>,
         _query_params: &[(String, String)],
-        _body: Bytes,
+        body: Bytes,
     ) -> Result<Self, S3Error> {
         Ok(Self {
             bucket: require_bucket(bucket)?,
             checksum_algorithm: header_enum(parts, "x-amz-sdk-checksum-algorithm"),
             content_md5: header_str(parts, "Content-MD5"),
             expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
-            object_lock_configuration: None,
+            object_lock_configuration: if body.is_empty() {
+                None
+            } else {
+                Some(parse_xml_body::<ObjectLockConfiguration>(&body)?)
+            },
             request_payer: header_enum(parts, "x-amz-request-payer"),
             token: header_str(parts, "x-amz-bucket-object-lock-token"),
         })
@@ -1248,7 +1518,7 @@ impl FromS3Request for PutObjectRetentionInput {
         bucket: Option<&str>,
         key: Option<&str>,
         query_params: &[(String, String)],
-        _body: Bytes,
+        body: Bytes,
     ) -> Result<Self, S3Error> {
         Ok(Self {
             bucket: require_bucket(bucket)?,
@@ -1258,7 +1528,11 @@ impl FromS3Request for PutObjectRetentionInput {
             expected_bucket_owner: header_str(parts, "x-amz-expected-bucket-owner"),
             key: require_key(key)?,
             request_payer: header_enum(parts, "x-amz-request-payer"),
-            retention: None,
+            retention: if body.is_empty() {
+                None
+            } else {
+                Some(parse_xml_body::<ObjectLockRetention>(&body)?)
+            },
             version_id: query_param(query_params, "versionId"),
         })
     }

@@ -208,14 +208,27 @@ impl_as_str!(
 // S3Serialize implementations for shared types
 // ---------------------------------------------------------------------------
 
+use ruststack_s3_model::output::{
+    CompleteMultipartUploadOutput, CopyObjectOutput, CreateMultipartUploadOutput,
+    DeleteObjectsOutput, GetBucketAccelerateConfigurationOutput, GetBucketAclOutput,
+    GetBucketCorsOutput, GetBucketEncryptionOutput, GetBucketLifecycleConfigurationOutput,
+    GetBucketLoggingOutput, GetBucketNotificationConfigurationOutput,
+    GetBucketOwnershipControlsOutput, GetBucketPolicyStatusOutput, GetBucketRequestPaymentOutput,
+    GetBucketTaggingOutput, GetBucketVersioningOutput, GetBucketWebsiteOutput, GetObjectAclOutput,
+    GetObjectAttributesOutput, GetObjectLegalHoldOutput, GetObjectLockConfigurationOutput,
+    GetObjectRetentionOutput, GetObjectTaggingOutput, GetPublicAccessBlockOutput,
+    ListBucketsOutput, ListMultipartUploadsOutput, ListObjectVersionsOutput, ListObjectsOutput,
+    ListObjectsV2Output, ListPartsOutput, UploadPartCopyOutput,
+};
 use ruststack_s3_model::types::{
     AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, Bucket,
     BucketInfo, BucketLifecycleConfiguration, BucketLoggingStatus, CORSConfiguration, CORSRule,
     Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, Condition, CopyObjectResult,
-    CreateBucketConfiguration, DefaultRetention, Delete, DeleteMarkerEntry, DeletedObject, Error,
-    ErrorDocument, EventBridgeConfiguration, FilterRule, GetObjectAttributesParts, Grant, Grantee,
-    IndexDocument, Initiator, LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule,
-    LifecycleRuleAndOperator, LifecycleRuleFilter, LocationInfo, LoggingEnabled, MultipartUpload,
+    CopyPartResult, CreateBucketConfiguration, DefaultRetention, Delete, DeleteMarkerEntry,
+    DeletedObject, Error, ErrorDocument, EventBridgeConfiguration, FilterRule,
+    GetObjectAttributesParts, Grant, Grantee, IndexDocument, Initiator,
+    LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator,
+    LifecycleRuleFilter, LocationInfo, LoggingEnabled, MultipartUpload,
     NoncurrentVersionExpiration, NoncurrentVersionTransition, NotificationConfiguration,
     NotificationConfigurationFilter, Object, ObjectIdentifier, ObjectLockConfiguration,
     ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, Owner,
@@ -1287,6 +1300,465 @@ impl S3Serialize for GetObjectAttributesParts {
                 }
                 Ok(())
             })?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// S3Serialize implementations for output types
+// ---------------------------------------------------------------------------
+
+impl S3Serialize for ListBucketsOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref owner) = self.owner {
+            owner.serialize_xml(writer)?;
+        }
+        writer.create_element("Buckets").write_inner_content(|w| {
+            for bucket in &self.buckets {
+                bucket.serialize_xml(w)?;
+            }
+            Ok(())
+        })?;
+        write_optional_text(
+            writer,
+            "ContinuationToken",
+            self.continuation_token.as_deref(),
+        )?;
+        write_optional_text(writer, "Prefix", self.prefix.as_deref())?;
+        Ok(())
+    }
+}
+
+impl S3Serialize for ListObjectsOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        write_optional_text(writer, "Name", self.name.as_deref())?;
+        write_optional_text(writer, "Prefix", self.prefix.as_deref())?;
+        write_optional_text(writer, "Marker", self.marker.as_deref())?;
+        write_optional_i32(writer, "MaxKeys", self.max_keys)?;
+        write_optional_text(writer, "Delimiter", self.delimiter.as_deref())?;
+        write_optional_bool(writer, "IsTruncated", self.is_truncated)?;
+        write_optional_enum(writer, "EncodingType", self.encoding_type.as_ref())?;
+        write_optional_text(writer, "NextMarker", self.next_marker.as_deref())?;
+        for obj in &self.contents {
+            obj.serialize_xml(writer)?;
+        }
+        for cp in &self.common_prefixes {
+            cp.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for ListObjectsV2Output {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        write_optional_text(writer, "Name", self.name.as_deref())?;
+        write_optional_text(writer, "Prefix", self.prefix.as_deref())?;
+        write_optional_i32(writer, "KeyCount", self.key_count)?;
+        write_optional_i32(writer, "MaxKeys", self.max_keys)?;
+        write_optional_text(writer, "Delimiter", self.delimiter.as_deref())?;
+        write_optional_bool(writer, "IsTruncated", self.is_truncated)?;
+        write_optional_text(
+            writer,
+            "ContinuationToken",
+            self.continuation_token.as_deref(),
+        )?;
+        write_optional_text(
+            writer,
+            "NextContinuationToken",
+            self.next_continuation_token.as_deref(),
+        )?;
+        write_optional_text(writer, "StartAfter", self.start_after.as_deref())?;
+        write_optional_enum(writer, "EncodingType", self.encoding_type.as_ref())?;
+        for obj in &self.contents {
+            obj.serialize_xml(writer)?;
+        }
+        for cp in &self.common_prefixes {
+            cp.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for ListObjectVersionsOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        write_optional_text(writer, "Name", self.name.as_deref())?;
+        write_optional_text(writer, "Prefix", self.prefix.as_deref())?;
+        write_optional_text(writer, "KeyMarker", self.key_marker.as_deref())?;
+        write_optional_text(writer, "VersionIdMarker", self.version_id_marker.as_deref())?;
+        write_optional_text(writer, "NextKeyMarker", self.next_key_marker.as_deref())?;
+        write_optional_text(
+            writer,
+            "NextVersionIdMarker",
+            self.next_version_id_marker.as_deref(),
+        )?;
+        write_optional_i32(writer, "MaxKeys", self.max_keys)?;
+        write_optional_text(writer, "Delimiter", self.delimiter.as_deref())?;
+        write_optional_bool(writer, "IsTruncated", self.is_truncated)?;
+        write_optional_enum(writer, "EncodingType", self.encoding_type.as_ref())?;
+        for version in &self.versions {
+            version.serialize_xml(writer)?;
+        }
+        for dm in &self.delete_markers {
+            dm.serialize_xml(writer)?;
+        }
+        for cp in &self.common_prefixes {
+            cp.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for ListPartsOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        write_optional_text(writer, "Bucket", self.bucket.as_deref())?;
+        write_optional_text(writer, "Key", self.key.as_deref())?;
+        write_optional_text(writer, "UploadId", self.upload_id.as_deref())?;
+        write_optional_text(
+            writer,
+            "PartNumberMarker",
+            self.part_number_marker.as_deref(),
+        )?;
+        write_optional_text(
+            writer,
+            "NextPartNumberMarker",
+            self.next_part_number_marker.as_deref(),
+        )?;
+        write_optional_i32(writer, "MaxParts", self.max_parts)?;
+        write_optional_bool(writer, "IsTruncated", self.is_truncated)?;
+        if let Some(ref initiator) = self.initiator {
+            initiator.serialize_xml(writer)?;
+        }
+        if let Some(ref owner) = self.owner {
+            owner.serialize_xml(writer)?;
+        }
+        write_optional_enum(writer, "StorageClass", self.storage_class.as_ref())?;
+        write_optional_enum(
+            writer,
+            "ChecksumAlgorithm",
+            self.checksum_algorithm.as_ref(),
+        )?;
+        write_optional_enum(writer, "ChecksumType", self.checksum_type.as_ref())?;
+        for part in &self.parts {
+            part.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for ListMultipartUploadsOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        write_optional_text(writer, "Bucket", self.bucket.as_deref())?;
+        write_optional_text(writer, "KeyMarker", self.key_marker.as_deref())?;
+        write_optional_text(writer, "UploadIdMarker", self.upload_id_marker.as_deref())?;
+        write_optional_text(writer, "NextKeyMarker", self.next_key_marker.as_deref())?;
+        write_optional_text(
+            writer,
+            "NextUploadIdMarker",
+            self.next_upload_id_marker.as_deref(),
+        )?;
+        write_optional_i32(writer, "MaxUploads", self.max_uploads)?;
+        write_optional_text(writer, "Delimiter", self.delimiter.as_deref())?;
+        write_optional_text(writer, "Prefix", self.prefix.as_deref())?;
+        write_optional_bool(writer, "IsTruncated", self.is_truncated)?;
+        write_optional_enum(writer, "EncodingType", self.encoding_type.as_ref())?;
+        for upload in &self.uploads {
+            upload.serialize_xml(writer)?;
+        }
+        for cp in &self.common_prefixes {
+            cp.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for DeleteObjectsOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        for deleted in &self.deleted {
+            deleted.serialize_xml(writer)?;
+        }
+        for error in &self.errors {
+            error.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketVersioningOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        write_optional_enum(writer, "Status", self.status.as_ref())?;
+        write_optional_enum(writer, "MfaDelete", self.mfa_delete.as_ref())?;
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketCorsOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        for rule in &self.cors_rules {
+            rule.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketAclOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref owner) = self.owner {
+            owner.serialize_xml(writer)?;
+        }
+        writer
+            .create_element("AccessControlList")
+            .write_inner_content(|w| {
+                for grant in &self.grants {
+                    grant.serialize_xml(w)?;
+                }
+                Ok(())
+            })?;
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketEncryptionOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref config) = self.server_side_encryption_configuration {
+            config.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketLoggingOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref le) = self.logging_enabled {
+            le.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketNotificationConfigurationOutput {
+    fn serialize_xml<W: Write>(&self, _writer: &mut Writer<W>) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketOwnershipControlsOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref controls) = self.ownership_controls {
+            controls.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketPolicyStatusOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref status) = self.policy_status {
+            status.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketRequestPaymentOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        write_optional_enum(writer, "Payer", self.payer.as_ref())?;
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketTaggingOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        writer.create_element("TagSet").write_inner_content(|w| {
+            for tag in &self.tag_set {
+                tag.serialize_xml(w)?;
+            }
+            Ok(())
+        })?;
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketWebsiteOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref rart) = self.redirect_all_requests_to {
+            rart.serialize_xml(writer)?;
+        }
+        if let Some(ref idx) = self.index_document {
+            idx.serialize_xml(writer)?;
+        }
+        if let Some(ref err) = self.error_document {
+            err.serialize_xml(writer)?;
+        }
+        if !self.routing_rules.is_empty() {
+            writer
+                .create_element("RoutingRules")
+                .write_inner_content(|w| {
+                    for rule in &self.routing_rules {
+                        rule.serialize_xml(w)?;
+                    }
+                    Ok(())
+                })?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketLifecycleConfigurationOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        for rule in &self.rules {
+            rule.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetBucketAccelerateConfigurationOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        write_optional_enum(writer, "Status", self.status.as_ref())?;
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetObjectAclOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref owner) = self.owner {
+            owner.serialize_xml(writer)?;
+        }
+        writer
+            .create_element("AccessControlList")
+            .write_inner_content(|w| {
+                for grant in &self.grants {
+                    grant.serialize_xml(w)?;
+                }
+                Ok(())
+            })?;
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetObjectLegalHoldOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref hold) = self.legal_hold {
+            hold.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetObjectLockConfigurationOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref config) = self.object_lock_configuration {
+            config.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetObjectRetentionOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref retention) = self.retention {
+            retention.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetPublicAccessBlockOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref config) = self.public_access_block_configuration {
+            config.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetObjectTaggingOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        writer.create_element("TagSet").write_inner_content(|w| {
+            for tag in &self.tag_set {
+                tag.serialize_xml(w)?;
+            }
+            Ok(())
+        })?;
+        Ok(())
+    }
+}
+
+impl S3Serialize for GetObjectAttributesOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        write_optional_text(writer, "ETag", self.e_tag.as_deref())?;
+        write_optional_i64(writer, "ObjectSize", self.object_size)?;
+        write_optional_enum(writer, "StorageClass", self.storage_class.as_ref())?;
+        if let Some(ref checksum) = self.checksum {
+            checksum.serialize_xml(writer)?;
+        }
+        if let Some(ref parts) = self.object_parts {
+            parts.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for CopyObjectOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref result) = self.copy_object_result {
+            result.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for CreateMultipartUploadOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        write_optional_text(writer, "Bucket", self.bucket.as_deref())?;
+        write_optional_text(writer, "Key", self.key.as_deref())?;
+        write_optional_text(writer, "UploadId", self.upload_id.as_deref())?;
+        Ok(())
+    }
+}
+
+impl S3Serialize for CompleteMultipartUploadOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        write_optional_text(writer, "Location", self.location.as_deref())?;
+        write_optional_text(writer, "Bucket", self.bucket.as_deref())?;
+        write_optional_text(writer, "Key", self.key.as_deref())?;
+        write_optional_text(writer, "ETag", self.e_tag.as_deref())?;
+        write_optional_text(writer, "ChecksumCRC32", self.checksum_crc32.as_deref())?;
+        write_optional_text(writer, "ChecksumCRC32C", self.checksum_crc32c.as_deref())?;
+        write_optional_text(
+            writer,
+            "ChecksumCRC64NVME",
+            self.checksum_crc64nvme.as_deref(),
+        )?;
+        write_optional_text(writer, "ChecksumSHA1", self.checksum_sha1.as_deref())?;
+        write_optional_text(writer, "ChecksumSHA256", self.checksum_sha256.as_deref())?;
+        write_optional_enum(writer, "ChecksumType", self.checksum_type.as_ref())?;
+        Ok(())
+    }
+}
+
+impl S3Serialize for UploadPartCopyOutput {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref result) = self.copy_part_result {
+            result.serialize_xml(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl S3Serialize for CopyPartResult {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        write_optional_text(writer, "ETag", self.e_tag.as_deref())?;
+        write_optional_timestamp(writer, "LastModified", self.last_modified.as_ref())?;
+        write_optional_text(writer, "ChecksumCRC32", self.checksum_crc32.as_deref())?;
+        write_optional_text(writer, "ChecksumCRC32C", self.checksum_crc32c.as_deref())?;
+        write_optional_text(
+            writer,
+            "ChecksumCRC64NVME",
+            self.checksum_crc64nvme.as_deref(),
+        )?;
+        write_optional_text(writer, "ChecksumSHA1", self.checksum_sha1.as_deref())?;
+        write_optional_text(writer, "ChecksumSHA256", self.checksum_sha256.as_deref())?;
         Ok(())
     }
 }
