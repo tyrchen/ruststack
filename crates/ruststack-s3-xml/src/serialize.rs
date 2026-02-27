@@ -1536,7 +1536,10 @@ impl S3Serialize for GetBucketLoggingOutput {
 }
 
 impl S3Serialize for GetBucketNotificationConfigurationOutput {
-    fn serialize_xml<W: Write>(&self, _writer: &mut Writer<W>) -> io::Result<()> {
+    fn serialize_xml<W: Write>(&self, writer: &mut Writer<W>) -> io::Result<()> {
+        if let Some(ref config) = self.notification_configuration {
+            config.serialize_xml(writer)?;
+        }
         Ok(())
     }
 }

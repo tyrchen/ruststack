@@ -507,12 +507,16 @@ impl RustStackS3 {
     ) -> Result<GetBucketNotificationConfigurationOutput, S3Error> {
         let bucket_name = input.bucket;
 
-        let _bucket = self
+        let bucket = self
             .state
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
 
-        Ok(GetBucketNotificationConfigurationOutput::default())
+        let notification_configuration = bucket.notification_configuration.read().clone();
+
+        Ok(GetBucketNotificationConfigurationOutput {
+            notification_configuration,
+        })
     }
 
     /// Set notification configuration for a bucket.
@@ -527,8 +531,7 @@ impl RustStackS3 {
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
 
-        *bucket.notification_configuration.write() =
-            Some(serde_json::json!({"status": "configured"}));
+        *bucket.notification_configuration.write() = Some(input.notification_configuration);
 
         debug!(bucket = %bucket_name, "put_bucket_notification_configuration completed");
         Ok(())

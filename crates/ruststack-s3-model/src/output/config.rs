@@ -3,10 +3,10 @@
 use crate::types::{
     BucketAccelerateStatus, BucketVersioningStatus, CORSRule, Checksum, ErrorDocument,
     GetObjectAttributesParts, Grant, IndexDocument, LifecycleRule, LoggingEnabled, MFADeleteStatus,
-    ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention, Owner, OwnershipControls,
-    Payer, PolicyStatus, PublicAccessBlockConfiguration, RedirectAllRequestsTo, RequestCharged,
-    RoutingRule, ServerSideEncryptionConfiguration, StorageClass, Tag,
-    TransitionDefaultMinimumObjectSize,
+    NotificationConfiguration, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention,
+    Owner, OwnershipControls, Payer, PolicyStatus, PublicAccessBlockConfiguration,
+    RedirectAllRequestsTo, RequestCharged, RoutingRule, ServerSideEncryptionConfiguration,
+    StorageClass, Tag, TransitionDefaultMinimumObjectSize,
 };
 
 /// S3 DeleteObjectTaggingOutput.
@@ -64,7 +64,8 @@ pub struct GetBucketLoggingOutput {
 /// the `NotificationConfiguration` structure from the AWS S3 model.
 #[derive(Debug, Clone, Default)]
 pub struct GetBucketNotificationConfigurationOutput {
-    // Notification configuration fields are opaque for now.
+    /// The notification configuration for the bucket.
+    pub notification_configuration: Option<NotificationConfiguration>,
 }
 
 /// S3 GetBucketOwnershipControlsOutput.

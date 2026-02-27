@@ -28,7 +28,9 @@ use crate::provider::RustStackS3;
 use crate::state::object::{
     CannedAcl, ChecksumData, ObjectMetadata, Owner as InternalOwner, S3Object,
 };
-use crate::utils::{is_valid_if_match, is_valid_if_none_match, parse_range_header};
+use crate::utils::{
+    is_valid_if_match, is_valid_if_none_match, parse_copy_source, parse_range_header,
+};
 use crate::validation::{validate_metadata, validate_object_key};
 
 // AWS S3 DTOs use signed integers (i32/i64) for inherently non-negative values
@@ -489,7 +491,8 @@ impl RustStackS3 {
 
         validate_object_key(&dst_key).map_err(S3ServiceError::into_s3_error)?;
 
-        let (src_bucket, src_key, src_version_id) = parse_copy_source(&input.copy_source)?;
+        let (src_bucket, src_key, src_version_id) =
+            parse_copy_source(&input.copy_source).map_err(S3ServiceError::into_s3_error)?;
 
         // Look up source object to get its metadata.
         // Keep this entire block synchronous -- no awaits while the lock is held.
@@ -622,51 +625,6 @@ impl RustStackS3 {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Parse the `x-amz-copy-source` header value into bucket, key, and optional
-/// version ID components.
-///
-/// The copy source header uses the format `/bucket/key` or `bucket/key`, with
-/// an optional `?versionId=<vid>` suffix.
-///
-/// # Errors
-///
-/// Returns [`S3Error`] with `InvalidArgument` code if the copy source string
-/// is empty or malformed.
-fn parse_copy_source(source: &str) -> Result<(String, String, Option<String>), S3Error> {
-    // Strip leading slash if present.
-    let source = source.strip_prefix('/').unwrap_or(source);
-
-    // Split off the versionId query parameter if present.
-    let (path, version_id) = if let Some((p, query)) = source.split_once('?') {
-        let vid = query
-            .split('&')
-            .find_map(|param| param.strip_prefix("versionId="))
-            .map(String::from);
-        (p, vid)
-    } else {
-        (source, None)
-    };
-
-    // Split into bucket and key at the first '/'.
-    let (bucket, key) = path.split_once('/').ok_or_else(|| {
-        S3Error::invalid_argument("Invalid copy source: must be in the format bucket/key")
-    })?;
-
-    if bucket.is_empty() || key.is_empty() {
-        return Err(S3Error::invalid_argument(
-            "Invalid copy source: bucket and key must not be empty",
-        ));
-    }
-
-    // URL-decode the key (copy source keys may be percent-encoded).
-    let decoded_key = percent_encoding::percent_decode_str(key)
-        .decode_utf8()
-        .map_err(|_| S3Error::invalid_argument("Invalid copy source: key contains invalid UTF-8"))?
-        .into_owned();
-
-    Ok((bucket.to_owned(), decoded_key, version_id))
-}
 
 /// Helper trait to get an owned string from a [`StorageClass`] reference.
 ///

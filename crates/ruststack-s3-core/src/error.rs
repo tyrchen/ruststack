@@ -303,36 +303,34 @@ fn error_code(err: &S3ServiceError) -> S3ErrorCode {
         S3ServiceError::MethodNotAllowed => S3ErrorCode::MethodNotAllowed,
         S3ServiceError::NotImplemented => S3ErrorCode::NotImplemented,
         S3ServiceError::PreconditionFailed => S3ErrorCode::PreconditionFailed,
-        S3ServiceError::ConditionalRequestConflict => {
-            S3ErrorCode::Custom("ConditionalRequestConflict")
-        }
-        S3ServiceError::NotModified => S3ErrorCode::Custom("NotModified"),
+        S3ServiceError::ConditionalRequestConflict => S3ErrorCode::ConditionalRequestConflict,
+        S3ServiceError::NotModified => S3ErrorCode::NotModified,
         S3ServiceError::InvalidObjectState => S3ErrorCode::InvalidObjectState,
         S3ServiceError::ObjectNotInActiveTierError => S3ErrorCode::ObjectNotInActiveTierError,
         S3ServiceError::InvalidDigest => S3ErrorCode::InvalidDigest,
-        S3ServiceError::BadDigest => S3ErrorCode::Custom("BadDigest"),
+        S3ServiceError::BadDigest => S3ErrorCode::BadDigest,
         S3ServiceError::MissingContentLength => S3ErrorCode::MissingContentLength,
         S3ServiceError::KeyTooLong => S3ErrorCode::KeyTooLongError,
-        S3ServiceError::MaxMessageLengthExceeded => S3ErrorCode::Custom("MaxMessageLengthExceeded"),
+        S3ServiceError::MaxMessageLengthExceeded => S3ErrorCode::MaxMessageLengthExceeded,
         S3ServiceError::NoSuchCorsConfiguration => S3ErrorCode::NoSuchCORSConfiguration,
         S3ServiceError::NoSuchTagSet => S3ErrorCode::NoSuchTagSet,
         S3ServiceError::NoSuchLifecycleConfiguration => S3ErrorCode::NoSuchLifecycleConfiguration,
         S3ServiceError::NoSuchBucketPolicy => S3ErrorCode::NoSuchBucketPolicy,
         S3ServiceError::NoSuchWebsiteConfiguration => S3ErrorCode::NoSuchWebsiteConfiguration,
         S3ServiceError::NoSuchPublicAccessBlockConfiguration => {
-            S3ErrorCode::Custom("NoSuchPublicAccessBlockConfiguration")
+            S3ErrorCode::NoSuchPublicAccessBlockConfiguration
         }
         S3ServiceError::ServerSideEncryptionConfigurationNotFoundError => {
-            S3ErrorCode::Custom("ServerSideEncryptionConfigurationNotFoundError")
+            S3ErrorCode::ServerSideEncryptionConfigurationNotFoundError
         }
         S3ServiceError::ObjectLockConfigurationNotFoundError => {
-            S3ErrorCode::Custom("NoSuchObjectLockConfiguration")
+            S3ErrorCode::NoSuchObjectLockConfiguration
         }
         S3ServiceError::OwnershipControlsNotFoundError => {
-            S3ErrorCode::Custom("OwnershipControlsNotFoundError")
+            S3ErrorCode::OwnershipControlsNotFoundError
         }
         S3ServiceError::ReplicationConfigurationNotFoundError => {
-            S3ErrorCode::Custom("ReplicationConfigurationNotFoundError")
+            S3ErrorCode::ReplicationConfigurationNotFoundError
         }
         S3ServiceError::Internal(_) => S3ErrorCode::InternalError,
     }
@@ -465,11 +463,63 @@ mod tests {
                 S3ServiceError::NoSuchWebsiteConfiguration,
                 S3ErrorCode::NoSuchWebsiteConfiguration,
             ),
+            (
+                S3ServiceError::NoSuchPublicAccessBlockConfiguration,
+                S3ErrorCode::NoSuchPublicAccessBlockConfiguration,
+            ),
+            (
+                S3ServiceError::ObjectLockConfigurationNotFoundError,
+                S3ErrorCode::NoSuchObjectLockConfiguration,
+            ),
+            (
+                S3ServiceError::OwnershipControlsNotFoundError,
+                S3ErrorCode::OwnershipControlsNotFoundError,
+            ),
+            (
+                S3ServiceError::ReplicationConfigurationNotFoundError,
+                S3ErrorCode::ReplicationConfigurationNotFoundError,
+            ),
+            (
+                S3ServiceError::ServerSideEncryptionConfigurationNotFoundError,
+                S3ErrorCode::ServerSideEncryptionConfigurationNotFoundError,
+            ),
         ];
 
         for (err, expected_code) in cases {
             let s3_err: S3Error = err.into();
             assert_eq!(s3_err.code, expected_code);
         }
+    }
+
+    #[test]
+    fn test_should_convert_not_modified_to_304() {
+        let err = S3ServiceError::NotModified;
+        let s3_err: S3Error = err.into();
+        assert_eq!(s3_err.code, S3ErrorCode::NotModified);
+        assert_eq!(s3_err.status_code, http::StatusCode::NOT_MODIFIED);
+    }
+
+    #[test]
+    fn test_should_convert_conditional_request_conflict_to_409() {
+        let err = S3ServiceError::ConditionalRequestConflict;
+        let s3_err: S3Error = err.into();
+        assert_eq!(s3_err.code, S3ErrorCode::ConditionalRequestConflict);
+        assert_eq!(s3_err.status_code, http::StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn test_should_convert_bad_digest_to_400() {
+        let err = S3ServiceError::BadDigest;
+        let s3_err: S3Error = err.into();
+        assert_eq!(s3_err.code, S3ErrorCode::BadDigest);
+        assert_eq!(s3_err.status_code, http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_should_convert_max_message_length_exceeded_to_400() {
+        let err = S3ServiceError::MaxMessageLengthExceeded;
+        let s3_err: S3Error = err.into();
+        assert_eq!(s3_err.code, S3ErrorCode::MaxMessageLengthExceeded);
+        assert_eq!(s3_err.status_code, http::StatusCode::BAD_REQUEST);
     }
 }

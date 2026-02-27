@@ -24,49 +24,10 @@ use crate::error::S3ServiceError;
 use crate::provider::RustStackS3;
 use crate::state::multipart::{MultipartUpload, UploadPart};
 use crate::state::object::{ObjectMetadata, Owner as InternalOwner, S3Object};
-use crate::utils::generate_upload_id;
+use crate::utils::{generate_upload_id, parse_copy_source};
 use crate::validation::validate_object_key;
 
 use super::bucket::to_model_owner;
-
-/// Parse a copy source string into (bucket, key, optional version_id).
-///
-/// The copy source format is `/bucket/key?versionId=vid` where the leading
-/// slash is optional and the version ID query parameter is optional.
-///
-/// # Errors
-///
-/// Returns [`S3Error`] if the copy source string cannot be parsed.
-fn parse_copy_source(source: &str) -> Result<(String, String, Option<String>), S3Error> {
-    // Strip leading slash if present.
-    let source = source.strip_prefix('/').unwrap_or(source);
-
-    // Split off query parameters.
-    let (path, query) = source
-        .split_once('?')
-        .map_or((source, None), |(p, q)| (p, Some(q)));
-
-    // Split bucket from key at the first slash.
-    let (bucket, key) = path.split_once('/').ok_or_else(|| {
-        S3Error::with_message(S3ErrorCode::InvalidArgument, "Invalid copy source format")
-    })?;
-
-    if bucket.is_empty() || key.is_empty() {
-        return Err(S3Error::with_message(
-            S3ErrorCode::InvalidArgument,
-            "Invalid copy source: empty bucket or key",
-        ));
-    }
-
-    // Parse version ID from query string if present.
-    let version_id = query.and_then(|q| {
-        q.split('&')
-            .find_map(|param| param.strip_prefix("versionId="))
-            .map(String::from)
-    });
-
-    Ok((bucket.to_owned(), key.to_owned(), version_id))
-}
 
 // AWS S3 DTOs use signed integers (i32/i64) for inherently non-negative values.
 // These handler methods must remain async for consistency.
@@ -271,7 +232,8 @@ impl RustStackS3 {
         let upload_id = input.upload_id;
         let part_number = input.part_number;
 
-        let (src_bucket, src_key, src_version_id) = parse_copy_source(&input.copy_source)?;
+        let (src_bucket, src_key, src_version_id) =
+            parse_copy_source(&input.copy_source).map_err(S3ServiceError::into_s3_error)?;
 
         // Read source object data.
         let src_vid = src_version_id.as_deref().unwrap_or("null");

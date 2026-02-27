@@ -180,8 +180,9 @@ pub struct S3Bucket {
     pub tags: RwLock<Vec<(String, String)>>,
     /// Canned ACL for the bucket.
     pub acl: RwLock<CannedAcl>,
-    /// Notification configuration (stored as opaque JSON).
-    pub notification_configuration: RwLock<Option<serde_json::Value>>,
+    /// Notification configuration for the bucket.
+    pub notification_configuration:
+        RwLock<Option<ruststack_s3_model::types::NotificationConfiguration>>,
     /// Logging configuration (stored as opaque JSON).
     pub logging: RwLock<Option<serde_json::Value>>,
     /// Public access block settings.

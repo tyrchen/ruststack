@@ -86,6 +86,24 @@ pub enum S3ErrorCode {
     TooManyBuckets,
     /// XAmzContentSHA256Mismatch error.
     XAmzContentSHA256Mismatch,
+    /// BadDigest error.
+    BadDigest,
+    /// ConditionalRequestConflict error.
+    ConditionalRequestConflict,
+    /// MaxMessageLengthExceeded error.
+    MaxMessageLengthExceeded,
+    /// NoSuchObjectLockConfiguration error.
+    NoSuchObjectLockConfiguration,
+    /// NoSuchPublicAccessBlockConfiguration error.
+    NoSuchPublicAccessBlockConfiguration,
+    /// NotModified error (HTTP 304).
+    NotModified,
+    /// OwnershipControlsNotFoundError error.
+    OwnershipControlsNotFoundError,
+    /// ReplicationConfigurationNotFoundError error.
+    ReplicationConfigurationNotFoundError,
+    /// ServerSideEncryptionConfigurationNotFoundError error.
+    ServerSideEncryptionConfigurationNotFoundError,
     /// A custom error code not in the standard set.
     Custom(&'static str),
 }
@@ -134,6 +152,17 @@ impl S3ErrorCode {
             Self::SignatureDoesNotMatch => "SignatureDoesNotMatch",
             Self::TooManyBuckets => "TooManyBuckets",
             Self::XAmzContentSHA256Mismatch => "XAmzContentSHA256Mismatch",
+            Self::BadDigest => "BadDigest",
+            Self::ConditionalRequestConflict => "ConditionalRequestConflict",
+            Self::MaxMessageLengthExceeded => "MaxMessageLengthExceeded",
+            Self::NoSuchObjectLockConfiguration => "NoSuchObjectLockConfiguration",
+            Self::NoSuchPublicAccessBlockConfiguration => "NoSuchPublicAccessBlockConfiguration",
+            Self::NotModified => "NotModified",
+            Self::OwnershipControlsNotFoundError => "OwnershipControlsNotFoundError",
+            Self::ReplicationConfigurationNotFoundError => "ReplicationConfigurationNotFoundError",
+            Self::ServerSideEncryptionConfigurationNotFoundError => {
+                "ServerSideEncryptionConfigurationNotFoundError"
+            }
             Self::Custom(s) => s,
         }
     }
@@ -143,7 +172,9 @@ impl S3ErrorCode {
     #[allow(clippy::match_same_arms)]
     pub fn default_status_code(&self) -> http::StatusCode {
         match self {
-            Self::EntityTooLarge
+            Self::NotModified => http::StatusCode::NOT_MODIFIED,
+            Self::BadDigest
+            | Self::EntityTooLarge
             | Self::EntityTooSmall
             | Self::InvalidArgument
             | Self::InvalidBucketName
@@ -155,7 +186,9 @@ impl S3ErrorCode {
             | Self::InvalidStorageClass
             | Self::KeyTooLongError
             | Self::MalformedXML
+            | Self::MaxMessageLengthExceeded
             | Self::MetadataTooLarge
+            | Self::ServerSideEncryptionConfigurationNotFoundError
             | Self::TooManyBuckets
             | Self::XAmzContentSHA256Mismatch => http::StatusCode::BAD_REQUEST,
             Self::AccessDenied
@@ -168,14 +201,19 @@ impl S3ErrorCode {
             | Self::NoSuchCORSConfiguration
             | Self::NoSuchKey
             | Self::NoSuchLifecycleConfiguration
+            | Self::NoSuchObjectLockConfiguration
+            | Self::NoSuchPublicAccessBlockConfiguration
             | Self::NoSuchUpload
             | Self::NoSuchVersion
             | Self::NoSuchTagSet
-            | Self::NoSuchWebsiteConfiguration => http::StatusCode::NOT_FOUND,
+            | Self::NoSuchWebsiteConfiguration
+            | Self::OwnershipControlsNotFoundError
+            | Self::ReplicationConfigurationNotFoundError => http::StatusCode::NOT_FOUND,
             Self::MethodNotAllowed => http::StatusCode::METHOD_NOT_ALLOWED,
             Self::BucketAlreadyExists
             | Self::BucketAlreadyOwnedByYou
             | Self::BucketNotEmpty
+            | Self::ConditionalRequestConflict
             | Self::InvalidBucketState => http::StatusCode::CONFLICT,
             Self::MissingContentLength => http::StatusCode::LENGTH_REQUIRED,
             Self::PreconditionFailed => http::StatusCode::PRECONDITION_FAILED,
@@ -240,6 +278,23 @@ impl S3ErrorCode {
             Self::TooManyBuckets => "You have attempted to create more buckets than allowed",
             Self::XAmzContentSHA256Mismatch => {
                 "The provided x-amz-content-sha256 header does not match"
+            }
+            Self::BadDigest => "The Content-MD5 you specified did not match what we received",
+            Self::ConditionalRequestConflict => "The conditional request cannot be processed",
+            Self::MaxMessageLengthExceeded => "Your request was too big",
+            Self::NoSuchObjectLockConfiguration => {
+                "Object Lock configuration does not exist for this bucket"
+            }
+            Self::NoSuchPublicAccessBlockConfiguration => {
+                "The public access block configuration was not found"
+            }
+            Self::NotModified => "Not Modified",
+            Self::OwnershipControlsNotFoundError => "The bucket ownership controls were not found",
+            Self::ReplicationConfigurationNotFoundError => {
+                "The replication configuration was not found"
+            }
+            Self::ServerSideEncryptionConfigurationNotFoundError => {
+                "The server-side encryption configuration was not found"
             }
             Self::Custom(s) => s,
         }

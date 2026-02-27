@@ -270,6 +270,71 @@ pub fn decode_continuation_token(token: &str) -> Result<String, S3ServiceError> 
 }
 
 // ---------------------------------------------------------------------------
+// Copy source parsing
+// ---------------------------------------------------------------------------
+
+/// Parse the `x-amz-copy-source` header value into bucket, key, and optional
+/// version ID components.
+///
+/// The copy source header uses the format `/bucket/key` or `bucket/key`, with
+/// an optional `?versionId=<vid>` suffix. Percent-encoded characters in the
+/// key are decoded.
+///
+/// # Errors
+///
+/// Returns [`S3ServiceError::InvalidArgument`] if the copy source string
+/// is empty or malformed.
+///
+/// # Examples
+///
+/// ```
+/// use ruststack_s3_core::utils::parse_copy_source;
+///
+/// let (bucket, key, vid) = parse_copy_source("my-bucket/my-key").unwrap();
+/// assert_eq!(bucket, "my-bucket");
+/// assert_eq!(key, "my-key");
+/// assert!(vid.is_none());
+/// ```
+pub fn parse_copy_source(source: &str) -> Result<(String, String, Option<String>), S3ServiceError> {
+    // Strip leading slash if present.
+    let source = source.strip_prefix('/').unwrap_or(source);
+
+    // Split off the versionId query parameter if present.
+    let (path, version_id) = if let Some((p, query)) = source.split_once('?') {
+        let vid = query
+            .split('&')
+            .find_map(|param| param.strip_prefix("versionId="))
+            .map(String::from);
+        (p, vid)
+    } else {
+        (source, None)
+    };
+
+    // Split into bucket and key at the first '/'.
+    let (bucket, key) = path
+        .split_once('/')
+        .ok_or_else(|| S3ServiceError::InvalidArgument {
+            message: "Invalid copy source: must be in the format bucket/key".to_owned(),
+        })?;
+
+    if bucket.is_empty() || key.is_empty() {
+        return Err(S3ServiceError::InvalidArgument {
+            message: "Invalid copy source: bucket and key must not be empty".to_owned(),
+        });
+    }
+
+    // URL-decode the key (copy source keys may be percent-encoded).
+    let decoded_key = percent_encoding::percent_decode_str(key)
+        .decode_utf8()
+        .map_err(|_| S3ServiceError::InvalidArgument {
+            message: "Invalid copy source: key contains invalid UTF-8".to_owned(),
+        })?
+        .into_owned();
+
+    Ok((bucket.to_owned(), decoded_key, version_id))
+}
+
+// ---------------------------------------------------------------------------
 // XML escaping
 // ---------------------------------------------------------------------------
 
@@ -476,6 +541,65 @@ mod tests {
     #[test]
     fn test_should_reject_invalid_continuation_token() {
         assert!(decode_continuation_token("!!!not-base64!!!").is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // Copy source parsing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_should_parse_copy_source_simple() {
+        let (bucket, key, vid) = parse_copy_source("my-bucket/my-key").unwrap();
+        assert_eq!(bucket, "my-bucket");
+        assert_eq!(key, "my-key");
+        assert!(vid.is_none());
+    }
+
+    #[test]
+    fn test_should_parse_copy_source_with_leading_slash() {
+        let (bucket, key, vid) = parse_copy_source("/my-bucket/my-key").unwrap();
+        assert_eq!(bucket, "my-bucket");
+        assert_eq!(key, "my-key");
+        assert!(vid.is_none());
+    }
+
+    #[test]
+    fn test_should_parse_copy_source_with_version_id() {
+        let (bucket, key, vid) = parse_copy_source("/my-bucket/my-key?versionId=abc123").unwrap();
+        assert_eq!(bucket, "my-bucket");
+        assert_eq!(key, "my-key");
+        assert_eq!(vid.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn test_should_parse_copy_source_with_nested_key() {
+        let (bucket, key, vid) = parse_copy_source("bucket/path/to/key").unwrap();
+        assert_eq!(bucket, "bucket");
+        assert_eq!(key, "path/to/key");
+        assert!(vid.is_none());
+    }
+
+    #[test]
+    fn test_should_parse_copy_source_with_encoded_key() {
+        let (bucket, key, vid) = parse_copy_source("bucket/path%20to/key%2B1").unwrap();
+        assert_eq!(bucket, "bucket");
+        assert_eq!(key, "path to/key+1");
+        assert!(vid.is_none());
+    }
+
+    #[test]
+    fn test_should_reject_copy_source_no_key() {
+        assert!(parse_copy_source("bucket-only").is_err());
+    }
+
+    #[test]
+    fn test_should_reject_copy_source_empty_bucket() {
+        assert!(parse_copy_source("/").is_err());
+    }
+
+    #[test]
+    fn test_should_reject_copy_source_empty_key() {
+        assert!(parse_copy_source("bucket/").is_err());
     }
 
     // -----------------------------------------------------------------------
