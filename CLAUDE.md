@@ -1,4 +1,4 @@
-# localstack-rs
+# ruststack
 
 ## Core Principles
 
