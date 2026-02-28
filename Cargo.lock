@@ -2048,6 +2048,7 @@ dependencies = [
  "hyper 1.8.1",
  "hyper-util",
  "ruststack-core",
+ "ruststack-s3-auth",
  "ruststack-s3-core",
  "ruststack-s3-http",
  "ruststack-s3-model",

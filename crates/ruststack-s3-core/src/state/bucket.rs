@@ -172,8 +172,8 @@ pub struct S3Bucket {
     pub encryption: RwLock<Option<BucketEncryption>>,
     /// CORS rules.
     pub cors_rules: RwLock<Option<Vec<CorsRuleConfig>>>,
-    /// Lifecycle configuration (stored as opaque JSON).
-    pub lifecycle: RwLock<Option<serde_json::Value>>,
+    /// Lifecycle configuration.
+    pub lifecycle: RwLock<Option<ruststack_s3_model::types::BucketLifecycleConfiguration>>,
     /// Bucket policy (JSON string).
     pub policy: RwLock<Option<String>>,
     /// Bucket tags.

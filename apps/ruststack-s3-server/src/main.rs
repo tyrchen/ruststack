@@ -23,10 +23,12 @@
 mod handler;
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as HttpConnBuilder;
+use ruststack_s3_auth::StaticCredentialProvider;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -60,12 +62,36 @@ fn init_tracing(log_level: &str) -> Result<()> {
 
 /// Build the [`S3HttpConfig`] from the application [`S3Config`].
 fn build_http_config(config: &S3Config) -> S3HttpConfig {
+    // Build a credential provider from environment variables if available.
+    let credential_provider = build_credential_provider();
+
     S3HttpConfig {
         domain: config.s3_domain.clone(),
         virtual_hosting: config.s3_virtual_hosting,
         skip_signature_validation: config.s3_skip_signature_validation,
         region: config.default_region.clone(),
+        credential_provider,
     }
+}
+
+/// Build a credential provider from `ACCESS_KEY` / `SECRET_KEY` environment
+/// variables (used by MinIO Mint and other test harnesses).
+fn build_credential_provider() -> Option<Arc<dyn ruststack_s3_auth::CredentialProvider>> {
+    let access_key = std::env::var("ACCESS_KEY")
+        .or_else(|_| std::env::var("AWS_ACCESS_KEY_ID"))
+        .ok()?;
+    let secret_key = std::env::var("SECRET_KEY")
+        .or_else(|_| std::env::var("AWS_SECRET_ACCESS_KEY"))
+        .ok()?;
+
+    info!(
+        access_key = %access_key,
+        "configured credential provider from environment"
+    );
+
+    Some(Arc::new(StaticCredentialProvider::new(vec![(
+        access_key, secret_key,
+    )])))
 }
 
 /// Run the accept loop, serving connections until a shutdown signal is received.

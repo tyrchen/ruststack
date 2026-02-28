@@ -304,13 +304,13 @@ impl RustStackS3 {
             .map_err(S3ServiceError::into_s3_error)?;
 
         let lifecycle = bucket.lifecycle.read();
-        if lifecycle.is_none() {
-            return Err(S3ServiceError::NoSuchLifecycleConfiguration.into_s3_error());
-        }
+        let config = lifecycle
+            .as_ref()
+            .ok_or(S3ServiceError::NoSuchLifecycleConfiguration)
+            .map_err(S3ServiceError::into_s3_error)?;
 
-        // Return empty rules since we store as opaque JSON.
         Ok(GetBucketLifecycleConfigurationOutput {
-            rules: Vec::new(),
+            rules: config.rules.clone(),
             transition_default_minimum_object_size: None,
         })
     }
@@ -327,8 +327,7 @@ impl RustStackS3 {
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
 
-        // Store as opaque JSON since we don't enforce lifecycle policies.
-        *bucket.lifecycle.write() = Some(serde_json::json!({"status": "configured"}));
+        *bucket.lifecycle.write() = input.lifecycle_configuration;
 
         debug!(bucket = %bucket_name, "put_bucket_lifecycle_configuration completed");
         Ok(PutBucketLifecycleConfigurationOutput {

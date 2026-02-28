@@ -31,7 +31,7 @@ use crate::state::object::{
 use crate::utils::{
     is_valid_if_match, is_valid_if_none_match, parse_copy_source, parse_range_header,
 };
-use crate::validation::{validate_metadata, validate_object_key};
+use crate::validation::{validate_content_md5, validate_metadata, validate_object_key};
 
 // AWS S3 DTOs use signed integers (i32/i64) for inherently non-negative values
 // (sizes, part counts). Casting from u64/u32/usize is safe in practice.
@@ -62,6 +62,10 @@ impl RustStackS3 {
 
         // Take the body out before borrowing other fields from input.
         let body_data = input.body.take().map_or_else(Bytes::new, |b| b.data);
+
+        // Validate Content-MD5 if provided.
+        validate_content_md5(input.content_md5.as_deref(), &body_data)
+            .map_err(S3ServiceError::into_s3_error)?;
 
         // Extract metadata from the request.
         let metadata = build_metadata(&input);

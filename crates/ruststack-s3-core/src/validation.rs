@@ -8,6 +8,9 @@ use std::collections::HashMap;
 use std::hash::BuildHasher;
 use std::net::Ipv4Addr;
 
+use base64::Engine;
+use md5::{Digest, Md5};
+
 use crate::error::S3ServiceError;
 
 /// Maximum number of tags allowed on a single S3 object or bucket.
@@ -299,6 +302,43 @@ pub fn validate_metadata<S: BuildHasher>(
     Ok(())
 }
 
+/// Validate the `Content-MD5` header against the request body.
+///
+/// If the header is present, its value must be a valid Base64-encoded MD5
+/// digest that matches the body. If the header is absent, validation
+/// succeeds (the header is optional).
+///
+/// # Errors
+///
+/// Returns [`S3ServiceError::InvalidDigest`] if the header value is not
+/// valid Base64, or [`S3ServiceError::BadDigest`] if the decoded digest
+/// does not match the body.
+///
+/// # Examples
+///
+/// ```
+/// use ruststack_s3_core::validation::validate_content_md5;
+///
+/// // No header → always OK
+/// assert!(validate_content_md5(None, b"hello").is_ok());
+/// ```
+pub fn validate_content_md5(content_md5: Option<&str>, body: &[u8]) -> Result<(), S3ServiceError> {
+    let Some(expected_b64) = content_md5 else {
+        return Ok(());
+    };
+
+    let expected_bytes = base64::engine::general_purpose::STANDARD
+        .decode(expected_b64)
+        .map_err(|_| S3ServiceError::InvalidDigest)?;
+
+    let actual = Md5::digest(body);
+    if actual.as_slice() != expected_bytes {
+        return Err(S3ServiceError::BadDigest);
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -490,5 +530,39 @@ mod tests {
         // key (3 bytes) + value (2045 bytes) = 2048
         meta.insert("key".to_owned(), "v".repeat(2045));
         assert!(validate_metadata(&meta).is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // Content-MD5 validation
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_should_accept_absent_content_md5() {
+        assert!(validate_content_md5(None, b"any body").is_ok());
+    }
+
+    #[test]
+    fn test_should_accept_correct_content_md5() {
+        let body = b"hello world";
+        let digest = base64::engine::general_purpose::STANDARD.encode(Md5::digest(body));
+        assert!(validate_content_md5(Some(&digest), body).is_ok());
+    }
+
+    #[test]
+    fn test_should_reject_wrong_content_md5() {
+        let body = b"hello world";
+        let wrong = base64::engine::general_purpose::STANDARD.encode(Md5::digest(b"wrong"));
+        assert!(matches!(
+            validate_content_md5(Some(&wrong), body),
+            Err(S3ServiceError::BadDigest)
+        ));
+    }
+
+    #[test]
+    fn test_should_reject_invalid_base64_content_md5() {
+        assert!(matches!(
+            validate_content_md5(Some("not-valid-base64!!!"), b"body"),
+            Err(S3ServiceError::InvalidDigest)
+        ));
     }
 }

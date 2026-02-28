@@ -24,13 +24,16 @@ use hyper::service::Service;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+use ruststack_s3_auth::CredentialProvider;
+use ruststack_s3_model::error::{S3Error, S3ErrorCode};
+
 use crate::body::S3ResponseBody;
 use crate::dispatch::{S3Handler, dispatch_operation};
 use crate::response::error_to_response;
 use crate::router::S3Router;
 
 /// Configuration for the S3 HTTP service.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct S3HttpConfig {
     /// The base domain for virtual-hosted-style requests (e.g., `s3.localhost`).
     pub domain: String,
@@ -40,6 +43,23 @@ pub struct S3HttpConfig {
     pub skip_signature_validation: bool,
     /// The AWS region this service operates in.
     pub region: String,
+    /// Optional credential provider for SigV4 and presigned URL verification.
+    pub credential_provider: Option<Arc<dyn CredentialProvider>>,
+}
+
+impl std::fmt::Debug for S3HttpConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("S3HttpConfig")
+            .field("domain", &self.domain)
+            .field("virtual_hosting", &self.virtual_hosting)
+            .field("skip_signature_validation", &self.skip_signature_validation)
+            .field("region", &self.region)
+            .field(
+                "credential_provider",
+                &self.credential_provider.as_ref().map(|_| "..."),
+            )
+            .finish()
+    }
 }
 
 impl Default for S3HttpConfig {
@@ -49,6 +69,7 @@ impl Default for S3HttpConfig {
             virtual_hosting: true,
             skip_signature_validation: true,
             region: "us-east-1".to_owned(),
+            credential_provider: None,
         }
     }
 }
@@ -132,7 +153,7 @@ async fn process_request<H: S3Handler>(
     req: http::Request<Incoming>,
     handler: &H,
     router: &S3Router,
-    _config: &S3HttpConfig,
+    config: &S3HttpConfig,
     request_id: &str,
 ) -> http::Response<S3ResponseBody> {
     let method = req.method().clone();
@@ -142,6 +163,11 @@ async fn process_request<H: S3Handler>(
     // 1. Health check interception.
     if is_health_check(&method, uri.path()) {
         return health_check_response();
+    }
+
+    // 1b. Prometheus metrics endpoint.
+    if is_metrics_endpoint(&method, uri.path()) {
+        return prometheus_metrics_response();
     }
 
     // 2. CORS preflight.
@@ -182,7 +208,36 @@ async fn process_request<H: S3Handler>(
         }
     };
 
-    // 5. Authentication (skipped for now - Phase 3).
+    // 5. Authentication.
+    if !config.skip_signature_validation {
+        if let Some(ref cred_provider) = config.credential_provider {
+            let has_presigned = parts
+                .uri
+                .query()
+                .is_some_and(|q| q.contains("X-Amz-Signature"));
+
+            let auth_result = if has_presigned {
+                ruststack_s3_auth::verify_presigned(&parts, cred_provider.as_ref())
+            } else if parts.headers.contains_key("authorization") {
+                let body_hash = ruststack_s3_auth::hash_payload(&body);
+                ruststack_s3_auth::verify_sigv4(&parts, &body_hash, cred_provider.as_ref())
+            } else {
+                // Anonymous request — allow through.
+                Ok(ruststack_s3_auth::AuthResult {
+                    access_key_id: String::new(),
+                    region: String::new(),
+                    service: String::new(),
+                    signed_headers: Vec::new(),
+                })
+            };
+
+            if let Err(auth_err) = auth_result {
+                warn!(error = %auth_err, request_id, "authentication failed");
+                let s3_err = S3Error::with_message(S3ErrorCode::AccessDenied, auth_err.to_string());
+                return error_to_response(&s3_err, request_id);
+            }
+        }
+    }
 
     // 6. Dispatch to handler.
     match dispatch_operation(handler, parts, body, ctx).await {
@@ -224,6 +279,28 @@ fn health_check_response() -> http::Response<S3ResponseBody> {
             r#"{"status":"running","service":"s3"}"#,
         ))
         .expect("static health response should be valid")
+}
+
+/// Check if the request is a Prometheus metrics scrape.
+fn is_metrics_endpoint(method: &http::Method, path: &str) -> bool {
+    *method == http::Method::GET
+        && (path == "/minio/v2/metrics/cluster"
+            || path == "/minio/prometheus/metrics"
+            || path == "/minio/v2/metrics/node")
+}
+
+/// Produce a Prometheus-format metrics response.
+fn prometheus_metrics_response() -> http::Response<S3ResponseBody> {
+    let body = concat!(
+        "# HELP s3_requests_total Total number of S3 requests.\n",
+        "# TYPE s3_requests_total counter\n",
+        "s3_requests_total 0\n",
+    );
+    http::Response::builder()
+        .status(http::StatusCode::OK)
+        .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+        .body(S3ResponseBody::from_string(body))
+        .expect("static metrics response should be valid")
 }
 
 /// Produce a CORS preflight response.
@@ -308,6 +385,39 @@ mod tests {
     }
 
     #[test]
+    fn test_should_detect_metrics_endpoints() {
+        assert!(is_metrics_endpoint(
+            &http::Method::GET,
+            "/minio/v2/metrics/cluster"
+        ));
+        assert!(is_metrics_endpoint(
+            &http::Method::GET,
+            "/minio/prometheus/metrics"
+        ));
+        assert!(is_metrics_endpoint(
+            &http::Method::GET,
+            "/minio/v2/metrics/node"
+        ));
+        assert!(!is_metrics_endpoint(
+            &http::Method::POST,
+            "/minio/v2/metrics/cluster"
+        ));
+        assert!(!is_metrics_endpoint(&http::Method::GET, "/mybucket"));
+    }
+
+    #[test]
+    fn test_should_produce_prometheus_metrics_response() {
+        let resp = prometheus_metrics_response();
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        assert!(
+            resp.headers()
+                .get("Content-Type")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| v.contains("text/plain"))
+        );
+    }
+
+    #[test]
     fn test_should_produce_cors_preflight_response() {
         let resp = cors_preflight_response();
         assert_eq!(resp.status(), http::StatusCode::OK);
@@ -341,5 +451,14 @@ mod tests {
         assert!(config.virtual_hosting);
         assert!(config.skip_signature_validation);
         assert_eq!(config.region, "us-east-1");
+        assert!(config.credential_provider.is_none());
+    }
+
+    #[test]
+    fn test_should_debug_format_config() {
+        let config = S3HttpConfig::default();
+        let debug_str = format!("{config:?}");
+        assert!(debug_str.contains("S3HttpConfig"));
+        assert!(debug_str.contains("s3.localhost"));
     }
 }

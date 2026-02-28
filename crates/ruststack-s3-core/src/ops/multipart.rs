@@ -25,7 +25,7 @@ use crate::provider::RustStackS3;
 use crate::state::multipart::{MultipartUpload, UploadPart};
 use crate::state::object::{ObjectMetadata, Owner as InternalOwner, S3Object};
 use crate::utils::{generate_upload_id, parse_copy_source};
-use crate::validation::validate_object_key;
+use crate::validation::{validate_content_md5, validate_object_key};
 
 use super::bucket::to_model_owner;
 
@@ -178,6 +178,10 @@ impl RustStackS3 {
 
         // Collect body data.
         let body_data = input.body.take().map(|b| b.data).unwrap_or_default();
+
+        // Validate Content-MD5 if provided.
+        validate_content_md5(input.content_md5.as_deref(), &body_data)
+            .map_err(S3ServiceError::into_s3_error)?;
 
         // Write part to storage.
         let write_result = self
