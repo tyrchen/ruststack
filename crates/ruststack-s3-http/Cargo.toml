@@ -30,6 +30,8 @@ futures = "0.3"
 pin-project-lite = "0.2"
 uuid = { version = "1.21", features = ["v4"] }
 mime = "0.3"
+sha2 = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

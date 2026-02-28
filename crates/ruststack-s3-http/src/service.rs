@@ -21,6 +21,7 @@ use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::service::Service;
+use sha2::{Digest, Sha256};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -208,6 +209,12 @@ async fn process_request<H: S3Handler>(
         }
     };
 
+    // 4b. Validate X-Amz-Content-Sha256 header (independent of auth).
+    if let Err(s3_err) = validate_content_sha256(&parts, &body) {
+        warn!(error = %s3_err.message, request_id, "content SHA256 mismatch");
+        return error_to_response(&s3_err, request_id);
+    }
+
     // 5. Authentication.
     if !config.skip_signature_validation {
         if let Some(ref cred_provider) = config.credential_provider {
@@ -257,6 +264,55 @@ async fn process_request<H: S3Handler>(
 async fn collect_body(incoming: Incoming) -> Result<Bytes, hyper::Error> {
     let collected = incoming.collect().await?;
     Ok(collected.to_bytes())
+}
+
+/// Validate the `X-Amz-Content-Sha256` header against the request body.
+///
+/// This check runs independently of signature validation. If the header is
+/// present and contains a concrete hex hash (i.e. not a streaming or unsigned
+/// placeholder), we verify it matches the actual body content. An invalid or
+/// mismatching value returns `XAmzContentSHA256Mismatch`.
+fn validate_content_sha256(parts: &http::request::Parts, body: &[u8]) -> Result<(), S3Error> {
+    let Some(header_value) = parts.headers.get("x-amz-content-sha256") else {
+        return Ok(());
+    };
+
+    let hash_str = header_value.to_str().map_err(|_| {
+        S3Error::with_message(
+            S3ErrorCode::XAmzContentSHA256Mismatch,
+            "Invalid X-Amz-Content-Sha256 header encoding",
+        )
+    })?;
+
+    // Skip validation for streaming and unsigned payload placeholders.
+    if matches!(
+        hash_str,
+        "UNSIGNED-PAYLOAD"
+            | "STREAMING-AWS4-HMAC-SHA256-PAYLOAD"
+            | "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER"
+            | "STREAMING-UNSIGNED-PAYLOAD-TRAILER"
+    ) {
+        return Ok(());
+    }
+
+    // The value must be a 64-character lowercase hex string (SHA-256 output).
+    if hash_str.len() != 64 || !hash_str.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(S3Error::with_message(
+            S3ErrorCode::XAmzContentSHA256Mismatch,
+            format!("The provided 'x-amz-content-sha256' header is not valid: {hash_str}"),
+        ));
+    }
+
+    // Compute the actual SHA-256 digest and compare.
+    let actual = hex::encode(Sha256::digest(body));
+    if actual != hash_str {
+        return Err(S3Error::with_message(
+            S3ErrorCode::XAmzContentSHA256Mismatch,
+            "The provided 'x-amz-content-sha256' header does not match what was computed",
+        ));
+    }
+
+    Ok(())
 }
 
 /// Check if the request is a health check probe.
@@ -460,5 +516,79 @@ mod tests {
         let debug_str = format!("{config:?}");
         assert!(debug_str.contains("S3HttpConfig"));
         assert!(debug_str.contains("s3.localhost"));
+    }
+
+    // -----------------------------------------------------------------------
+    // X-Amz-Content-Sha256 validation
+    // -----------------------------------------------------------------------
+
+    fn parts_with_sha256(header_value: &str) -> http::request::Parts {
+        let (parts, ()) = http::Request::builder()
+            .method(http::Method::PUT)
+            .uri("/bucket/key")
+            .header("x-amz-content-sha256", header_value)
+            .body(())
+            .expect("valid request")
+            .into_parts();
+        parts
+    }
+
+    fn parts_without_sha256() -> http::request::Parts {
+        let (parts, ()) = http::Request::builder()
+            .method(http::Method::PUT)
+            .uri("/bucket/key")
+            .body(())
+            .expect("valid request")
+            .into_parts();
+        parts
+    }
+
+    #[test]
+    fn test_should_accept_absent_content_sha256() {
+        let parts = parts_without_sha256();
+        assert!(validate_content_sha256(&parts, b"hello").is_ok());
+    }
+
+    #[test]
+    fn test_should_accept_unsigned_payload() {
+        let parts = parts_with_sha256("UNSIGNED-PAYLOAD");
+        assert!(validate_content_sha256(&parts, b"hello").is_ok());
+    }
+
+    #[test]
+    fn test_should_accept_streaming_payload() {
+        let parts = parts_with_sha256("STREAMING-AWS4-HMAC-SHA256-PAYLOAD");
+        assert!(validate_content_sha256(&parts, b"hello").is_ok());
+    }
+
+    #[test]
+    fn test_should_accept_correct_content_sha256() {
+        let body = b"hello";
+        let hash = hex::encode(Sha256::digest(body));
+        let parts = parts_with_sha256(&hash);
+        assert!(validate_content_sha256(&parts, body).is_ok());
+    }
+
+    #[test]
+    fn test_should_reject_invalid_content_sha256() {
+        let parts = parts_with_sha256("invalid-sha256");
+        let result = validate_content_sha256(&parts, b"hello");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code,
+            S3ErrorCode::XAmzContentSHA256Mismatch
+        );
+    }
+
+    #[test]
+    fn test_should_reject_wrong_content_sha256() {
+        let wrong_hash = hex::encode(Sha256::digest(b"wrong"));
+        let parts = parts_with_sha256(&wrong_hash);
+        let result = validate_content_sha256(&parts, b"hello");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code,
+            S3ErrorCode::XAmzContentSHA256Mismatch
+        );
     }
 }

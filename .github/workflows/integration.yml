@@ -101,10 +101,11 @@ jobs:
 
           # Assert we don't regress below the current number of passing suites.
           # Mint prints "Executed N out of 15 tests successfully." at the end.
-          # Baseline after Content-MD5, lifecycle, Prometheus metrics, and auth fixes.
+          # Baseline after Content-MD5, lifecycle, Prometheus metrics, auth, and SHA256 fixes.
           # Expected passing: aws-sdk-java, aws-sdk-java-v2, s3cmd, awscli, minio-java,
-          # healthcheck, mc, plus potentially aws-sdk-go. Raise as more suites are fixed.
-          MIN_PASS=5
+          # healthcheck, mc, aws-sdk-go, plus potentially versioning.
+          # Not fixable without major features: minio-py/s3select (S3 Select), aws-sdk-ruby (presigned POST).
+          MIN_PASS=7
           PASS_COUNT=$(grep -oP 'Executed \K[0-9]+' /tmp/mint-logs/mint-output.txt || echo "0")
           FAIL_COUNT=$(grep -c '"status": "FAIL"' /tmp/mint-logs/mint-output.txt || true)
           echo "Mint results: $PASS_COUNT passed, $FAIL_COUNT failed (minimum required: $MIN_PASS)"
