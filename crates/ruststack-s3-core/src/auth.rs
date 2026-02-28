@@ -1,6 +1,6 @@
 //! S3 authentication via the `CredentialProvider` trait.
 //!
-//! [`RustStackAuth`] implements the [`ruststack_s3_auth::credentials::CredentialProvider`]
+//! [`RustStackAuth`] implements the [`ruststack_auth::credentials::CredentialProvider`]
 //! trait to provide authentication for the RustStack S3 service. When signature
 //! validation is skipped (the default for local development), any access key maps
 //! to an empty secret key, effectively disabling signature verification.
@@ -8,8 +8,8 @@
 //! When validation is enabled, all access keys map to the secret key `"test"`,
 //! matching LocalStack's default behavior.
 
-use ruststack_s3_auth::credentials::CredentialProvider;
-use ruststack_s3_auth::error::AuthError;
+use ruststack_auth::credentials::CredentialProvider;
+use ruststack_auth::error::AuthError;
 use tracing::debug;
 
 /// RustStack authentication provider.

@@ -186,6 +186,14 @@ impl RustStackS3 {
         let if_none_match_param = input.if_none_match;
         let range_param = input.range;
 
+        // S3 response header overrides (from query parameters in presigned URLs).
+        let override_cache_control = input.response_cache_control;
+        let override_content_disposition = input.response_content_disposition;
+        let override_content_encoding = input.response_content_encoding;
+        let override_content_language = input.response_content_language;
+        let override_content_type = input.response_content_type;
+        let override_expires = input.response_expires;
+
         // Look up the object and extract all needed data while holding the lock.
         // The lock must be dropped before any `.await` calls since parking_lot
         // guards are `!Send`.
@@ -296,13 +304,14 @@ impl RustStackS3 {
         let output = GetObjectOutput {
             accept_ranges: Some("bytes".to_owned()),
             body: Some(body),
-            cache_control: obj_meta.cache_control,
-            content_disposition: obj_meta.content_disposition,
-            content_encoding: obj_meta.content_encoding,
-            content_language: obj_meta.content_language,
+            cache_control: override_cache_control.or(obj_meta.cache_control),
+            content_disposition: override_content_disposition.or(obj_meta.content_disposition),
+            content_encoding: override_content_encoding.or(obj_meta.content_encoding),
+            content_language: override_content_language.or(obj_meta.content_language),
             content_length: Some(content_length),
             content_range,
-            content_type,
+            content_type: override_content_type.or(content_type),
+            expires: override_expires.map(|dt| dt.to_rfc2822()),
             e_tag: Some(obj_etag),
             last_modified: Some(obj_last_modified),
             metadata,
@@ -338,6 +347,14 @@ impl RustStackS3 {
         let bucket_name = input.bucket;
         let key = input.key;
         let version_id_param = input.version_id;
+
+        // S3 response header overrides (from query parameters in presigned URLs).
+        let override_cache_control = input.response_cache_control;
+        let override_content_disposition = input.response_content_disposition;
+        let override_content_encoding = input.response_content_encoding;
+        let override_content_language = input.response_content_language;
+        let override_content_type = input.response_content_type;
+        let override_expires = input.response_expires;
 
         let bucket = self
             .state
@@ -387,12 +404,14 @@ impl RustStackS3 {
 
         let output = HeadObjectOutput {
             accept_ranges: Some("bytes".to_owned()),
-            cache_control: obj.metadata.cache_control.clone(),
-            content_disposition: obj.metadata.content_disposition.clone(),
-            content_encoding: obj.metadata.content_encoding.clone(),
-            content_language: obj.metadata.content_language.clone(),
+            cache_control: override_cache_control.or(obj.metadata.cache_control.clone()),
+            content_disposition: override_content_disposition
+                .or(obj.metadata.content_disposition.clone()),
+            content_encoding: override_content_encoding.or(obj.metadata.content_encoding.clone()),
+            content_language: override_content_language.or(obj.metadata.content_language.clone()),
             content_length: Some(obj.size as i64),
-            content_type,
+            content_type: override_content_type.or(content_type),
+            expires: override_expires.map(|dt| dt.to_rfc2822()),
             e_tag: Some(obj.etag.clone()),
             last_modified: Some(obj.last_modified),
             metadata,

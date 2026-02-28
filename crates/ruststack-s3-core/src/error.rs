@@ -272,9 +272,20 @@ impl S3ServiceError {
 
 impl From<S3ServiceError> for S3Error {
     fn from(err: S3ServiceError) -> Self {
-        let message = err.to_string();
         let code = error_code(&err);
-
+        // Use the error code's standard message for the XML <Message> element.
+        // SDKs compare message strings exactly, so context-specific details
+        // (bucket/key names) must not appear in <Message>.
+        // For validation errors, preserve the specific message.
+        let message = match &err {
+            S3ServiceError::InvalidArgument { message }
+            | S3ServiceError::InvalidTag { message } => message.clone(),
+            S3ServiceError::InvalidBucketName { name, reason } => {
+                format!("Invalid bucket name: {name}: {reason}")
+            }
+            S3ServiceError::Internal(e) => e.to_string(),
+            _ => code.default_message().to_owned(),
+        };
         S3Error::with_message(code, message)
     }
 }
@@ -350,7 +361,8 @@ mod tests {
         };
         let s3_err: S3Error = err.into();
         assert_eq!(s3_err.code, S3ErrorCode::NoSuchBucket);
-        assert!(s3_err.message.contains("my-bucket"));
+        // Message should use the standard S3 error message without bucket name.
+        assert_eq!(s3_err.message, "The specified bucket does not exist");
     }
 
     #[test]

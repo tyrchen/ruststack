@@ -43,7 +43,8 @@ mint-build:
 
 mint-start: mint-build
 	@echo "Starting RustStack S3 server..."
-	@S3_SKIP_SIGNATURE_VALIDATION=true \
+	@ACCESS_KEY=minioadmin SECRET_KEY=minioadmin \
+		S3_SKIP_SIGNATURE_VALIDATION=false \
 		GATEWAY_LISTEN=0.0.0.0:4566 \
 		LOG_LEVEL=warn \
 		cargo run --release -p ruststack-s3-server &
@@ -68,8 +69,8 @@ mint-run:
 	@mkdir -p /tmp/mint-logs
 	$(CONTAINER_CMD) run --rm $(MINT_NETWORK) \
 		-e SERVER_ENDPOINT=$(MINT_SERVER_ENDPOINT) \
-		-e ACCESS_KEY=test \
-		-e SECRET_KEY=test \
+		-e ACCESS_KEY=minioadmin \
+		-e SECRET_KEY=minioadmin \
 		-e ENABLE_HTTPS=0 \
 		minio/mint:latest 2>&1 | tee /tmp/mint-logs/mint-output.txt || true
 	@echo ""

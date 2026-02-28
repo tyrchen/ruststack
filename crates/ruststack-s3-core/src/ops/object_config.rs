@@ -363,6 +363,35 @@ impl RustStackS3 {
                 .ok_or_else(|| S3ServiceError::NoSuchKey { key: key.clone() }.into_s3_error())?
         };
 
+        // Enforce Object Lock retention rules:
+        // - Cannot shorten an active retention period
+        // - Cannot remove retention without governance bypass
+        let existing_until = obj.metadata.object_lock_retain_until;
+        let existing_mode = obj.metadata.object_lock_mode.as_deref();
+        let bypass = input.bypass_governance_retention.unwrap_or(false);
+
+        if let Some(current_until) = existing_until {
+            let now = chrono::Utc::now();
+            if current_until > now {
+                // Retention is still active.
+                let new_until = retention.as_ref().and_then(|r| r.retain_until_date);
+
+                let is_shortening = match new_until {
+                    Some(new) => new < current_until,
+                    None => true, // removing retention entirely
+                };
+
+                if is_shortening {
+                    // GOVERNANCE mode can be bypassed.
+                    if existing_mode == Some("GOVERNANCE") && bypass {
+                        // Allow the change.
+                    } else {
+                        return Err(S3ServiceError::AccessDenied.into_s3_error());
+                    }
+                }
+            }
+        }
+
         let mut updated = obj.clone();
         if let Some(ret) = retention {
             updated.metadata.object_lock_mode = ret.mode.as_ref().map(|m| m.as_str().to_owned());
@@ -396,6 +425,10 @@ impl RustStackS3 {
             .state
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
+
+        if !*bucket.object_lock_enabled.read() {
+            return Err(S3ServiceError::ObjectLockConfigurationNotFoundError.into_s3_error());
+        }
 
         let store = bucket.objects.read();
         let obj = if let Some(version_id) = &input.version_id {
@@ -439,7 +472,17 @@ impl RustStackS3 {
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
 
+        if !*bucket.object_lock_enabled.read() {
+            return Err(S3ServiceError::ObjectLockConfigurationNotFoundError.into_s3_error());
+        }
+
         let legal_hold = input.legal_hold;
+
+        // Reject requests with missing or empty LegalHold body.
+        let status = legal_hold.as_ref().and_then(|lh| lh.status.as_ref());
+        if status.is_none() {
+            return Err(S3Error::malformed_xml("Missing LegalHold status"));
+        }
 
         let mut store = bucket.objects.write();
         let obj = if let Some(version_id) = &input.version_id {

@@ -28,7 +28,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as HttpConnBuilder;
-use ruststack_s3_auth::StaticCredentialProvider;
+use ruststack_auth::StaticCredentialProvider;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -76,7 +76,7 @@ fn build_http_config(config: &S3Config) -> S3HttpConfig {
 
 /// Build a credential provider from `ACCESS_KEY` / `SECRET_KEY` environment
 /// variables (used by MinIO Mint and other test harnesses).
-fn build_credential_provider() -> Option<Arc<dyn ruststack_s3_auth::CredentialProvider>> {
+fn build_credential_provider() -> Option<Arc<dyn ruststack_auth::CredentialProvider>> {
     let access_key = std::env::var("ACCESS_KEY")
         .or_else(|_| std::env::var("AWS_ACCESS_KEY_ID"))
         .ok()?;

@@ -1914,6 +1914,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruststack-auth"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chrono",
+ "digest",
+ "hex",
+ "hmac",
+ "http 1.4.0",
+ "percent-encoding",
+ "sha1",
+ "sha2",
+ "subtle",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ruststack-core"
 version = "0.1.0"
 dependencies = [
@@ -1926,23 +1945,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
-]
-
-[[package]]
-name = "ruststack-s3-auth"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "digest",
- "hex",
- "hmac",
- "http 1.4.0",
- "percent-encoding",
- "sha2",
- "subtle",
- "thiserror",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -1965,8 +1967,8 @@ dependencies = [
  "percent-encoding",
  "quick-xml",
  "rand",
+ "ruststack-auth",
  "ruststack-core",
- "ruststack-s3-auth",
  "ruststack-s3-model",
  "serde",
  "serde_json",
@@ -1997,7 +1999,7 @@ dependencies = [
  "mime",
  "percent-encoding",
  "pin-project-lite",
- "ruststack-s3-auth",
+ "ruststack-auth",
  "ruststack-s3-model",
  "ruststack-s3-xml",
  "sha2",
@@ -2049,8 +2051,8 @@ dependencies = [
  "http-body-util",
  "hyper 1.8.1",
  "hyper-util",
+ "ruststack-auth",
  "ruststack-core",
- "ruststack-s3-auth",
  "ruststack-s3-core",
  "ruststack-s3-http",
  "ruststack-s3-model",

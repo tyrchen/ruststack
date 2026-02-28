@@ -16,10 +16,10 @@ path = "src/main.rs"
 
 [dependencies]
 ruststack-core = { workspace = true }
-ruststack-s3-auth = { workspace = true }
+ruststack-auth = { workspace = true }
 ruststack-s3-core = { workspace = true }
 ruststack-s3-http = { workspace = true }
-ruststack-s3-model = { path = "../../crates/ruststack-s3-model" }
+ruststack-s3-model = { workspace = true }
 
 # Async
 tokio = { workspace = true }

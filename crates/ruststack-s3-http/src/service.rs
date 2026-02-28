@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use ruststack_s3_auth::CredentialProvider;
+use ruststack_auth::CredentialProvider;
 use ruststack_s3_model::error::{S3Error, S3ErrorCode};
 
 use crate::body::S3ResponseBody;
@@ -245,13 +245,21 @@ async fn process_request<H: S3Handler>(
                 .is_some_and(|q| q.contains("X-Amz-Signature"));
 
             let auth_result = if has_presigned {
-                ruststack_s3_auth::verify_presigned(&parts, cred_provider.as_ref())
-            } else if parts.headers.contains_key("authorization") {
-                let body_hash = ruststack_s3_auth::hash_payload(&body);
-                ruststack_s3_auth::verify_sigv4(&parts, &body_hash, cred_provider.as_ref())
+                ruststack_auth::verify_presigned(&parts, cred_provider.as_ref())
+            } else if let Some(auth_header) = parts
+                .headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+            {
+                if ruststack_auth::is_sigv2(auth_header) {
+                    ruststack_auth::verify_sigv2(&parts, cred_provider.as_ref())
+                } else {
+                    let body_hash = ruststack_auth::hash_payload(&body);
+                    ruststack_auth::verify_sigv4(&parts, &body_hash, cred_provider.as_ref())
+                }
             } else {
                 // Anonymous request — allow through.
-                Ok(ruststack_s3_auth::AuthResult {
+                Ok(ruststack_auth::AuthResult {
                     access_key_id: String::new(),
                     region: String::new(),
                     service: String::new(),

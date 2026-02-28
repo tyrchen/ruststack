@@ -29,7 +29,7 @@ pub trait CredentialProvider: Send + Sync {
 /// # Examples
 ///
 /// ```
-/// use ruststack_s3_auth::credentials::{CredentialProvider, StaticCredentialProvider};
+/// use ruststack_auth::credentials::{CredentialProvider, StaticCredentialProvider};
 ///
 /// let provider = StaticCredentialProvider::new(vec![
 ///     ("AKIAIOSFODNN7EXAMPLE".to_owned(), "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_owned()),

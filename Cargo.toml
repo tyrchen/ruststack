@@ -25,10 +25,11 @@ collapsible_if = "allow"
 [workspace.dependencies]
 # Internal crates
 ruststack-core = { path = "crates/ruststack-core" }
-ruststack-s3-auth = { path = "crates/ruststack-s3-auth" }
+ruststack-auth = { path = "crates/ruststack-auth" }
 ruststack-s3-core = { path = "crates/ruststack-s3-core" }
 ruststack-s3-http = { path = "crates/ruststack-s3-http" }
 ruststack-s3-model = { path = "crates/ruststack-s3-model" }
+ruststack-s3-xml = { path = "crates/ruststack-s3-xml" }
 
 # Async runtime
 tokio = { version = "1.49", features = [

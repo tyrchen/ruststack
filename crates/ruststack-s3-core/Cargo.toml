@@ -12,8 +12,8 @@ workspace = true
 
 [dependencies]
 ruststack-core = { workspace = true }
-ruststack-s3-model = { path = "../ruststack-s3-model" }
-ruststack-s3-auth = { path = "../ruststack-s3-auth" }
+ruststack-s3-model = { workspace = true }
+ruststack-auth = { workspace = true }
 
 # Async
 tokio = { workspace = true }

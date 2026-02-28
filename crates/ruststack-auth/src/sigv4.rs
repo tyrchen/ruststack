@@ -132,7 +132,7 @@ pub fn parse_authorization_header(header: &str) -> Result<ParsedAuth, AuthError>
 /// # Examples
 ///
 /// ```
-/// use ruststack_s3_auth::sigv4::build_string_to_sign;
+/// use ruststack_auth::sigv4::build_string_to_sign;
 ///
 /// let sts = build_string_to_sign(
 ///     "20130524T000000Z",
@@ -162,7 +162,7 @@ pub fn build_string_to_sign(
 /// # Examples
 ///
 /// ```
-/// use ruststack_s3_auth::sigv4::derive_signing_key;
+/// use ruststack_auth::sigv4::derive_signing_key;
 ///
 /// let key = derive_signing_key(
 ///     "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
@@ -245,13 +245,22 @@ pub fn verify_sigv4(
     let signed_header_refs: Vec<&str> = parsed.signed_headers.iter().map(String::as_str).collect();
     let header_pairs: Vec<(&str, &str)> = collect_signed_headers(parts, &signed_header_refs)?;
 
+    // Use the x-amz-content-sha256 header value (what the client signed with)
+    // rather than the recomputed body hash. This is critical because the client
+    // may use STREAMING-* placeholders or compute the hash before encoding.
+    let payload_hash = parts
+        .headers
+        .get("x-amz-content-sha256")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or(body_hash);
+
     let canonical_request = build_canonical_request(
         method,
         uri,
         query,
         &header_pairs,
         &signed_header_refs,
-        body_hash,
+        payload_hash,
     );
 
     debug!(canonical_request, "Built canonical request");
@@ -340,7 +349,7 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
 /// # Examples
 ///
 /// ```
-/// use ruststack_s3_auth::sigv4::hash_payload;
+/// use ruststack_auth::sigv4::hash_payload;
 ///
 /// // SHA-256 of empty payload
 /// assert_eq!(

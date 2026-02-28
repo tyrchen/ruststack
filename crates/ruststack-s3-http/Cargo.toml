@@ -11,9 +11,9 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-ruststack-s3-model = { path = "../ruststack-s3-model" }
-ruststack-s3-auth = { path = "../ruststack-s3-auth" }
-ruststack-s3-xml = { path = "../ruststack-s3-xml" }
+ruststack-s3-model = { workspace = true }
+ruststack-auth = { workspace = true }
+ruststack-s3-xml = { workspace = true }
 
 hyper = { version = "1.8", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio", "server-auto", "server-graceful"] }

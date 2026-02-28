@@ -11,7 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-ruststack-s3-model = { path = "../ruststack-s3-model" }
+ruststack-s3-model = { workspace = true }
 quick-xml = "0.39"
 bytes = "1.11"
 chrono = { version = "0.4", features = ["serde"] }

@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 
-use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 
 /// The set of characters that must be percent-encoded in URI path segments.
 ///
@@ -50,7 +50,7 @@ const QUERY_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
 /// # Examples
 ///
 /// ```
-/// use ruststack_s3_auth::canonical::build_canonical_request;
+/// use ruststack_auth::canonical::build_canonical_request;
 ///
 /// let canonical = build_canonical_request(
 ///     "GET",
@@ -89,7 +89,7 @@ pub fn build_canonical_request(
 /// # Examples
 ///
 /// ```
-/// use ruststack_s3_auth::canonical::build_canonical_uri;
+/// use ruststack_auth::canonical::build_canonical_uri;
 ///
 /// assert_eq!(build_canonical_uri("/test.txt"), "/test.txt");
 /// assert_eq!(build_canonical_uri("/"), "/");
@@ -102,8 +102,15 @@ pub fn build_canonical_uri(path: &str) -> String {
     }
 
     let segments: Vec<&str> = path.split('/').collect();
-    let encoded_segments: Vec<String> =
-        segments.iter().map(|segment| uri_encode(segment)).collect();
+    let encoded_segments: Vec<String> = segments
+        .iter()
+        .map(|segment| {
+            // Decode first to normalize, then re-encode to produce consistent canonical form.
+            // This prevents double-encoding when the path is already percent-encoded.
+            let decoded = percent_decode_str(segment).decode_utf8_lossy();
+            uri_encode(&decoded)
+        })
+        .collect();
 
     encoded_segments.join("/")
 }
@@ -116,7 +123,7 @@ pub fn build_canonical_uri(path: &str) -> String {
 /// # Examples
 ///
 /// ```
-/// use ruststack_s3_auth::canonical::build_canonical_query_string;
+/// use ruststack_auth::canonical::build_canonical_query_string;
 ///
 /// assert_eq!(build_canonical_query_string(""), "");
 /// assert_eq!(
@@ -135,7 +142,11 @@ pub fn build_canonical_query_string(query: &str) -> String {
         .filter(|s| !s.is_empty())
         .map(|param| {
             let (key, value) = param.split_once('=').unwrap_or((param, ""));
-            (query_encode(key), query_encode(value))
+            // Decode first to normalize, then re-encode to produce consistent canonical form.
+            // This prevents double-encoding when the query string is already percent-encoded.
+            let decoded_key = percent_decode_str(key).decode_utf8_lossy();
+            let decoded_value = percent_decode_str(value).decode_utf8_lossy();
+            (query_encode(&decoded_key), query_encode(&decoded_value))
         })
         .collect();
 
@@ -160,7 +171,7 @@ pub fn build_canonical_query_string(query: &str) -> String {
 /// # Examples
 ///
 /// ```
-/// use ruststack_s3_auth::canonical::build_canonical_headers;
+/// use ruststack_auth::canonical::build_canonical_headers;
 ///
 /// let headers = vec![
 ///     ("Host", "example.com"),
@@ -208,7 +219,7 @@ pub fn build_canonical_headers(headers: &[(&str, &str)], signed_headers: &[&str]
 /// # Examples
 ///
 /// ```
-/// use ruststack_s3_auth::canonical::build_signed_headers_string;
+/// use ruststack_auth::canonical::build_signed_headers_string;
 ///
 /// assert_eq!(
 ///     build_signed_headers_string(&["x-amz-date", "host"]),
@@ -383,8 +394,41 @@ mod tests {
             &X-Amz-Expires=86400\
             &X-Amz-SignedHeaders=host";
         let result = build_canonical_query_string(query);
-        // Should be sorted and re-encoded
+        // Should be sorted and re-encoded (not double-encoded)
         assert!(result.contains("X-Amz-Algorithm=AWS4-HMAC-SHA256"));
         assert!(result.contains("X-Amz-Expires=86400"));
+        // %2F should be preserved, not double-encoded to %252F
+        assert!(result.contains("AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request"));
+    }
+
+    #[test]
+    fn test_should_not_double_encode_query_parameters() {
+        // Simulate a query string that arrives already percent-encoded from the HTTP layer
+        let query = "events=s3%3AObjectCreated%3A%2A&prefix=test";
+        let result = build_canonical_query_string(query);
+        // Should decode first, then re-encode consistently
+        assert_eq!(result, "events=s3%3AObjectCreated%3A%2A&prefix=test");
+    }
+
+    #[test]
+    fn test_should_normalize_inconsistent_encoding_in_query() {
+        // Raw (unencoded) input should produce the same result as pre-encoded input
+        let raw = "events=s3:ObjectCreated:*&prefix=test";
+        let encoded = "events=s3%3AObjectCreated%3A%2A&prefix=test";
+        assert_eq!(
+            build_canonical_query_string(raw),
+            build_canonical_query_string(encoded)
+        );
+    }
+
+    #[test]
+    fn test_should_not_double_encode_uri_path() {
+        // Path with already percent-encoded space
+        assert_eq!(build_canonical_uri("/hello%20world"), "/hello%20world");
+        // Raw path should produce the same result
+        assert_eq!(
+            build_canonical_uri("/hello world"),
+            build_canonical_uri("/hello%20world")
+        );
     }
 }

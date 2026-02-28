@@ -1,6 +1,6 @@
 [package]
-name = "ruststack-s3-auth"
-description = "AWS Signature Version 4 request authentication for RustStack S3"
+name = "ruststack-auth"
+description = "AWS Signature Version 2 and 4 request authentication for RustStack"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -21,6 +21,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 subtle = { workspace = true }
 digest = { workspace = true }
+sha1 = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
