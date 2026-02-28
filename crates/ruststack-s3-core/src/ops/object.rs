@@ -239,7 +239,7 @@ impl RustStackS3 {
             obj_meta
                 .content_type
                 .clone()
-                .unwrap_or_else(|| "application/octet-stream".to_owned()),
+                .unwrap_or_else(|| "binary/octet-stream".to_owned()),
         );
 
         let metadata = if obj_meta.user_metadata.is_empty() {
@@ -331,7 +331,7 @@ impl RustStackS3 {
             obj.metadata
                 .content_type
                 .clone()
-                .unwrap_or_else(|| "application/octet-stream".to_owned()),
+                .unwrap_or_else(|| "binary/octet-stream".to_owned()),
         );
 
         let metadata = if obj.metadata.user_metadata.is_empty() {

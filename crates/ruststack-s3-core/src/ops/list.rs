@@ -231,6 +231,13 @@ impl RustStackS3 {
         &self,
         input: ListObjectVersionsInput,
     ) -> Result<ListObjectVersionsOutput, S3Error> {
+        // S3 requires KeyMarker when VersionIdMarker is specified.
+        if input.version_id_marker.is_some() && input.key_marker.is_none() {
+            return Err(S3Error::invalid_argument(
+                "A version-id marker cannot be specified without a key marker",
+            ));
+        }
+
         let bucket_name = input.bucket;
 
         let bucket = self

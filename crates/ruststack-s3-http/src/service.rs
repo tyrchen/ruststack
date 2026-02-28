@@ -341,8 +341,10 @@ fn health_check_response() -> http::Response<S3ResponseBody> {
 fn is_metrics_endpoint(method: &http::Method, path: &str) -> bool {
     *method == http::Method::GET
         && (path == "/minio/v2/metrics/cluster"
-            || path == "/minio/prometheus/metrics"
-            || path == "/minio/v2/metrics/node")
+            || path == "/minio/v2/metrics/node"
+            || path == "/minio/v2/metrics/bucket"
+            || path == "/minio/v2/metrics/resource"
+            || path == "/minio/prometheus/metrics")
 }
 
 /// Produce a Prometheus-format metrics response.

@@ -6,6 +6,10 @@
 
 use chrono::Utc;
 use ruststack_s3_model::error::{S3Error, S3ErrorCode};
+
+/// Minimum part size for multipart uploads (5 MB). All parts except the last
+/// must be at least this size per the S3 specification.
+const MIN_PART_SIZE: u64 = 5 * 1024 * 1024;
 use ruststack_s3_model::input::{
     AbortMultipartUploadInput, CompleteMultipartUploadInput, CreateMultipartUploadInput,
     ListMultipartUploadsInput, ListPartsInput, UploadPartCopyInput, UploadPartInput,
@@ -353,6 +357,25 @@ impl RustStackS3 {
             part_numbers.push(part_num_u32);
         }
 
+        // Validate minimum part size for all parts except the last one.
+        // S3 requires each part (except the final one) to be at least 5 MB.
+        if part_numbers.len() > 1 {
+            for &num in &part_numbers[..part_numbers.len() - 1] {
+                if let Some(part) = upload.get_part(num) {
+                    if part.size < MIN_PART_SIZE {
+                        return Err(S3Error::with_message(
+                            S3ErrorCode::EntityTooSmall,
+                            format!(
+                                "Your proposed upload is smaller than the minimum allowed size. \
+                                 Part {num} has size {} bytes, minimum is {MIN_PART_SIZE}",
+                                part.size
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+
         // Determine version ID.
         let version_id = if bucket.is_versioning_enabled() {
             crate::utils::generate_version_id()
@@ -440,13 +463,8 @@ impl RustStackS3 {
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
 
-        // Remove the upload metadata.
-        bucket.multipart_uploads.remove(&upload_id).ok_or_else(|| {
-            S3ServiceError::NoSuchUpload {
-                upload_id: upload_id.clone(),
-            }
-            .into_s3_error()
-        })?;
+        // Remove the upload metadata (idempotent: no error if already gone).
+        bucket.multipart_uploads.remove(&upload_id);
 
         // Clean up storage parts.
         self.storage.abort_multipart(&bucket_name, &upload_id);
