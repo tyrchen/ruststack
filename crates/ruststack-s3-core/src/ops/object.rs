@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use chrono::Utc;
-use ruststack_s3_model::error::S3Error;
+use ruststack_s3_model::error::{S3Error, S3ErrorCode};
 use ruststack_s3_model::input::{
     CopyObjectInput, DeleteObjectInput, DeleteObjectsInput, GetObjectInput, HeadObjectInput,
     PutObjectInput,
@@ -25,6 +25,7 @@ use tracing::debug;
 
 use crate::error::S3ServiceError;
 use crate::provider::RustStackS3;
+use crate::state::keystore::ObjectStore;
 use crate::state::object::{
     CannedAcl, ChecksumData, ObjectMetadata, Owner as InternalOwner, S3Object,
 };
@@ -32,6 +33,50 @@ use crate::utils::{
     is_valid_if_match, is_valid_if_none_match, parse_copy_source, parse_range_header,
 };
 use crate::validation::{validate_content_md5, validate_metadata, validate_object_key};
+
+/// Check whether Object Lock (legal hold or retention) prevents deletion of a
+/// specific object version.
+///
+/// # Errors
+///
+/// Returns `AccessDenied` if the version has a legal hold enabled or an active
+/// retention period.
+///
+/// AWS S3 rules:
+/// - DELETE *without* a version ID always succeeds (creates a delete marker).
+/// - DELETE *with* a version ID must be rejected if the version has a legal
+///   hold enabled or a retention period that has not yet expired.
+///
+/// Returns `Ok(())` when the deletion is allowed.
+#[allow(clippy::result_large_err)]
+fn check_object_lock_for_delete(
+    store: &ObjectStore,
+    key: &str,
+    version_id: &str,
+) -> Result<(), S3Error> {
+    let Some(obj) = store.get_version(key, version_id) else {
+        // Version not found — nothing to protect.
+        return Ok(());
+    };
+
+    if obj.metadata.object_lock_legal_hold == Some(true) {
+        return Err(S3Error::with_message(
+            S3ErrorCode::AccessDenied,
+            "Object Lock legal hold is enabled on this object",
+        ));
+    }
+
+    if let Some(retain_until) = obj.metadata.object_lock_retain_until {
+        if retain_until > Utc::now() {
+            return Err(S3Error::with_message(
+                S3ErrorCode::AccessDenied,
+                "Object Lock retention period has not expired",
+            ));
+        }
+    }
+
+    Ok(())
+}
 
 // AWS S3 DTOs use signed integers (i32/i64) for inherently non-negative values
 // (sizes, part counts). Casting from u64/u32/usize is safe in practice.
@@ -395,6 +440,7 @@ impl RustStackS3 {
             if let Some(version_id) = &input.version_id {
                 // Delete a specific version.
                 let mut store = bucket.objects.write();
+                check_object_lock_for_delete(&store, &key, version_id)?;
                 let removed = store.delete_version(&key, version_id);
                 if let Some(ref version) = removed {
                     self.storage
@@ -446,7 +492,7 @@ impl RustStackS3 {
         let quiet = delete_request.quiet.unwrap_or(false);
 
         let mut deleted: Vec<DeletedObject> = Vec::with_capacity(objects.len());
-        let errors: Vec<ruststack_s3_model::types::Error> = Vec::new();
+        let mut errors: Vec<ruststack_s3_model::types::Error> = Vec::new();
 
         for obj_id in objects {
             let key = obj_id.key;
@@ -455,6 +501,15 @@ impl RustStackS3 {
             if let Some(ref vid) = version_id {
                 // Delete a specific version.
                 let mut store = bucket.objects.write();
+                if let Err(lock_err) = check_object_lock_for_delete(&store, &key, vid) {
+                    errors.push(ruststack_s3_model::types::Error {
+                        code: Some(lock_err.code.as_str().to_owned()),
+                        key: Some(key),
+                        message: Some(lock_err.message),
+                        version_id: Some(vid.clone()),
+                    });
+                    continue;
+                }
                 let removed = store.delete_version(&key, vid);
                 if let Some(ref version) = removed {
                     self.storage

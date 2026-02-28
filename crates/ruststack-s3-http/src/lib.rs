@@ -55,6 +55,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod body;
+pub mod codec;
 pub mod dispatch;
 pub mod request;
 pub mod response;

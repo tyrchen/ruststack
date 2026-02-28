@@ -150,6 +150,7 @@ impl<H: S3Handler> Service<http::Request<Incoming>> for S3HttpService<H> {
 }
 
 /// Process an incoming HTTP request through the S3 pipeline.
+#[allow(clippy::too_many_lines)]
 async fn process_request<H: S3Handler>(
     req: http::Request<Incoming>,
     handler: &H,
@@ -198,8 +199,8 @@ async fn process_request<H: S3Handler>(
     );
 
     // 4. Collect body.
-    let (parts, incoming) = req.into_parts();
-    let body = match collect_body(incoming).await {
+    let (mut parts, incoming) = req.into_parts();
+    let mut body = match collect_body(incoming).await {
         Ok(body) => body,
         Err(err) => {
             error!(error = %err, request_id, "failed to collect request body");
@@ -213,6 +214,26 @@ async fn process_request<H: S3Handler>(
     if let Err(s3_err) = validate_content_sha256(&parts, &body) {
         warn!(error = %s3_err.message, request_id, "content SHA256 mismatch");
         return error_to_response(&s3_err, request_id);
+    }
+
+    // 4c. Decode AWS chunked transfer encoding.
+    if crate::codec::is_aws_chunked(&parts) {
+        match crate::codec::decode_aws_chunked(&body) {
+            Ok(decoded) => {
+                debug!(
+                    raw_len = body.len(),
+                    decoded_len = decoded.len(),
+                    request_id,
+                    "decoded aws-chunked body"
+                );
+                body = decoded;
+                crate::codec::strip_aws_chunked_encoding(&mut parts.headers);
+            }
+            Err(s3_err) => {
+                warn!(error = %s3_err.message, request_id, "failed to decode aws-chunked body");
+                return error_to_response(&s3_err, request_id);
+            }
+        }
     }
 
     // 5. Authentication.
