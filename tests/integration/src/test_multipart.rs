@@ -24,8 +24,8 @@ mod tests {
 
         let upload_id = create.upload_id().expect("upload_id");
 
-        // Upload 2 parts (minimum 5 MB each for real S3, but our server accepts smaller).
-        let part1_data = vec![0xAAu8; 1024];
+        // Upload 2 parts. Non-last parts must be at least 5 MB per S3 spec.
+        let part1_data = vec![0xAAu8; 5 * 1024 * 1024];
         let part1 = client
             .upload_part()
             .bucket(&bucket)
@@ -90,9 +90,9 @@ mod tests {
             .expect("get multipart object");
 
         let data = resp.body.collect().await.expect("collect").into_bytes();
-        assert_eq!(data.len(), 2048);
-        assert!(data[..1024].iter().all(|&b| b == 0xAA));
-        assert!(data[1024..].iter().all(|&b| b == 0xBB));
+        assert_eq!(data.len(), 5 * 1024 * 1024 + 1024);
+        assert!(data[..5 * 1024 * 1024].iter().all(|&b| b == 0xAA));
+        assert!(data[5 * 1024 * 1024..].iter().all(|&b| b == 0xBB));
 
         cleanup_bucket(&client, &bucket).await;
     }
