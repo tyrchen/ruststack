@@ -13,7 +13,9 @@ workspace = true
 [dependencies]
 ruststack-core = { workspace = true }
 ruststack-dynamodb-model = { workspace = true }
+ruststack-dynamodb-http = { workspace = true }
 ruststack-auth = { workspace = true }
+http = { workspace = true }
 
 dashmap = { workspace = true }
 parking_lot = { workspace = true }

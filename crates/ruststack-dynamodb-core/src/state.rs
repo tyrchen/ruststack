@@ -1,0 +1,201 @@
+//! DynamoDB service state management.
+
+use std::sync::Arc;
+
+use dashmap::DashMap;
+
+use ruststack_dynamodb_model::error::DynamoDBError;
+use ruststack_dynamodb_model::types::{
+    AttributeDefinition, BillingMode, BillingModeSummary, GlobalSecondaryIndex,
+    GlobalSecondaryIndexDescription, IndexStatus, KeySchemaElement, LocalSecondaryIndex,
+    LocalSecondaryIndexDescription, ProvisionedThroughput, ProvisionedThroughputDescription,
+    SSEDescription, SSESpecification, SseStatus, SseType, StreamSpecification, TableDescription,
+    TableStatus, Tag,
+};
+
+use crate::storage::{KeySchema, TableStorage};
+
+/// Top-level DynamoDB service state.
+#[derive(Debug)]
+pub struct DynamoDBServiceState {
+    /// All tables keyed by name.
+    tables: DashMap<String, Arc<DynamoDBTable>>,
+}
+
+impl DynamoDBServiceState {
+    /// Create a new empty service state.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            tables: DashMap::new(),
+        }
+    }
+
+    /// Get a table by name.
+    #[must_use]
+    pub fn get_table(&self, name: &str) -> Option<Arc<DynamoDBTable>> {
+        self.tables.get(name).map(|r| Arc::clone(r.value()))
+    }
+
+    /// Get a table or return `ResourceNotFoundException`.
+    pub fn require_table(&self, name: &str) -> Result<Arc<DynamoDBTable>, DynamoDBError> {
+        self.get_table(name).ok_or_else(|| {
+            DynamoDBError::resource_not_found(format!(
+                "Requested resource not found: Table: {name} not found"
+            ))
+        })
+    }
+
+    /// Insert a new table. Returns error if table already exists.
+    pub fn create_table(&self, table: DynamoDBTable) -> Result<Arc<DynamoDBTable>, DynamoDBError> {
+        let name = table.name.clone();
+        let table = Arc::new(table);
+        // Use entry API to atomically check + insert.
+        match self.tables.entry(name) {
+            dashmap::mapref::entry::Entry::Occupied(e) => Err(DynamoDBError::resource_in_use(
+                format!("Table already exists: {}", e.key()),
+            )),
+            dashmap::mapref::entry::Entry::Vacant(e) => {
+                let table = Arc::clone(&table);
+                e.insert(table.clone());
+                Ok(table)
+            }
+        }
+    }
+
+    /// Remove a table by name. Returns the removed table.
+    pub fn delete_table(&self, name: &str) -> Result<Arc<DynamoDBTable>, DynamoDBError> {
+        self.tables.remove(name).map(|(_, t)| t).ok_or_else(|| {
+            DynamoDBError::resource_not_found(format!(
+                "Requested resource not found: Table: {name} not found"
+            ))
+        })
+    }
+
+    /// List all table names (sorted).
+    #[must_use]
+    pub fn list_table_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.tables.iter().map(|r| r.key().clone()).collect();
+        names.sort();
+        names
+    }
+
+    /// Reset all state (remove all tables).
+    pub fn reset(&self) {
+        self.tables.clear();
+    }
+}
+
+impl Default for DynamoDBServiceState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A single DynamoDB table with metadata and storage.
+#[derive(Debug)]
+pub struct DynamoDBTable {
+    /// Table name.
+    pub name: String,
+    /// Table status.
+    pub status: TableStatus,
+    /// Key schema elements.
+    pub key_schema_elements: Vec<KeySchemaElement>,
+    /// Parsed key schema for storage operations.
+    pub key_schema: KeySchema,
+    /// Attribute definitions.
+    pub attribute_definitions: Vec<AttributeDefinition>,
+    /// Billing mode.
+    pub billing_mode: BillingMode,
+    /// Provisioned throughput (accepted but not enforced).
+    pub provisioned_throughput: Option<ProvisionedThroughput>,
+    /// Global secondary index definitions.
+    pub gsi_definitions: Vec<GlobalSecondaryIndex>,
+    /// Local secondary index definitions.
+    pub lsi_definitions: Vec<LocalSecondaryIndex>,
+    /// Stream specification.
+    pub stream_specification: Option<StreamSpecification>,
+    /// SSE specification.
+    pub sse_specification: Option<SSESpecification>,
+    /// Tags.
+    pub tags: parking_lot::RwLock<Vec<Tag>>,
+    /// Table ARN.
+    pub arn: String,
+    /// Creation timestamp.
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Item storage engine.
+    pub storage: TableStorage,
+}
+
+impl DynamoDBTable {
+    /// Build a `TableDescription` from this table's metadata.
+    #[must_use]
+    pub fn to_description(&self) -> TableDescription {
+        TableDescription {
+            table_name: Some(self.name.clone()),
+            table_status: Some(self.status.clone()),
+            key_schema: self.key_schema_elements.clone(),
+            attribute_definitions: self.attribute_definitions.clone(),
+            table_arn: Some(self.arn.clone()),
+            table_id: Some(uuid::Uuid::new_v4().to_string()),
+            #[allow(clippy::cast_precision_loss)] // Acceptable: DynamoDB returns epoch seconds as f64
+            creation_date_time: Some(self.created_at.timestamp() as f64),
+            item_count: Some(i64::try_from(self.storage.item_count()).unwrap_or(i64::MAX)),
+            table_size_bytes: Some(
+                i64::try_from(self.storage.total_size_bytes()).unwrap_or(i64::MAX),
+            ),
+            billing_mode_summary: Some(BillingModeSummary {
+                billing_mode: Some(self.billing_mode.clone()),
+                last_update_to_pay_per_request_date_time: None,
+            }),
+            provisioned_throughput: self
+                .provisioned_throughput
+                .as_ref()
+                .map(|pt| ProvisionedThroughputDescription {
+                    read_capacity_units: pt.read_capacity_units,
+                    write_capacity_units: pt.write_capacity_units,
+                    ..Default::default()
+                }),
+            global_secondary_indexes: self
+                .gsi_definitions
+                .iter()
+                .map(|gsi| GlobalSecondaryIndexDescription {
+                    index_name: Some(gsi.index_name.clone()),
+                    key_schema: gsi.key_schema.clone(),
+                    projection: Some(gsi.projection.clone()),
+                    index_status: Some(IndexStatus::Active),
+                    provisioned_throughput: gsi.provisioned_throughput.as_ref().map(
+                        |pt| ProvisionedThroughputDescription {
+                            read_capacity_units: pt.read_capacity_units,
+                            write_capacity_units: pt.write_capacity_units,
+                            ..Default::default()
+                        },
+                    ),
+                    index_size_bytes: Some(0),
+                    item_count: Some(0),
+                    index_arn: Some(format!("{}/index/{}", self.arn, gsi.index_name)),
+                    ..Default::default()
+                })
+                .collect(),
+            local_secondary_indexes: self
+                .lsi_definitions
+                .iter()
+                .map(|lsi| LocalSecondaryIndexDescription {
+                    index_name: Some(lsi.index_name.clone()),
+                    key_schema: lsi.key_schema.clone(),
+                    projection: Some(lsi.projection.clone()),
+                    index_size_bytes: Some(0),
+                    item_count: Some(0),
+                    index_arn: Some(format!("{}/index/{}", self.arn, lsi.index_name)),
+                })
+                .collect(),
+            stream_specification: self.stream_specification.clone(),
+            sse_description: self.sse_specification.as_ref().map(|_| SSEDescription {
+                status: Some(SseStatus::Enabled),
+                sse_type: Some(SseType::Aes256),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+}
