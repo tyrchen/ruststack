@@ -2485,6 +2485,29 @@ mod tests {
     }
 
     #[test]
+    fn test_should_deserialize_cors_configuration() {
+        let xml = br#"<CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+            <CORSRule>
+                <AllowedOrigin>https://example.com</AllowedOrigin>
+                <AllowedMethod>GET</AllowedMethod>
+                <AllowedMethod>PUT</AllowedMethod>
+                <AllowedHeader>*</AllowedHeader>
+                <MaxAgeSeconds>3600</MaxAgeSeconds>
+            </CORSRule>
+        </CORSConfiguration>"#;
+
+        let config: CORSConfiguration = from_xml(xml).expect("deserialization should succeed");
+        assert_eq!(config.cors_rules.len(), 1);
+        assert_eq!(
+            config.cors_rules[0].allowed_origins,
+            vec!["https://example.com"]
+        );
+        assert_eq!(config.cors_rules[0].allowed_methods, vec!["GET", "PUT"]);
+        assert_eq!(config.cors_rules[0].allowed_headers, vec!["*"]);
+        assert_eq!(config.cors_rules[0].max_age_seconds, Some(3600));
+    }
+
+    #[test]
     fn test_should_roundtrip_tagging() {
         let original = Tagging {
             tag_set: vec![
