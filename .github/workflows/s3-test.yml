@@ -375,7 +375,8 @@ jobs:
 
           # Create objects with a directory-like structure
           for key in "photos/2024/jan.jpg" "photos/2024/feb.jpg" "photos/2025/mar.jpg" "docs/readme.txt" "docs/guide.txt" "root.txt"; do
-            echo "$key" | aws s3api put-object --bucket test-listing --key "$key" --body /dev/stdin > /dev/null
+            echo "$key" > /tmp/listing-obj.txt
+            aws s3api put-object --bucket test-listing --key "$key" --body /tmp/listing-obj.txt > /dev/null
           done
 
           # List all
