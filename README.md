@@ -42,6 +42,82 @@ docker run -p 4566:4566 ruststack-s3
 
 Multi-arch images (amd64/arm64) are published to `ghcr.io/tyrchen/ruststack-s3` on tagged releases.
 
+## GitHub Action
+
+Use RustStack as a drop-in S3 service in your CI pipelines:
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+  - uses: tyrchen/ruststack@v0
+    id: ruststack
+```
+
+That's it. The action starts the server, waits for it to be healthy, and exports `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` into the environment. All subsequent `aws` CLI and AWS SDK calls will automatically use RustStack.
+
+### Usage Example
+
+```yaml
+name: test
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: tyrchen/ruststack@v0
+
+      - name: Run S3 tests
+        run: |
+          aws s3api create-bucket --bucket my-test-bucket
+          aws s3api put-object --bucket my-test-bucket --key hello.txt --body README.md
+          aws s3api get-object --bucket my-test-bucket --key hello.txt /tmp/out.txt
+```
+
+### Action Inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `image-tag` | `latest` | Docker image tag (`latest`, `0.1.0`, etc.) |
+| `port` | `4566` | Host port to bind the S3 service to |
+| `default-region` | `us-east-1` | Default AWS region |
+| `log-level` | `info` | Log level (`error`, `warn`, `info`, `debug`, `trace`) |
+| `wait-timeout` | `30` | Seconds to wait for the service to become healthy |
+
+### Action Outputs
+
+| Output | Description |
+|--------|-------------|
+| `endpoint` | The S3 endpoint URL (e.g. `http://localhost:4566`) |
+| `container-id` | Docker container ID for advanced usage |
+
+### Environment Variables Set by the Action
+
+The action automatically exports these into `$GITHUB_ENV`, so all subsequent steps can use `aws` CLI and AWS SDKs without extra configuration:
+
+| Variable | Value |
+|----------|-------|
+| `AWS_ENDPOINT_URL` | `http://localhost:<port>` |
+| `AWS_ACCESS_KEY_ID` | `test` |
+| `AWS_SECRET_ACCESS_KEY` | `test` |
+| `AWS_DEFAULT_REGION` | Value of `default-region` input |
+
+### What You Can Test
+
+See the [s3-test workflow](.github/workflows/s3-test.yml) for a comprehensive example covering:
+
+- Bucket CRUD, object CRUD, copy, batch delete
+- Object metadata (content-type, cache-control, user metadata)
+- Presigned URLs (GET and PUT via curl)
+- Versioning (multiple versions, delete markers, version-specific GET)
+- Object tagging (put, get, delete)
+- Bucket configuration (CORS, lifecycle, encryption, tagging, website)
+- Object lock (retention, legal hold)
+- Multipart uploads (create, upload-part, list-parts, complete, abort)
+- List objects (prefix, delimiter, max-keys, pagination, start-after)
+- POST object (browser-based multipart/form-data upload)
+- Error handling (NoSuchBucket, NoSuchKey, BucketNotEmpty)
+
 ## Configuration
 
 All settings are controlled via environment variables, matching LocalStack conventions:
@@ -172,8 +248,9 @@ Tests cover buckets, objects, multipart uploads, versioning, CORS, error handlin
 |----------|---------|-------------|
 | `build.yml` | Push / PR | Format, lint, test, coverage |
 | `integration.yml` | Push / PR | AWS SDK integration tests, MinIO Mint compatibility |
+| `s3-test.yml` | Push / PR | End-to-end S3 tests via the GitHub Action + AWS CLI |
 | `nightly.yml` | Daily 06:00 UTC | Ceph s3-tests compatibility suite |
-| `release-docker.yml` | Version tags | Multi-arch Docker image to GHCR |
+| `release-docker.yml` | Version tags / manual | Multi-arch Docker image to GHCR |
 
 ## License
 
