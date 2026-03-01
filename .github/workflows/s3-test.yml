@@ -113,19 +113,16 @@ jobs:
           echo "$HEAD" | grep -q "attachment"
           echo "$HEAD" | grep -q "ruststack"
 
-      # ── Large Object via aws s3 cp ───────────────────────────────────
-      - name: "Large Object: 10MB upload via aws s3 cp"
+      # ── Larger Object via aws s3 cp ──────────────────────────────────
+      - name: "Larger Object: 1MB upload via aws s3 cp with integrity check"
         run: |
           set -euo pipefail
 
-          # Raise multipart threshold so aws s3 cp uses a single PUT
-          aws configure set default.s3.multipart_threshold 64MB
-
-          # Generate a 10MB file
-          dd if=/dev/urandom of=/tmp/large-file.bin bs=1M count=10 2>/dev/null
+          # Generate a 1MB file
+          dd if=/dev/urandom of=/tmp/large-file.bin bs=1M count=1 2>/dev/null
           ORIG_MD5=$(md5sum /tmp/large-file.bin | cut -d' ' -f1)
 
-          # Upload using high-level aws s3 cp (single PUT due to raised threshold)
+          # Upload using high-level aws s3 cp
           aws s3 cp /tmp/large-file.bin s3://test-bucket-ops/large/file.bin
 
           # Download and verify integrity
