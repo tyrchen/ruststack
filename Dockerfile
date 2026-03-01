@@ -12,14 +12,24 @@ WORKDIR /src
 
 # Copy manifests first to cache dependency compilation.
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY apps/ruststack-s3-server/Cargo.toml apps/ruststack-s3-server/Cargo.toml
+COPY crates/ruststack-auth/Cargo.toml crates/ruststack-auth/Cargo.toml
 COPY crates/ruststack-core/Cargo.toml crates/ruststack-core/Cargo.toml
 COPY crates/ruststack-s3-core/Cargo.toml crates/ruststack-s3-core/Cargo.toml
-COPY apps/ruststack-s3-server/Cargo.toml apps/ruststack-s3-server/Cargo.toml
+COPY crates/ruststack-s3-http/Cargo.toml crates/ruststack-s3-http/Cargo.toml
+COPY crates/ruststack-s3-model/Cargo.toml crates/ruststack-s3-model/Cargo.toml
+COPY crates/ruststack-s3-xml/Cargo.toml crates/ruststack-s3-xml/Cargo.toml
+COPY tests/integration/Cargo.toml tests/integration/Cargo.toml
 
 # Create stub sources so cargo can resolve the workspace.
-RUN mkdir -p crates/ruststack-core/src && echo '//! stub' > crates/ruststack-core/src/lib.rs \
+RUN mkdir -p apps/ruststack-s3-server/src && echo 'fn main() {}' > apps/ruststack-s3-server/src/main.rs \
+    && mkdir -p crates/ruststack-auth/src && echo '//! stub' > crates/ruststack-auth/src/lib.rs \
+    && mkdir -p crates/ruststack-core/src && echo '//! stub' > crates/ruststack-core/src/lib.rs \
     && mkdir -p crates/ruststack-s3-core/src && echo '//! stub' > crates/ruststack-s3-core/src/lib.rs \
-    && mkdir -p apps/ruststack-s3-server/src && echo 'fn main() {}' > apps/ruststack-s3-server/src/main.rs
+    && mkdir -p crates/ruststack-s3-http/src && echo '//! stub' > crates/ruststack-s3-http/src/lib.rs \
+    && mkdir -p crates/ruststack-s3-model/src && echo '//! stub' > crates/ruststack-s3-model/src/lib.rs \
+    && mkdir -p crates/ruststack-s3-xml/src && echo '//! stub' > crates/ruststack-s3-xml/src/lib.rs \
+    && mkdir -p tests/integration/src && echo '//! stub' > tests/integration/src/lib.rs
 
 # Pre-build dependencies (cached layer).
 ARG TARGETARCH
@@ -35,9 +45,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Copy real source code.
 COPY crates/ crates/
 COPY apps/ apps/
+COPY tests/ tests/
 
 # Touch source files so cargo knows they changed.
-RUN find crates/ apps/ -name '*.rs' -exec touch {} +
+RUN find crates/ apps/ tests/ -name '*.rs' -exec touch {} +
 
 # Build the actual binary.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
