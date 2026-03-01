@@ -134,7 +134,7 @@ impl DynamoDBTable {
     #[must_use]
     pub fn to_description(&self) -> TableDescription {
         #[allow(clippy::cast_precision_loss)] // Acceptable: DynamoDB returns epoch seconds as f64
-        let creation_time = self.created_at.timestamp() as f64;
+        let creation_time = self.created_at.timestamp_millis() as f64 / 1000.0;
         TableDescription {
             table_name: Some(self.name.clone()),
             table_status: Some(self.status.clone()),
@@ -203,7 +203,7 @@ impl DynamoDBTable {
     #[must_use]
     pub fn to_delete_description(&self) -> TableDescription {
         #[allow(clippy::cast_precision_loss)]
-        let creation_time = self.created_at.timestamp() as f64;
+        let creation_time = self.created_at.timestamp_millis() as f64 / 1000.0;
         TableDescription {
             table_name: Some(self.name.clone()),
             table_status: Some(TableStatus::Deleting),

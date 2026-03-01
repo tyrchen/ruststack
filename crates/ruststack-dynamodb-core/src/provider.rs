@@ -31,12 +31,176 @@ use crate::expression::{
 };
 use crate::state::{DynamoDBServiceState, DynamoDBTable};
 use crate::storage::{
-    KeyAttribute, KeySchema, SortKeyCondition, SortableAttributeValue, TableStorage,
-    calculate_item_size, extract_primary_key,
+    KeyAttribute, KeySchema, PrimaryKey, SortKeyCondition, SortableAttributeValue, TableStorage,
+    calculate_item_size, extract_primary_key, partition_key_segment,
 };
 
 /// Maximum item size in bytes (400 KB).
 const MAX_ITEM_SIZE_BYTES: u64 = 400 * 1024;
+
+/// Maximum number of significant digits allowed for DynamoDB numbers.
+const MAX_SIGNIFICANT_DIGITS: usize = 38;
+
+/// Validate a DynamoDB number string for format, magnitude, and precision.
+///
+/// Returns `Ok(())` if the number is valid, or an error with an appropriate
+/// message for invalid format, overflow, underflow, or precision violations.
+fn validate_number_string(s: &str) -> Result<(), DynamoDBError> {
+    // Reject leading/trailing spaces.
+    if s != s.trim() {
+        return Err(DynamoDBError::validation(
+            "The parameter cannot be converted to a numeric value: numeric value is not valid",
+        ));
+    }
+    let trimmed = s.trim();
+
+    // Reject empty strings.
+    if trimmed.is_empty() {
+        return Err(DynamoDBError::validation(
+            "The parameter cannot be converted to a numeric value",
+        ));
+    }
+
+    // Reject NaN, Infinity, and other non-numeric strings.
+    // Only allow: optional sign, digits, optional decimal point, optional exponent.
+    let rest = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
+    if rest.is_empty() {
+        return Err(DynamoDBError::validation(
+            "The parameter cannot be converted to a numeric value: numeric value is not valid",
+        ));
+    }
+
+    // Split into mantissa and exponent parts.
+    let (mantissa, explicit_exp) = if let Some(pos) = rest.find(['e', 'E']) {
+        let exp_str = &rest[pos + 1..];
+        let exp: i64 = exp_str.parse().map_err(|_| {
+            DynamoDBError::validation(
+                "The parameter cannot be converted to a numeric value: numeric value is not valid",
+            )
+        })?;
+        (&rest[..pos], exp)
+    } else {
+        (rest, 0i64)
+    };
+
+    // Validate mantissa: must be digits with optional single decimal point.
+    // Reject leading/trailing spaces (already trimmed), but also reject
+    // mantissa that has no digits at all.
+    if mantissa.is_empty() {
+        return Err(DynamoDBError::validation(
+            "The parameter cannot be converted to a numeric value: numeric value is not valid",
+        ));
+    }
+
+    let mut has_dot = false;
+    let mut has_digit = false;
+    for ch in mantissa.chars() {
+        if ch == '.' {
+            if has_dot {
+                return Err(DynamoDBError::validation(
+                    "The parameter cannot be converted to a numeric value: numeric value is not valid",
+                ));
+            }
+            has_dot = true;
+        } else if ch.is_ascii_digit() {
+            has_digit = true;
+        } else {
+            return Err(DynamoDBError::validation(
+                "The parameter cannot be converted to a numeric value: numeric value is not valid",
+            ));
+        }
+    }
+    if !has_digit {
+        return Err(DynamoDBError::validation(
+            "The parameter cannot be converted to a numeric value: numeric value is not valid",
+        ));
+    }
+
+    // Remove the decimal point and compute significant digits.
+    let all_digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    let trimmed_leading = all_digits.trim_start_matches('0');
+    let significant = trimmed_leading.trim_end_matches('0');
+
+    // Check if the number is zero (all zeros).
+    if significant.is_empty() {
+        // Zero is always valid regardless of exponent.
+        return Ok(());
+    }
+
+    // Validate precision: max 38 significant digits.
+    let sig_digit_count = trimmed_leading.trim_end_matches('0').len();
+    if sig_digit_count > MAX_SIGNIFICANT_DIGITS {
+        return Err(DynamoDBError::validation(format!(
+            "Attempting to store more than {MAX_SIGNIFICANT_DIGITS} significant digits in a Number"
+        )));
+    }
+
+    // Compute the actual magnitude of the number.
+    // The number is: significant_digits * 10^(explicit_exp - frac_digits + trailing_zeros_in_significant)
+    let dot_pos = mantissa.find('.');
+    #[allow(clippy::cast_possible_wrap)]
+    let frac_digits = if let Some(pos) = dot_pos {
+        (mantissa.len() - pos - 1) as i64
+    } else {
+        0i64
+    };
+    // Number of leading zeros in all_digits
+    #[allow(clippy::cast_possible_wrap)]
+    let leading_zeros = (all_digits.len() - trimmed_leading.len()) as i64;
+    // Actual magnitude = explicit_exp - frac_digits + all_digits.len() - leading_zeros - 1
+    #[allow(clippy::cast_possible_wrap)]
+    let magnitude = explicit_exp - frac_digits + all_digits.len() as i64 - leading_zeros - 1;
+
+    if magnitude > 125 {
+        return Err(DynamoDBError::validation(
+            "Number overflow. Attempting to store a number with magnitude larger than supported range",
+        ));
+    }
+    // The smallest allowed magnitude is -130.
+    // A number like 1e-130 has magnitude = -130, which is allowed.
+    // A number like 1e-131 has magnitude = -131, which is NOT allowed.
+    if magnitude < -130 {
+        return Err(DynamoDBError::validation(
+            "Number underflow. Attempting to store a number with magnitude smaller than supported range",
+        ));
+    }
+
+    Ok(())
+}
+
+/// Validate all number-type values in an attribute value map.
+fn validate_numbers_in_item(item: &HashMap<String, AttributeValue>) -> Result<(), DynamoDBError> {
+    for val in item.values() {
+        validate_numbers_in_value(val)?;
+    }
+    Ok(())
+}
+
+/// Recursively validate number-type values in an `AttributeValue`.
+fn validate_numbers_in_value(val: &AttributeValue) -> Result<(), DynamoDBError> {
+    match val {
+        AttributeValue::N(s) => validate_number_string(s),
+        AttributeValue::Ns(nums) => {
+            for n in nums {
+                validate_number_string(n)?;
+            }
+            Ok(())
+        }
+        AttributeValue::L(list) => {
+            for v in list {
+                validate_numbers_in_value(v)?;
+            }
+            Ok(())
+        }
+        AttributeValue::M(map) => {
+            for v in map.values() {
+                validate_numbers_in_value(v)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
 
 /// Validate a table name against DynamoDB rules: 3-255 characters, `[a-zA-Z0-9._-]+`.
 fn validate_table_name(name: &str) -> Result<(), DynamoDBError> {
@@ -109,6 +273,56 @@ fn validate_key_only_has_key_attrs(
     Ok(())
 }
 
+/// Validate that key attribute values match the expected types from the key schema.
+///
+/// DynamoDB only allows S, N, or B for key attributes. This function checks
+/// that each provided key value has the type matching the schema definition.
+fn validate_key_types(
+    key_schema: &KeySchema,
+    key: &HashMap<String, AttributeValue>,
+) -> Result<(), DynamoDBError> {
+    for ka in std::iter::once(&key_schema.partition_key).chain(key_schema.sort_key.iter()) {
+        if let Some(val) = key.get(&ka.name) {
+            let type_matches = match &ka.attr_type {
+                ScalarAttributeType::S => matches!(val, AttributeValue::S(_)),
+                ScalarAttributeType::N => matches!(val, AttributeValue::N(_)),
+                ScalarAttributeType::B => matches!(val, AttributeValue::B(_)),
+                ScalarAttributeType::Unknown(_) => false,
+            };
+            if !type_matches {
+                return Err(DynamoDBError::validation(format!(
+                    "The provided key element does not match the schema. \
+                     Expected type {expected} for key column {name}, got type {actual}",
+                    expected = ka.attr_type,
+                    name = ka.name,
+                    actual = val.type_descriptor(),
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate that `AttributesToGet` does not contain duplicate attribute names.
+fn validate_no_duplicate_attributes_to_get(attrs: &[String]) -> Result<(), DynamoDBError> {
+    let mut seen = HashSet::new();
+    for attr in attrs {
+        if !seen.insert(attr.as_str()) {
+            return Err(DynamoDBError::validation(format!(
+                "One or more parameter values are not valid. \
+                 Duplicate value in AttributesToGet: {attr}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Wrap an expression error with ProjectionExpression context.
+#[allow(clippy::needless_pass_by_value)]
+fn projection_error_to_dynamodb(e: crate::expression::ExpressionError) -> DynamoDBError {
+    DynamoDBError::validation(format!("Invalid ProjectionExpression: {e}"))
+}
+
 /// Format key attribute names from a key map for error messages.
 fn format_key_names(key: &HashMap<String, AttributeValue>) -> String {
     let mut names: Vec<&str> = key.keys().map(String::as_str).collect();
@@ -165,6 +379,66 @@ fn validate_select(
     Ok(())
 }
 
+/// Maximum allowed value for `TotalSegments` in a parallel scan.
+const MAX_TOTAL_SEGMENTS: i32 = 1_000_000;
+
+/// Validate and extract parallel scan parameters (`Segment` / `TotalSegments`).
+///
+/// Returns `(Some(segment), Some(total_segments))` when parallel scan is
+/// requested, or `(None, None)` when it is not.
+fn validate_parallel_scan(
+    input: &ScanInput,
+    exclusive_start_key: Option<&PrimaryKey>,
+) -> Result<(Option<u32>, Option<u32>), DynamoDBError> {
+    match (input.segment, input.total_segments) {
+        (Some(seg), Some(total)) => {
+            // TotalSegments must be in [1, MAX_TOTAL_SEGMENTS].
+            if total > MAX_TOTAL_SEGMENTS {
+                return Err(DynamoDBError::validation(format!(
+                    "1 validation error detected: Value '{total}' at 'totalSegments' failed \
+                     to satisfy constraint: Member must have value less than or equal to \
+                     {MAX_TOTAL_SEGMENTS}. The Segment parameter is required but was not present \
+                     in the request when parameter TotalSegments is present"
+                )));
+            }
+            // Segment must be in [0, TotalSegments).
+            if seg >= total {
+                return Err(DynamoDBError::validation(format!(
+                    "The Segment parameter is zero-indexed and must be less than \
+                     parameter TotalSegments. Segment: {seg}, TotalSegments: {total}"
+                )));
+            }
+            // ExclusiveStartKey must map to the same segment.
+            if let Some(start_key) = exclusive_start_key {
+                #[allow(clippy::cast_sign_loss)] // Validated above
+                let key_segment = partition_key_segment(&start_key.partition_key, total as u32);
+                #[allow(clippy::cast_sign_loss)]
+                if key_segment != seg as u32 {
+                    return Err(DynamoDBError::validation(
+                        "The provided Exclusive start key does not map to the provided \
+                         Segment and TotalSegments values."
+                            .to_owned(),
+                    ));
+                }
+            }
+            #[allow(clippy::cast_sign_loss)] // Validated: seg >= 0, total >= 1
+            Ok((Some(seg as u32), Some(total as u32)))
+        }
+        (None, None) => Ok((None, None)),
+        // If only one is provided, DynamoDB returns an error about the
+        // missing one, but boto3 rejects this client-side. We still
+        // handle it for raw API callers.
+        (Some(_), None) => Err(DynamoDBError::validation(
+            "The TotalSegments parameter is required but was not present in the request \
+             when parameter Segment is present",
+        )),
+        (None, Some(_)) => Err(DynamoDBError::validation(
+            "The Segment parameter is required but was not present in the request \
+             when parameter TotalSegments is present",
+        )),
+    }
+}
+
 /// Main DynamoDB provider implementing all operations.
 #[derive(Debug)]
 pub struct RustStackDynamoDB {
@@ -203,6 +477,15 @@ impl RustStackDynamoDB {
     ) -> Result<CreateTableOutput, DynamoDBError> {
         // Validate table name.
         validate_table_name(&input.table_name)?;
+
+        // Validate attribute definitions are present.
+        if input.attribute_definitions.is_empty() {
+            return Err(DynamoDBError::validation(
+                "One or more parameter values were invalid: \
+                 Some AttributeDefinitions are not valid. \
+                 AttributeDefinitions must be provided for all key attributes",
+            ));
+        }
 
         // Validate attribute definitions: no duplicate attribute names.
         validate_attribute_definitions(&input.attribute_definitions)?;
@@ -361,6 +644,7 @@ impl RustStackDynamoDB {
 impl RustStackDynamoDB {
     /// Handle `PutItem`.
     pub fn handle_put_item(&self, mut input: PutItemInput) -> Result<PutItemOutput, DynamoDBError> {
+        validate_table_name(&input.table_name)?;
         let table = self.state.require_table(&input.table_name)?;
 
         // Validate return_values: PutItem only supports NONE and ALL_OLD.
@@ -395,6 +679,14 @@ impl RustStackDynamoDB {
             merge_expression_names(&mut input.expression_attribute_names, names);
             merge_expression_values(&mut input.expression_attribute_values, values);
         }
+
+        // Validate return_values_on_condition_check_failure.
+        validate_return_values_on_condition_check_failure(
+            input.return_values_on_condition_check_failure.as_deref(),
+        )?;
+
+        // Validate numbers in item.
+        validate_numbers_in_item(&input.item)?;
 
         // Validate item size.
         let size = calculate_item_size(&input.item);
@@ -437,9 +729,14 @@ impl RustStackDynamoDB {
             };
             let result = ctx.evaluate(&expr).map_err(expression_error_to_dynamodb)?;
             if !result {
-                return Err(DynamoDBError::conditional_check_failed(
-                    "The conditional request failed",
-                ));
+                let mut err =
+                    DynamoDBError::conditional_check_failed("The conditional request failed");
+                if input.return_values_on_condition_check_failure.as_deref() == Some("ALL_OLD") {
+                    if let Some(ref existing_item) = existing {
+                        err = err.with_item(existing_item.clone());
+                    }
+                }
+                return Err(err);
             }
         }
 
@@ -464,10 +761,24 @@ impl RustStackDynamoDB {
     /// Handle `GetItem`.
     #[allow(clippy::needless_pass_by_value)]
     pub fn handle_get_item(&self, mut input: GetItemInput) -> Result<GetItemOutput, DynamoDBError> {
+        validate_table_name(&input.table_name)?;
         let table = self.state.require_table(&input.table_name)?;
+
+        // Reject both ProjectionExpression and AttributesToGet.
+        if input.projection_expression.is_some()
+            && input
+                .attributes_to_get
+                .as_ref()
+                .is_some_and(|v| !v.is_empty())
+        {
+            return Err(DynamoDBError::validation(
+                "Cannot have both AttributesToGet and ProjectionExpression",
+            ));
+        }
 
         // Validate key: no spurious columns, correct types, not empty.
         validate_key_only_has_key_attrs(&table.key_schema, &input.key)?;
+        validate_key_types(&table.key_schema, &input.key)?;
         validate_key_not_empty(&table.key_schema, &input.key)?;
         let pk = extract_primary_key(&table.key_schema, &input.key)
             .map_err(storage_error_to_dynamodb)?;
@@ -480,6 +791,7 @@ impl RustStackDynamoDB {
                      must contain at least one element",
                 ));
             }
+            validate_no_duplicate_attributes_to_get(atg)?;
             if input.projection_expression.is_none() {
                 input.projection_expression = Some(convert_attributes_to_get(atg));
             }
@@ -489,7 +801,7 @@ impl RustStackDynamoDB {
         {
             let mut used_names = HashSet::new();
             if let Some(ref proj) = input.projection_expression {
-                let paths = parse_projection(proj).map_err(expression_error_to_dynamodb)?;
+                let paths = parse_projection(proj).map_err(projection_error_to_dynamodb)?;
                 collect_names_from_projection(&paths, &mut used_names);
             }
             validate_no_unused_names(&input.expression_attribute_names, &used_names)?;
@@ -500,7 +812,7 @@ impl RustStackDynamoDB {
         // Apply projection if specified.
         let projected = match (item, &input.projection_expression) {
             (Some(item), Some(proj_expr)) => {
-                let paths = parse_projection(proj_expr).map_err(expression_error_to_dynamodb)?;
+                let paths = parse_projection(proj_expr).map_err(projection_error_to_dynamodb)?;
                 let ctx = EvalContext {
                     item: &item,
                     names: &input.expression_attribute_names,
@@ -523,6 +835,7 @@ impl RustStackDynamoDB {
         &self,
         mut input: DeleteItemInput,
     ) -> Result<DeleteItemOutput, DynamoDBError> {
+        validate_table_name(&input.table_name)?;
         let table = self.state.require_table(&input.table_name)?;
 
         // Validate return_values: DeleteItem only supports NONE and ALL_OLD.
@@ -534,11 +847,19 @@ impl RustStackDynamoDB {
             }
         }
 
+        // Validate return_values_on_condition_check_failure.
+        validate_return_values_on_condition_check_failure(
+            input.return_values_on_condition_check_failure.as_deref(),
+        )?;
+
         // Validate key: no spurious columns, correct types, not empty.
         validate_key_only_has_key_attrs(&table.key_schema, &input.key)?;
         validate_key_not_empty(&table.key_schema, &input.key)?;
         let pk = extract_primary_key(&table.key_schema, &input.key)
             .map_err(storage_error_to_dynamodb)?;
+
+        // Validate ConditionalOperator usage.
+        validate_conditional_operator(input.conditional_operator.as_ref(), &input.expected)?;
 
         // Reject mixing Expected with ConditionExpression.
         if !input.expected.is_empty() && input.condition_expression.is_some() {
@@ -587,9 +908,14 @@ impl RustStackDynamoDB {
             };
             let result = ctx.evaluate(&expr).map_err(expression_error_to_dynamodb)?;
             if !result {
-                return Err(DynamoDBError::conditional_check_failed(
-                    "The conditional request failed",
-                ));
+                let mut err =
+                    DynamoDBError::conditional_check_failed("The conditional request failed");
+                if input.return_values_on_condition_check_failure.as_deref() == Some("ALL_OLD") {
+                    if let Some(ref existing_item) = existing {
+                        err = err.with_item(existing_item.clone());
+                    }
+                }
+                return Err(err);
             }
         }
 
@@ -614,6 +940,7 @@ impl RustStackDynamoDB {
         &self,
         mut input: UpdateItemInput,
     ) -> Result<UpdateItemOutput, DynamoDBError> {
+        validate_table_name(&input.table_name)?;
         let table = self.state.require_table(&input.table_name)?;
 
         // Validate return_values.
@@ -631,6 +958,14 @@ impl RustStackDynamoDB {
                 )));
             }
         }
+
+        // Validate return_values_on_condition_check_failure.
+        validate_return_values_on_condition_check_failure(
+            input.return_values_on_condition_check_failure.as_deref(),
+        )?;
+
+        // Validate ConditionalOperator usage.
+        validate_conditional_operator(input.conditional_operator.as_ref(), &input.expected)?;
 
         // Reject mixing non-expression parameters with expression parameters.
         if !input.attribute_updates.is_empty() && input.update_expression.is_some() {
@@ -661,6 +996,7 @@ impl RustStackDynamoDB {
         // Validate key: no spurious columns, correct types, not empty.
         validate_key_only_has_key_attrs(&table.key_schema, &input.key)?;
         validate_key_not_empty(&table.key_schema, &input.key)?;
+        validate_numbers_in_item(&input.key)?;
         let pk = extract_primary_key(&table.key_schema, &input.key)
             .map_err(storage_error_to_dynamodb)?;
 
@@ -677,7 +1013,49 @@ impl RustStackDynamoDB {
             merge_expression_values(&mut input.expression_attribute_values, values);
         }
 
-        // Legacy API: convert AttributeUpdates to UpdateExpression.
+        // Legacy API: handle ADD-for-lists by applying list_append directly.
+        // The modern UpdateExpression ADD does not support lists, but the
+        // legacy AttributeUpdates ADD does (it appends to lists).
+        if !input.attribute_updates.is_empty() && input.update_expression.is_none() {
+            let list_add_attrs: Vec<String> = input
+                .attribute_updates
+                .iter()
+                .filter(|(_, u)| {
+                    u.action
+                        .as_ref()
+                        .is_some_and(|a| *a == AttributeAction::Add)
+                        && u.value
+                            .as_ref()
+                            .is_some_and(|v| matches!(v, AttributeValue::L(_)))
+                })
+                .map(|(k, _)| k.clone())
+                .collect();
+            for attr in &list_add_attrs {
+                if let Some(update) = input.attribute_updates.remove(attr) {
+                    if let Some(AttributeValue::L(new_items)) = update.value {
+                        match item.get(attr) {
+                            Some(AttributeValue::L(existing)) => {
+                                let mut merged = existing.clone();
+                                merged.extend(new_items);
+                                item.insert(attr.clone(), AttributeValue::L(merged));
+                            }
+                            None => {
+                                item.insert(attr.clone(), AttributeValue::L(new_items));
+                            }
+                            Some(existing_val) => {
+                                return Err(DynamoDBError::validation(format!(
+                                    "Type mismatch for ADD; operator type: L, \
+                                     existing type: {}",
+                                    existing_val.type_descriptor(),
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Legacy API: convert remaining AttributeUpdates to UpdateExpression.
         if !input.attribute_updates.is_empty() && input.update_expression.is_none() {
             let (expr, names, values) =
                 convert_attribute_updates_to_expression(&input.attribute_updates);
@@ -685,6 +1063,9 @@ impl RustStackDynamoDB {
             merge_expression_names(&mut input.expression_attribute_names, names);
             merge_expression_values(&mut input.expression_attribute_values, values);
         }
+
+        // Validate numbers in expression attribute values.
+        validate_numbers_in_item(&input.expression_attribute_values)?;
 
         // Validate expression attribute values contain no empty sets.
         validate_no_empty_sets(&input.expression_attribute_values)?;
@@ -733,19 +1114,24 @@ impl RustStackDynamoDB {
             };
             let result = ctx.evaluate(&expr).map_err(expression_error_to_dynamodb)?;
             if !result {
-                return Err(DynamoDBError::conditional_check_failed(
-                    "The conditional request failed",
-                ));
+                let mut err =
+                    DynamoDBError::conditional_check_failed("The conditional request failed");
+                if input.return_values_on_condition_check_failure.as_deref() == Some("ALL_OLD") {
+                    let existing_ref = existing.as_ref();
+                    if let Some(existing_item) = existing_ref {
+                        err = err.with_item(existing_item.clone());
+                    }
+                }
+                return Err(err);
             }
         }
 
-        // Determine if the update is REMOVE-only (for non-existent item logic).
-        let is_remove_only = input.update_expression.as_ref().is_some_and(|expr| {
+        // Determine if the update contains only subtractive operations (REMOVE
+        // and/or DELETE). When such an update targets a non-existent item,
+        // DynamoDB does NOT create the item.
+        let is_subtractive_only = input.update_expression.as_ref().is_some_and(|expr| {
             let upper = expr.trim().to_ascii_uppercase();
-            upper.starts_with("REMOVE")
-                && !upper.contains("SET ")
-                && !upper.contains("ADD ")
-                && !upper.contains("DELETE ")
+            !upper.contains("SET ") && !upper.contains("ADD ")
         });
 
         // Parse and apply update expression. Keep the parsed AST for
@@ -765,11 +1151,12 @@ impl RustStackDynamoDB {
             None
         };
 
-        // If the original item didn't exist and the update only contains REMOVE
-        // operations, the resulting item would only have key attributes. In this
-        // case DynamoDB does NOT create the item.
+        // If the original item didn't exist and the update only contains
+        // subtractive operations (REMOVE/DELETE), the resulting item would
+        // only have key attributes. In this case DynamoDB does NOT create
+        // the item.
         let item_not_stored = existing.is_none()
-            && is_remove_only
+            && is_subtractive_only
             && item_has_only_key_attrs(&item, &table.key_schema);
 
         if item_not_stored {
@@ -841,6 +1228,13 @@ impl RustStackDynamoDB {
             if limit <= 0 {
                 return Err(DynamoDBError::validation("Limit must be greater than 0"));
             }
+        }
+
+        // Reject both ProjectionExpression and AttributesToGet.
+        if input.projection_expression.is_some() && has_atg {
+            return Err(DynamoDBError::validation(
+                "Cannot have both AttributesToGet and ProjectionExpression",
+            ));
         }
 
         // Validate AttributesToGet: empty list is not allowed.
@@ -956,7 +1350,7 @@ impl RustStackDynamoDB {
                 )?;
             }
             if let Some(ref proj) = input.projection_expression {
-                let paths = parse_projection(proj).map_err(expression_error_to_dynamodb)?;
+                let paths = parse_projection(proj).map_err(projection_error_to_dynamodb)?;
                 collect_names_from_projection(&paths, &mut used_names);
             }
             validate_no_unresolved_names(&input.expression_attribute_names, &used_names)?;
@@ -1025,7 +1419,7 @@ impl RustStackDynamoDB {
 
         // Apply projection expression if present.
         if let Some(ref proj) = input.projection_expression {
-            let paths = parse_projection(proj).map_err(expression_error_to_dynamodb)?;
+            let paths = parse_projection(proj).map_err(projection_error_to_dynamodb)?;
             items = items
                 .into_iter()
                 .map(|item| {
@@ -1086,6 +1480,13 @@ impl RustStackDynamoDB {
             has_atg,
         )?;
 
+        // Reject both ProjectionExpression and AttributesToGet.
+        if input.projection_expression.is_some() && has_atg {
+            return Err(DynamoDBError::validation(
+                "Cannot have both AttributesToGet and ProjectionExpression",
+            ));
+        }
+
         // Validate AttributesToGet: empty list is not allowed.
         if let Some(ref atg) = input.attributes_to_get {
             if atg.is_empty() {
@@ -1129,7 +1530,7 @@ impl RustStackDynamoDB {
                 collect_values_from_expr(&parsed, &mut used_values);
             }
             if let Some(ref proj) = input.projection_expression {
-                let paths = parse_projection(proj).map_err(expression_error_to_dynamodb)?;
+                let paths = parse_projection(proj).map_err(projection_error_to_dynamodb)?;
                 collect_names_from_projection(&paths, &mut used_names);
             }
             validate_no_unused_names(&input.expression_attribute_names, &used_names)?;
@@ -1148,7 +1549,13 @@ impl RustStackDynamoDB {
             )
         };
 
-        let (mut items, last_key) = table.storage.scan(limit, exclusive_start.as_ref());
+        // Validate and extract parallel scan parameters.
+        let (segment, total_segments) = validate_parallel_scan(&input, exclusive_start.as_ref())?;
+
+        let (mut items, last_key) =
+            table
+                .storage
+                .scan(limit, exclusive_start.as_ref(), segment, total_segments);
 
         let scanned_count = i32::try_from(items.len()).unwrap_or(i32::MAX);
 
@@ -1176,7 +1583,7 @@ impl RustStackDynamoDB {
 
         // Apply projection expression if present.
         if let Some(ref proj) = input.projection_expression {
-            let paths = parse_projection(proj).map_err(expression_error_to_dynamodb)?;
+            let paths = parse_projection(proj).map_err(projection_error_to_dynamodb)?;
             items = items
                 .into_iter()
                 .map(|item| {
@@ -1244,6 +1651,32 @@ impl RustStackDynamoDB {
 
         for (table_name, keys_and_attrs) in &input.request_items {
             let table = self.state.require_table(table_name)?;
+
+            // Detect duplicate keys within this table.
+            detect_duplicate_keys(&table.key_schema, keys_and_attrs.keys.iter())?;
+
+            // Determine effective projection: ProjectionExpression takes priority,
+            // then AttributesToGet.
+            let effective_projection = if keys_and_attrs.projection_expression.is_some() {
+                keys_and_attrs.projection_expression.clone()
+            } else if !keys_and_attrs.attributes_to_get.is_empty() {
+                Some(convert_attributes_to_get(&keys_and_attrs.attributes_to_get))
+            } else {
+                None
+            };
+
+            // Validate unused expression attribute names if projection is set.
+            if let Some(ref proj) = effective_projection {
+                if let Some(ref ean) = keys_and_attrs.expression_attribute_names {
+                    if !ean.is_empty() {
+                        let paths = parse_projection(proj).map_err(projection_error_to_dynamodb)?;
+                        let mut used_names = HashSet::new();
+                        collect_names_from_projection(&paths, &mut used_names);
+                        validate_no_unused_names(ean, &used_names)?;
+                    }
+                }
+            }
+
             let mut table_items = Vec::new();
 
             for key in &keys_and_attrs.keys {
@@ -1251,8 +1684,8 @@ impl RustStackDynamoDB {
                     .map_err(storage_error_to_dynamodb)?;
                 if let Some(item) = table.storage.get_item(&pk) {
                     // Apply projection if specified.
-                    let item = if let Some(ref proj) = keys_and_attrs.projection_expression {
-                        let paths = parse_projection(proj).map_err(expression_error_to_dynamodb)?;
+                    let item = if let Some(ref proj) = effective_projection {
+                        let paths = parse_projection(proj).map_err(projection_error_to_dynamodb)?;
                         let names = keys_and_attrs
                             .expression_attribute_names
                             .clone()
@@ -1270,9 +1703,8 @@ impl RustStackDynamoDB {
                 }
             }
 
-            if !table_items.is_empty() {
-                responses.insert(table_name.clone(), table_items);
-            }
+            // Always include the table in responses (even if empty).
+            responses.insert(table_name.clone(), table_items);
         }
 
         Ok(BatchGetItemOutput {
@@ -1291,23 +1723,54 @@ impl RustStackDynamoDB {
         // Enforce 25-item limit across all tables.
         let total_writes: usize = input.request_items.values().map(Vec::len).sum();
         if total_writes > 25 {
-            return Err(DynamoDBError::validation(
-                "Too many items requested for the BatchWriteItem call",
-            ));
+            return Err(DynamoDBError::validation(format!(
+                "Too many items in the BatchWriteItem request; \
+                 the request length {total_writes} exceeds the limit of 25"
+            )));
         }
 
+        // Validation pass: validate all items before writing any (atomic failure).
+        for (table_name, write_requests) in &input.request_items {
+            let table = self.state.require_table(table_name)?;
+
+            // Detect duplicate keys within this table's write requests.
+            let key_items: Vec<&HashMap<String, AttributeValue>> = write_requests
+                .iter()
+                .filter_map(|wr| {
+                    wr.put_request
+                        .as_ref()
+                        .map(|p| &p.item)
+                        .or(wr.delete_request.as_ref().map(|d| &d.key))
+                })
+                .collect();
+            detect_duplicate_keys(&table.key_schema, key_items.into_iter())?;
+
+            for wr in write_requests {
+                if let Some(ref put) = wr.put_request {
+                    validate_key_not_empty(&table.key_schema, &put.item)?;
+                    let size = calculate_item_size(&put.item);
+                    if size > MAX_ITEM_SIZE_BYTES {
+                        return Err(DynamoDBError::validation(format!(
+                            "Item size has exceeded the maximum allowed size of \
+                             {MAX_ITEM_SIZE_BYTES} bytes"
+                        )));
+                    }
+                    // Validate key schema compliance (catches wrong key types).
+                    extract_primary_key(&table.key_schema, &put.item)
+                        .map_err(storage_error_to_dynamodb)?;
+                } else if let Some(ref del) = wr.delete_request {
+                    extract_primary_key(&table.key_schema, &del.key)
+                        .map_err(storage_error_to_dynamodb)?;
+                }
+            }
+        }
+
+        // Execution pass: all validations passed, now execute writes.
         for (table_name, write_requests) in &input.request_items {
             let table = self.state.require_table(table_name)?;
 
             for wr in write_requests {
                 if let Some(ref put) = wr.put_request {
-                    // Validate item size.
-                    let size = calculate_item_size(&put.item);
-                    if size > MAX_ITEM_SIZE_BYTES {
-                        return Err(DynamoDBError::validation(format!(
-                            "Item size has exceeded the maximum allowed size of {MAX_ITEM_SIZE_BYTES} bytes"
-                        )));
-                    }
                     table
                         .storage
                         .put_item(put.item.clone())
@@ -1611,11 +2074,17 @@ fn build_condition_fragment(
             format!("contains({name_placeholder}, {val_ph})")
         }
         ComparisonOperator::NotContains => {
+            // In the legacy API, NOT_CONTAINS fails when the attribute does
+            // not exist.  The modern `NOT contains(path, :v)` expression
+            // would return true for a missing attribute, so we additionally
+            // require `attribute_exists(path)`.
             let val_ph = format!("{val_prefix}{counter}");
             if let Some(v) = value_list.first() {
                 values.insert(val_ph.clone(), v.clone());
             }
-            format!("NOT contains({name_placeholder}, {val_ph})")
+            format!(
+                "(attribute_exists({name_placeholder}) AND NOT contains({name_placeholder}, {val_ph}))"
+            )
         }
         ComparisonOperator::BeginsWith => {
             let val_ph = format!("{val_prefix}{counter}");
@@ -1683,6 +2152,153 @@ fn merge_expression_values(
 ///
 /// DynamoDB does not allow empty sets (SS, NS, BS with zero elements).
 /// Validate an `Expected` map for correctness before converting to a condition expression.
+/// Validate that `ConditionalOperator` is only used when `Expected` has
+/// conditions.  DynamoDB rejects `ConditionalOperator` when `Expected` is
+/// missing or empty.
+fn validate_conditional_operator(
+    conditional_operator: Option<&ConditionalOperator>,
+    expected: &HashMap<String, ExpectedAttributeValue>,
+) -> Result<(), DynamoDBError> {
+    if conditional_operator.is_some() && expected.is_empty() {
+        return Err(DynamoDBError::validation(
+            "ConditionalOperator cannot be used without Expected or with an empty Expected map",
+        ));
+    }
+    Ok(())
+}
+
+/// Validate that `ReturnValuesOnConditionCheckFailure` has a valid value.
+/// Only `NONE` and `ALL_OLD` are accepted.
+fn validate_return_values_on_condition_check_failure(
+    value: Option<&str>,
+) -> Result<(), DynamoDBError> {
+    if let Some(v) = value {
+        if v != "NONE" && v != "ALL_OLD" {
+            return Err(DynamoDBError::validation(format!(
+                "1 validation error detected: Value '{v}' at \
+                 'returnValuesOnConditionCheckFailure' failed to satisfy constraint: \
+                 Member must satisfy enum value set: [NONE, ALL_OLD]"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Detect duplicate primary keys within a batch of items.
+fn detect_duplicate_keys<'a>(
+    key_schema: &KeySchema,
+    items: impl Iterator<Item = &'a HashMap<String, AttributeValue>>,
+) -> Result<(), DynamoDBError> {
+    let mut seen = HashSet::new();
+    for item in items {
+        if let Ok(pk) = extract_primary_key(key_schema, item) {
+            if !seen.insert(pk) {
+                return Err(DynamoDBError::validation(
+                    "Provided list of item keys contains duplicates",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate the operand count and value types for a single `ComparisonOperator`.
+fn validate_comparison_operator(
+    comp_op: &ComparisonOperator,
+    value_list: &[AttributeValue],
+) -> Result<(), DynamoDBError> {
+    let count = value_list.len();
+    match comp_op {
+        ComparisonOperator::Eq
+        | ComparisonOperator::Ne
+        | ComparisonOperator::Lt
+        | ComparisonOperator::Le
+        | ComparisonOperator::Gt
+        | ComparisonOperator::Ge
+        | ComparisonOperator::BeginsWith => {
+            if count != 1 {
+                return Err(DynamoDBError::validation(format!(
+                    "One or more parameter values were invalid: \
+                     Invalid number of argument(s) for the {comp_op} \
+                     ComparisonOperator"
+                )));
+            }
+        }
+        ComparisonOperator::Contains | ComparisonOperator::NotContains => {
+            if count != 1 {
+                return Err(DynamoDBError::validation(format!(
+                    "One or more parameter values were invalid: \
+                     Invalid number of argument(s) for the {comp_op} \
+                     ComparisonOperator"
+                )));
+            }
+            // CONTAINS/NOT_CONTAINS only accept scalar types (S, N, B).
+            if let Some(val) = value_list.first() {
+                if !is_scalar_attribute_value(val) {
+                    return Err(DynamoDBError::validation(format!(
+                        "One or more parameter values were invalid: \
+                         ComparisonOperator {comp_op} is not valid for {val_type} \
+                         AttributeValue type",
+                        val_type = val.type_descriptor(),
+                    )));
+                }
+            }
+        }
+        ComparisonOperator::Between => {
+            if count != 2 {
+                return Err(DynamoDBError::validation(
+                    "One or more parameter values were invalid: \
+                     Invalid number of argument(s) for the BETWEEN \
+                     ComparisonOperator",
+                ));
+            }
+        }
+        ComparisonOperator::In => {
+            if count == 0 {
+                return Err(DynamoDBError::validation(
+                    "One or more parameter values were invalid: \
+                     Invalid number of argument(s) for the IN \
+                     ComparisonOperator",
+                ));
+            }
+            // IN requires all values to be scalar and of the same type.
+            for val in value_list {
+                if !is_scalar_attribute_value(val) {
+                    return Err(DynamoDBError::validation(
+                        "One or more parameter values were invalid: \
+                         ComparisonOperator IN is not valid for non-scalar \
+                         AttributeValue type",
+                    ));
+                }
+            }
+            // All values must be the same type.
+            if count > 1 {
+                let first_type = value_list[0].type_descriptor();
+                for val in &value_list[1..] {
+                    if val.type_descriptor() != first_type {
+                        return Err(DynamoDBError::validation(
+                            "One or more parameter values were invalid: \
+                             AttributeValues inside AttributeValueList must all \
+                             be of the same type",
+                        ));
+                    }
+                }
+            }
+        }
+        ComparisonOperator::Null | ComparisonOperator::NotNull => {
+            if count != 0 {
+                return Err(DynamoDBError::validation(format!(
+                    "One or more parameter values were invalid: \
+                     Invalid number of argument(s) for the {comp_op} \
+                     ComparisonOperator"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate all entries in the legacy `Expected` parameter.
 fn validate_expected(
     expected: &HashMap<String, ExpectedAttributeValue>,
 ) -> Result<(), DynamoDBError> {
@@ -1695,63 +2311,37 @@ fn validate_expected(
                      with ComparisonOperator for attribute ({attr_name})"
                 )));
             }
-            // Validate operand count for each operator.
-            let count = exp.attribute_value_list.len();
-            match comp_op {
-                ComparisonOperator::Eq
-                | ComparisonOperator::Ne
-                | ComparisonOperator::Lt
-                | ComparisonOperator::Le
-                | ComparisonOperator::Gt
-                | ComparisonOperator::Ge
-                | ComparisonOperator::Contains
-                | ComparisonOperator::NotContains
-                | ComparisonOperator::BeginsWith => {
-                    if count != 1 {
-                        return Err(DynamoDBError::validation(format!(
-                            "One or more parameter values were invalid: \
-                             Invalid number of argument(s) for the {comp_op} \
-                             ComparisonOperator"
-                        )));
-                    }
-                }
-                ComparisonOperator::Between => {
-                    if count != 2 {
-                        return Err(DynamoDBError::validation(
-                            "One or more parameter values were invalid: \
-                             Invalid number of argument(s) for the BETWEEN \
-                             ComparisonOperator",
-                        ));
-                    }
-                }
-                ComparisonOperator::In => {
-                    if count == 0 {
-                        return Err(DynamoDBError::validation(
-                            "One or more parameter values were invalid: \
-                             Invalid number of argument(s) for the IN \
-                             ComparisonOperator",
-                        ));
-                    }
-                }
-                ComparisonOperator::Null | ComparisonOperator::NotNull => {
-                    if count != 0 {
-                        return Err(DynamoDBError::validation(format!(
-                            "One or more parameter values were invalid: \
-                             Invalid number of argument(s) for the {comp_op} \
-                             ComparisonOperator"
-                        )));
-                    }
-                }
-            }
+            validate_comparison_operator(comp_op, &exp.attribute_value_list)?;
         } else if exp.value.is_none() && exp.exists.is_none() {
             // Must have at least one of: ComparisonOperator, Value, or Exists.
             return Err(DynamoDBError::validation(format!(
                 "One or more parameter values were invalid: Value or ComparisonOperator must be \
                  used in Expected for attribute ({attr_name})"
             )));
+        } else if exp.exists == Some(true) && exp.value.is_none() {
+            // Exists:True without Value is a validation error.
+            return Err(DynamoDBError::validation(format!(
+                "One or more parameter values were invalid: \
+                 Exists is set to TRUE for attribute ({attr_name}), \
+                 Value must also be set"
+            )));
+        } else if exp.exists == Some(false) && exp.value.is_some() {
+            // Exists:False with Value is a validation error.
+            return Err(DynamoDBError::validation(format!(
+                "One or more parameter values were invalid: \
+                 Value cannot be used when Exists is set to FALSE for attribute ({attr_name})"
+            )));
         }
     }
     Ok(())
+}
+
+/// Check whether an `AttributeValue` is a scalar type (S, N, or B).
+fn is_scalar_attribute_value(val: &AttributeValue) -> bool {
+    matches!(
+        val,
+        AttributeValue::S(_) | AttributeValue::N(_) | AttributeValue::B(_)
+    )
 }
 
 fn validate_no_empty_sets(values: &HashMap<String, AttributeValue>) -> Result<(), DynamoDBError> {
@@ -3070,7 +3660,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code, DynamoDBErrorCode::ValidationException);
-        assert!(err.message.contains("Too many items requested"));
+        assert!(err.message.contains("exceeds the limit"));
     }
 
     #[test]

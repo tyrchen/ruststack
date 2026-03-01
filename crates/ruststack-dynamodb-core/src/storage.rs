@@ -20,6 +20,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Bound;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
@@ -609,11 +610,16 @@ impl TableStorage {
     /// Returns a tuple of (items, last_evaluated_key). The last evaluated key
     /// is `Some` when the result was truncated by the limit or by the 1 MB
     /// response size cap.
+    ///
+    /// When `segment` and `total_segments` are provided, only items whose
+    /// partition key hashes into the given segment are included (parallel scan).
     #[must_use]
     pub fn scan(
         &self,
         limit: Option<usize>,
         exclusive_start_key: Option<&PrimaryKey>,
+        segment: Option<u32>,
+        total_segments: Option<u32>,
     ) -> (Vec<HashMap<String, AttributeValue>>, Option<PrimaryKey>) {
         /// DynamoDB caps a single Scan/Query response at 1 MB.
         const MAX_RESPONSE_BYTES: u64 = 1_048_576;
@@ -627,7 +633,17 @@ impl TableStorage {
         // Sort partitions deterministically by partition key display string.
         partition_entries.sort_by(|a, b| format!("{}", a.key()).cmp(&format!("{}", b.key())));
 
+        // For parallel scan, filter partitions by segment assignment.
+        let parallel_filter = segment.zip(total_segments);
+
         for entry in &partition_entries {
+            // When parallel scan is active, skip partitions not assigned to this segment.
+            if let Some((seg, total)) = parallel_filter {
+                let pk_hash = partition_key_segment(entry.key(), total);
+                if pk_hash != seg {
+                    continue;
+                }
+            }
             for (sk, item) in entry.value() {
                 all_items.push((entry.key().clone(), sk.clone(), item));
             }
@@ -701,6 +717,23 @@ impl TableStorage {
             .collect();
 
         (result, last_key)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Parallel scan helpers
+// ---------------------------------------------------------------------------
+
+/// Compute which segment a partition key belongs to by hashing the key's
+/// display representation and taking the modulus with the total segment count.
+pub fn partition_key_segment(pk: &AttributeValue, total_segments: u32) -> u32 {
+    let mut hasher = DefaultHasher::new();
+    // Use the Display representation for a stable, deterministic hash.
+    format!("{pk}").hash(&mut hasher);
+    let h = hasher.finish();
+    #[allow(clippy::cast_possible_truncation)]
+    {
+        (h % u64::from(total_segments)) as u32
     }
 }
 
@@ -1363,7 +1396,7 @@ mod tests {
             storage.put_item(item).ok();
         }
 
-        let (items, last_key) = storage.scan(None, None);
+        let (items, last_key) = storage.scan(None, None, None, None);
         assert_eq!(items.len(), 5);
         assert!(last_key.is_none());
     }
@@ -1380,12 +1413,12 @@ mod tests {
             storage.put_item(item).ok();
         }
 
-        let (items, last_key) = storage.scan(Some(3), None);
+        let (items, last_key) = storage.scan(Some(3), None, None, None);
         assert_eq!(items.len(), 3);
         assert!(last_key.is_some());
 
         // Continue scanning from the last key.
-        let (items2, last_key2) = storage.scan(Some(3), last_key.as_ref());
+        let (items2, last_key2) = storage.scan(Some(3), last_key.as_ref(), None, None);
         assert_eq!(items2.len(), 2);
         assert!(last_key2.is_none());
     }

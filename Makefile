@@ -97,7 +97,7 @@ ALTERNATOR_URL := http://localhost:4566
 ALTERNATOR_P0_FILES := test_table.py test_item.py test_batch.py test_query.py test_scan.py \
 	test_condition_expression.py test_filter_expression.py test_update_expression.py \
 	test_projection_expression.py test_key_condition_expression.py test_number.py \
-	test_nested.py test_describe_table.py test_returnvalues.py
+	test_nested.py test_describe_table.py test_returnvalues.py test_expected.py
 
 alternator-run:
 	@echo "Running Alternator DynamoDB compatibility tests..."

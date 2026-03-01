@@ -97,21 +97,18 @@ def full_scan(table, **kwargs):
 
 
 def full_scan_and_count(table, **kwargs):
-    """Like full_scan but also returns the server-side Count and ScannedCount."""
+    """Like full_scan but also returns the server-side Count."""
     items = []
     count = 0
-    scanned_count = 0
     response = table.scan(**kwargs)
     items.extend(response.get("Items", []))
     count += response.get("Count", 0)
-    scanned_count += response.get("ScannedCount", 0)
     while "LastEvaluatedKey" in response:
         kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
         response = table.scan(**kwargs)
         items.extend(response.get("Items", []))
         count += response.get("Count", 0)
-        scanned_count += response.get("ScannedCount", 0)
-    return items, count, scanned_count
+    return count, items
 
 
 def full_query(table, **kwargs):
@@ -251,21 +248,30 @@ def scylla_inject_error(rest_api, *args, **kwargs):
     """Stub: ScyllaDB error injection. No-op on non-Scylla endpoints."""
 
 
+@contextlib.contextmanager
 def client_no_transform(dynamodb):
     """Create a low-level DynamoDB client without number transformation.
 
     boto3 by default transforms DynamoDB number strings (e.g., "123") into
     Python Decimal objects. This client skips that transformation, returning
     raw DynamoDB JSON responses.
+
+    Accepts either a boto3 DynamoDB resource or a botocore DynamoDB client.
     """
-    endpoint = dynamodb.meta.client._endpoint.host
+    # Resolve the underlying client: if dynamodb is a resource it has
+    # .meta.client; if it is already a client, .meta is ClientMeta which
+    # has no .client attribute, so use dynamodb directly.
+    if hasattr(dynamodb.meta, "client"):
+        underlying = dynamodb.meta.client
+    else:
+        underlying = dynamodb
+    endpoint = underlying._endpoint.host
     config = botocore.client.Config(
         parameter_validation=False,
         retries={"max_attempts": 0},
         read_timeout=300,
     )
-    # Access credentials from the existing resource.
-    creds = dynamodb.meta.client._request_signer._credentials.get_frozen_credentials()
+    creds = underlying._request_signer._credentials.get_frozen_credentials()
     client = boto3.client(
         "dynamodb",
         endpoint_url=endpoint,
@@ -274,7 +280,10 @@ def client_no_transform(dynamodb):
         aws_secret_access_key=creds.secret_key,
         config=config,
     )
-    return client
+    try:
+        yield client
+    finally:
+        client.close()
 
 
 def manual_request(dynamodb, target, payload, timeout=30):

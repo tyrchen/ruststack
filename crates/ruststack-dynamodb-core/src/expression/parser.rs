@@ -345,10 +345,18 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        let n: usize = s.parse().map_err(|_| ExpressionError::InvalidOperand {
-            operation: "index parse".to_owned(),
-            message: format!("'{s}' is not a valid index"),
+        // DynamoDB rejects list indices that overflow a reasonable integer
+        // range with "List index is not within the allowable range".
+        let n: usize = s.parse().map_err(|_| ExpressionError::Validation {
+            message: format!("List index is not within the allowable range; index: [{s}]"),
         })?;
+        // Even if it fits in usize on 64-bit, DynamoDB limits indices to
+        // roughly i32 range.
+        if n > i32::MAX as usize {
+            return Err(ExpressionError::Validation {
+                message: format!("List index is not within the allowable range; index: [{s}]"),
+            });
+        }
         Ok(Token::Number(n))
     }
 
