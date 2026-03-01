@@ -27,10 +27,30 @@ inputs:
     description: "Seconds to wait for the service to become healthy"
     required: false
     default: "30"
+  access-key:
+    description: "AWS access key for authentication (set to empty to disable auth)"
+    required: false
+    default: "test"
+  secret-key:
+    description: "AWS secret key for authentication (set to empty to disable auth)"
+    required: false
+    default: "test"
+  s3-skip-auth:
+    description: "Skip S3 signature validation (true/false)"
+    required: false
+    default: "true"
+  dynamodb-skip-auth:
+    description: "Skip DynamoDB signature validation (true/false)"
+    required: false
+    default: "true"
+  persistence:
+    description: "Enable durable storage persistence (true/false)"
+    required: false
+    default: "false"
 
 outputs:
   endpoint:
-    description: "The service endpoint URL"
+    description: "The service endpoint URL (used as AWS_ENDPOINT_URL for both S3 and DynamoDB)"
     value: ${{ steps.start.outputs.endpoint }}
   container-id:
     description: "The Docker container ID (for advanced usage)"
@@ -53,6 +73,11 @@ runs:
           -p "${{ inputs.port }}:4566" \
           -e "DEFAULT_REGION=${{ inputs.default-region }}" \
           -e "LOG_LEVEL=${{ inputs.log-level }}" \
+          -e "S3_SKIP_SIGNATURE_VALIDATION=${{ inputs.s3-skip-auth }}" \
+          -e "DYNAMODB_SKIP_SIGNATURE_VALIDATION=${{ inputs.dynamodb-skip-auth }}" \
+          -e "ACCESS_KEY=${{ inputs.access-key }}" \
+          -e "SECRET_KEY=${{ inputs.secret-key }}" \
+          -e "PERSISTENCE=${{ inputs.persistence }}" \
           "ghcr.io/tyrchen/ruststack:${{ inputs.image-tag }}")
 
         echo "container_id=$CONTAINER_ID" >> "$GITHUB_OUTPUT"
@@ -77,7 +102,7 @@ runs:
           ELAPSED=$((ELAPSED + 1))
         done
 
-        echo "RustStack is ready at $ENDPOINT"
+        echo "RustStack is ready at $ENDPOINT (S3 + DynamoDB)"
 
     - name: Export environment
       shell: bash
@@ -85,5 +110,5 @@ runs:
         echo "AWS_ENDPOINT_URL=http://localhost:${{ inputs.port }}" >> "$GITHUB_ENV"
         echo "LOCALSTACK_ENDPOINT=http://localhost:${{ inputs.port }}" >> "$GITHUB_ENV"
         echo "AWS_DEFAULT_REGION=${{ inputs.default-region }}" >> "$GITHUB_ENV"
-        echo "AWS_ACCESS_KEY_ID=test" >> "$GITHUB_ENV"
-        echo "AWS_SECRET_ACCESS_KEY=test" >> "$GITHUB_ENV"
+        echo "AWS_ACCESS_KEY_ID=${{ inputs.access-key }}" >> "$GITHUB_ENV"
+        echo "AWS_SECRET_ACCESS_KEY=${{ inputs.secret-key }}" >> "$GITHUB_ENV"
