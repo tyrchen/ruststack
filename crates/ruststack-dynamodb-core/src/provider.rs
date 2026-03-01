@@ -378,8 +378,17 @@ impl RustStackDynamoDB {
         // Validate item does not contain empty sets.
         validate_item_no_empty_sets(&input.item)?;
 
+        // Reject mixing Expected with ConditionExpression.
+        if !input.expected.is_empty() && input.condition_expression.is_some() {
+            return Err(DynamoDBError::validation(
+                "Can not use both expression and non-expression parameters in the same request: \
+                 Non-expression parameters: {Expected} Expression parameters: {ConditionExpression}",
+            ));
+        }
+
         // Legacy API: convert Expected to ConditionExpression.
         if !input.expected.is_empty() && input.condition_expression.is_none() {
+            validate_expected(&input.expected)?;
             let (expr, names, values) =
                 convert_expected_to_condition(&input.expected, input.conditional_operator.as_ref());
             input.condition_expression = Some(expr);
@@ -464,8 +473,16 @@ impl RustStackDynamoDB {
             .map_err(storage_error_to_dynamodb)?;
 
         // Legacy API: convert AttributesToGet to ProjectionExpression.
-        if !input.attributes_to_get.is_empty() && input.projection_expression.is_none() {
-            input.projection_expression = Some(convert_attributes_to_get(&input.attributes_to_get));
+        if let Some(ref atg) = input.attributes_to_get {
+            if atg.is_empty() {
+                return Err(DynamoDBError::validation(
+                    "One or more parameter values are not valid. The AttributesToGet parameter \
+                     must contain at least one element",
+                ));
+            }
+            if input.projection_expression.is_none() {
+                input.projection_expression = Some(convert_attributes_to_get(atg));
+            }
         }
 
         // Validate unused expression attribute names.
@@ -523,8 +540,17 @@ impl RustStackDynamoDB {
         let pk = extract_primary_key(&table.key_schema, &input.key)
             .map_err(storage_error_to_dynamodb)?;
 
+        // Reject mixing Expected with ConditionExpression.
+        if !input.expected.is_empty() && input.condition_expression.is_some() {
+            return Err(DynamoDBError::validation(
+                "Can not use both expression and non-expression parameters in the same request: \
+                 Non-expression parameters: {Expected} Expression parameters: {ConditionExpression}",
+            ));
+        }
+
         // Legacy API: convert Expected to ConditionExpression.
         if !input.expected.is_empty() && input.condition_expression.is_none() {
+            validate_expected(&input.expected)?;
             let (expr, names, values) =
                 convert_expected_to_condition(&input.expected, input.conditional_operator.as_ref());
             input.condition_expression = Some(expr);
@@ -619,6 +645,12 @@ impl RustStackDynamoDB {
                  Non-expression parameters: {AttributeUpdates} Expression parameters: {ConditionExpression}",
             ));
         }
+        if !input.expected.is_empty() && input.update_expression.is_some() {
+            return Err(DynamoDBError::validation(
+                "Can not use both expression and non-expression parameters in the same request: \
+                 Non-expression parameters: {Expected} Expression parameters: {UpdateExpression}",
+            ));
+        }
         if !input.expected.is_empty() && input.condition_expression.is_some() {
             return Err(DynamoDBError::validation(
                 "Can not use both expression and non-expression parameters in the same request: \
@@ -637,6 +669,7 @@ impl RustStackDynamoDB {
 
         // Legacy API: convert Expected to ConditionExpression.
         if !input.expected.is_empty() && input.condition_expression.is_none() {
+            validate_expected(&input.expected)?;
             let (expr, names, values) =
                 convert_expected_to_condition(&input.expected, input.conditional_operator.as_ref());
             input.condition_expression = Some(expr);
@@ -715,8 +748,9 @@ impl RustStackDynamoDB {
                 && !upper.contains("DELETE ")
         });
 
-        // Apply update expression.
-        if let Some(ref update_expr) = input.update_expression {
+        // Parse and apply update expression. Keep the parsed AST for
+        // computing UPDATED_OLD / UPDATED_NEW return values later.
+        let parsed_update = if let Some(ref update_expr) = input.update_expression {
             let parsed = parse_update(update_expr).map_err(expression_error_to_dynamodb)?;
             let ctx = EvalContext {
                 item: &item,
@@ -726,7 +760,10 @@ impl RustStackDynamoDB {
             item = ctx
                 .apply_update(&parsed)
                 .map_err(expression_error_to_dynamodb)?;
-        }
+            Some(parsed)
+        } else {
+            None
+        };
 
         // If the original item didn't exist and the update only contains REMOVE
         // operations, the resulting item would only have key attributes. In this
@@ -766,6 +803,8 @@ impl RustStackDynamoDB {
             old_for_return.as_ref(),
             &item,
             &table.key_schema,
+            parsed_update.as_ref(),
+            &input.expression_attribute_names,
         );
 
         Ok(UpdateItemOutput {
@@ -787,10 +826,14 @@ impl RustStackDynamoDB {
         let table = self.state.require_table(&input.table_name)?;
 
         // Validate Select parameter.
+        let has_atg = input
+            .attributes_to_get
+            .as_ref()
+            .is_some_and(|v| !v.is_empty());
         validate_select(
             input.select.as_ref(),
             input.projection_expression.is_some(),
-            !input.attributes_to_get.is_empty(),
+            has_atg,
         )?;
 
         // Validate Limit: must be > 0 if specified.
@@ -800,9 +843,19 @@ impl RustStackDynamoDB {
             }
         }
 
+        // Validate AttributesToGet: empty list is not allowed.
+        if let Some(ref atg) = input.attributes_to_get {
+            if atg.is_empty() {
+                return Err(DynamoDBError::validation(
+                    "One or more parameter values are not valid. The AttributesToGet parameter \
+                     must contain at least one element",
+                ));
+            }
+        }
+
         // Reject mixing non-expression parameter AttributesToGet with expression
         // parameters (FilterExpression, KeyConditionExpression, ProjectionExpression).
-        if !input.attributes_to_get.is_empty() {
+        if has_atg {
             let mut expr_params = Vec::new();
             if input.filter_expression.is_some() {
                 expr_params.push("FilterExpression");
@@ -837,6 +890,8 @@ impl RustStackDynamoDB {
             let (expr, names, values) = convert_conditions_to_expression(
                 &input.key_conditions,
                 None, // KeyConditions are always AND-joined
+                "#lckc",
+                ":lckv",
             );
             input.key_condition_expression = Some(expr);
             merge_expression_names(&mut input.expression_attribute_names, names);
@@ -848,6 +903,8 @@ impl RustStackDynamoDB {
             let (expr, names, values) = convert_conditions_to_expression(
                 &input.query_filter,
                 input.conditional_operator.as_ref(),
+                "#lcqf",
+                ":lcqv",
             );
             input.filter_expression = Some(expr);
             merge_expression_names(&mut input.expression_attribute_names, names);
@@ -855,8 +912,10 @@ impl RustStackDynamoDB {
         }
 
         // Legacy API: convert AttributesToGet to ProjectionExpression.
-        if !input.attributes_to_get.is_empty() && input.projection_expression.is_none() {
-            input.projection_expression = Some(convert_attributes_to_get(&input.attributes_to_get));
+        if let Some(ref atg) = input.attributes_to_get {
+            if !atg.is_empty() && input.projection_expression.is_none() {
+                input.projection_expression = Some(convert_attributes_to_get(atg));
+            }
         }
 
         // Parse key condition expression (must exist for Query).
@@ -994,7 +1053,7 @@ impl RustStackDynamoDB {
         // If Select=COUNT, return only the count (no items).
         if input.select == Some(Select::Count) {
             return Ok(QueryOutput {
-                items: Vec::new(),
+                items: None,
                 count,
                 scanned_count,
                 last_evaluated_key: last_evaluated_key.unwrap_or_default(),
@@ -1003,7 +1062,7 @@ impl RustStackDynamoDB {
         }
 
         Ok(QueryOutput {
-            items,
+            items: Some(items),
             count,
             scanned_count,
             last_evaluated_key: last_evaluated_key.unwrap_or_default(),
@@ -1016,18 +1075,34 @@ impl RustStackDynamoDB {
     pub fn handle_scan(&self, mut input: ScanInput) -> Result<ScanOutput, DynamoDBError> {
         let table = self.state.require_table(&input.table_name)?;
 
+        let has_atg = input
+            .attributes_to_get
+            .as_ref()
+            .is_some_and(|v| !v.is_empty());
         // Validate Select parameter.
         validate_select(
             input.select.as_ref(),
             input.projection_expression.is_some(),
-            !input.attributes_to_get.is_empty(),
+            has_atg,
         )?;
+
+        // Validate AttributesToGet: empty list is not allowed.
+        if let Some(ref atg) = input.attributes_to_get {
+            if atg.is_empty() {
+                return Err(DynamoDBError::validation(
+                    "One or more parameter values are not valid. The AttributesToGet parameter \
+                     must contain at least one element",
+                ));
+            }
+        }
 
         // Legacy API: convert ScanFilter to FilterExpression.
         if !input.scan_filter.is_empty() && input.filter_expression.is_none() {
             let (expr, names, values) = convert_conditions_to_expression(
                 &input.scan_filter,
                 input.conditional_operator.as_ref(),
+                "#lcsf",
+                ":lcsv",
             );
             input.filter_expression = Some(expr);
             merge_expression_names(&mut input.expression_attribute_names, names);
@@ -1035,8 +1110,10 @@ impl RustStackDynamoDB {
         }
 
         // Legacy API: convert AttributesToGet to ProjectionExpression.
-        if !input.attributes_to_get.is_empty() && input.projection_expression.is_none() {
-            input.projection_expression = Some(convert_attributes_to_get(&input.attributes_to_get));
+        if let Some(ref atg) = input.attributes_to_get {
+            if !atg.is_empty() && input.projection_expression.is_none() {
+                input.projection_expression = Some(convert_attributes_to_get(atg));
+            }
         }
 
         // Reject empty filter expression (before parsing attempt).
@@ -1126,7 +1203,7 @@ impl RustStackDynamoDB {
         // If Select=COUNT, return only the count (no items).
         if input.select == Some(Select::Count) {
             return Ok(ScanOutput {
-                items: Vec::new(),
+                items: None,
                 count,
                 scanned_count,
                 last_evaluated_key: last_evaluated_key.unwrap_or_default(),
@@ -1135,7 +1212,7 @@ impl RustStackDynamoDB {
         }
 
         Ok(ScanOutput {
-            items,
+            items: Some(items),
             count,
             scanned_count,
             last_evaluated_key: last_evaluated_key.unwrap_or_default(),
@@ -1263,6 +1340,8 @@ impl RustStackDynamoDB {
 fn convert_conditions_to_expression(
     conditions: &HashMap<String, Condition>,
     conditional_operator: Option<&ConditionalOperator>,
+    name_prefix: &str,
+    val_prefix: &str,
 ) -> (
     String,
     HashMap<String, String>,
@@ -1286,7 +1365,7 @@ fn convert_conditions_to_expression(
         let Some(condition) = conditions.get(attr_name) else {
             continue;
         };
-        let name_placeholder = format!("#lcattr{counter}");
+        let name_placeholder = format!("{name_prefix}{counter}");
         names.insert(name_placeholder.clone(), attr_name.clone());
 
         let fragment = build_condition_fragment(
@@ -1295,6 +1374,7 @@ fn convert_conditions_to_expression(
             &condition.attribute_value_list,
             &mut values,
             &mut counter,
+            val_prefix,
         );
         parts.push(fragment);
         counter += 1;
@@ -1332,12 +1412,16 @@ fn convert_expected_to_condition(
         let Some(exp) = expected.get(attr_name) else {
             continue;
         };
-        let name_placeholder = format!("#lcattr{counter}");
+        // Use distinct prefixes (#lcexp / :lcexpv) to avoid collisions with
+        // placeholders generated by convert_attribute_updates_to_expression
+        // (#lcattr / :lcval) when both Expected and AttributeUpdates are
+        // present in the same request.
+        let name_placeholder = format!("#lcexp{counter}");
         names.insert(name_placeholder.clone(), attr_name.clone());
 
         if let Some(ref comp_op) = exp.comparison_operator {
             // Extended form: uses comparison_operator with attribute_value_list.
-            let fragment = build_condition_fragment(
+            let fragment = build_expected_condition_fragment(
                 &name_placeholder,
                 comp_op,
                 &exp.attribute_value_list,
@@ -1347,7 +1431,7 @@ fn convert_expected_to_condition(
             parts.push(fragment);
         } else if let Some(ref value) = exp.value {
             // Simple form with value: attribute must equal value.
-            let val_placeholder = format!(":lcval{counter}");
+            let val_placeholder = format!(":lcexpv{counter}");
             values.insert(val_placeholder.clone(), value.clone());
             parts.push(format!("{name_placeholder} = {val_placeholder}"));
         } else if let Some(false) = exp.exists {
@@ -1468,45 +1552,46 @@ fn build_condition_fragment(
     value_list: &[AttributeValue],
     values: &mut HashMap<String, AttributeValue>,
     counter: &mut usize,
+    val_prefix: &str,
 ) -> String {
     match op {
         ComparisonOperator::Eq => {
-            let val_ph = format!(":lcval{counter}");
+            let val_ph = format!("{val_prefix}{counter}");
             if let Some(v) = value_list.first() {
                 values.insert(val_ph.clone(), v.clone());
             }
             format!("{name_placeholder} = {val_ph}")
         }
         ComparisonOperator::Ne => {
-            let val_ph = format!(":lcval{counter}");
+            let val_ph = format!("{val_prefix}{counter}");
             if let Some(v) = value_list.first() {
                 values.insert(val_ph.clone(), v.clone());
             }
             format!("{name_placeholder} <> {val_ph}")
         }
         ComparisonOperator::Lt => {
-            let val_ph = format!(":lcval{counter}");
+            let val_ph = format!("{val_prefix}{counter}");
             if let Some(v) = value_list.first() {
                 values.insert(val_ph.clone(), v.clone());
             }
             format!("{name_placeholder} < {val_ph}")
         }
         ComparisonOperator::Le => {
-            let val_ph = format!(":lcval{counter}");
+            let val_ph = format!("{val_prefix}{counter}");
             if let Some(v) = value_list.first() {
                 values.insert(val_ph.clone(), v.clone());
             }
             format!("{name_placeholder} <= {val_ph}")
         }
         ComparisonOperator::Gt => {
-            let val_ph = format!(":lcval{counter}");
+            let val_ph = format!("{val_prefix}{counter}");
             if let Some(v) = value_list.first() {
                 values.insert(val_ph.clone(), v.clone());
             }
             format!("{name_placeholder} > {val_ph}")
         }
         ComparisonOperator::Ge => {
-            let val_ph = format!(":lcval{counter}");
+            let val_ph = format!("{val_prefix}{counter}");
             if let Some(v) = value_list.first() {
                 values.insert(val_ph.clone(), v.clone());
             }
@@ -1519,21 +1604,21 @@ fn build_condition_fragment(
             format!("attribute_exists({name_placeholder})")
         }
         ComparisonOperator::Contains => {
-            let val_ph = format!(":lcval{counter}");
+            let val_ph = format!("{val_prefix}{counter}");
             if let Some(v) = value_list.first() {
                 values.insert(val_ph.clone(), v.clone());
             }
             format!("contains({name_placeholder}, {val_ph})")
         }
         ComparisonOperator::NotContains => {
-            let val_ph = format!(":lcval{counter}");
+            let val_ph = format!("{val_prefix}{counter}");
             if let Some(v) = value_list.first() {
                 values.insert(val_ph.clone(), v.clone());
             }
             format!("NOT contains({name_placeholder}, {val_ph})")
         }
         ComparisonOperator::BeginsWith => {
-            let val_ph = format!(":lcval{counter}");
+            let val_ph = format!("{val_prefix}{counter}");
             if let Some(v) = value_list.first() {
                 values.insert(val_ph.clone(), v.clone());
             }
@@ -1542,15 +1627,15 @@ fn build_condition_fragment(
         ComparisonOperator::In => {
             let mut in_vals = Vec::new();
             for (i, v) in value_list.iter().enumerate() {
-                let val_ph = format!(":lcval{counter}i{i}");
+                let val_ph = format!("{val_prefix}{counter}i{i}");
                 values.insert(val_ph.clone(), v.clone());
                 in_vals.push(val_ph);
             }
             format!("{name_placeholder} IN ({})", in_vals.join(", "))
         }
         ComparisonOperator::Between => {
-            let low_ph = format!(":lcval{counter}lo");
-            let high_ph = format!(":lcval{counter}hi");
+            let low_ph = format!("{val_prefix}{counter}lo");
+            let high_ph = format!("{val_prefix}{counter}hi");
             if let Some(v) = value_list.first() {
                 values.insert(low_ph.clone(), v.clone());
             }
@@ -1560,6 +1645,17 @@ fn build_condition_fragment(
             format!("{name_placeholder} BETWEEN {low_ph} AND {high_ph}")
         }
     }
+}
+
+/// Build a condition fragment for Expected conversion (uses `:lcexpv` prefix).
+fn build_expected_condition_fragment(
+    name_placeholder: &str,
+    op: &ComparisonOperator,
+    value_list: &[AttributeValue],
+    values: &mut HashMap<String, AttributeValue>,
+    counter: &mut usize,
+) -> String {
+    build_condition_fragment(name_placeholder, op, value_list, values, counter, ":lcexpv")
 }
 
 /// Merge generated expression attribute names into an existing map.
@@ -1586,6 +1682,78 @@ fn merge_expression_values(
 /// Validate that expression attribute values do not contain empty sets.
 ///
 /// DynamoDB does not allow empty sets (SS, NS, BS with zero elements).
+/// Validate an `Expected` map for correctness before converting to a condition expression.
+fn validate_expected(
+    expected: &HashMap<String, ExpectedAttributeValue>,
+) -> Result<(), DynamoDBError> {
+    for (attr_name, exp) in expected {
+        if let Some(ref comp_op) = exp.comparison_operator {
+            // When using ComparisonOperator, the legacy Value/Exists fields must not be set.
+            if exp.value.is_some() || exp.exists.is_some() {
+                return Err(DynamoDBError::validation(format!(
+                    "One or more parameter values were invalid: Value or Exists cannot be used \
+                     with ComparisonOperator for attribute ({attr_name})"
+                )));
+            }
+            // Validate operand count for each operator.
+            let count = exp.attribute_value_list.len();
+            match comp_op {
+                ComparisonOperator::Eq
+                | ComparisonOperator::Ne
+                | ComparisonOperator::Lt
+                | ComparisonOperator::Le
+                | ComparisonOperator::Gt
+                | ComparisonOperator::Ge
+                | ComparisonOperator::Contains
+                | ComparisonOperator::NotContains
+                | ComparisonOperator::BeginsWith => {
+                    if count != 1 {
+                        return Err(DynamoDBError::validation(format!(
+                            "One or more parameter values were invalid: \
+                             Invalid number of argument(s) for the {comp_op} \
+                             ComparisonOperator"
+                        )));
+                    }
+                }
+                ComparisonOperator::Between => {
+                    if count != 2 {
+                        return Err(DynamoDBError::validation(
+                            "One or more parameter values were invalid: \
+                             Invalid number of argument(s) for the BETWEEN \
+                             ComparisonOperator",
+                        ));
+                    }
+                }
+                ComparisonOperator::In => {
+                    if count == 0 {
+                        return Err(DynamoDBError::validation(
+                            "One or more parameter values were invalid: \
+                             Invalid number of argument(s) for the IN \
+                             ComparisonOperator",
+                        ));
+                    }
+                }
+                ComparisonOperator::Null | ComparisonOperator::NotNull => {
+                    if count != 0 {
+                        return Err(DynamoDBError::validation(format!(
+                            "One or more parameter values were invalid: \
+                             Invalid number of argument(s) for the {comp_op} \
+                             ComparisonOperator"
+                        )));
+                    }
+                }
+            }
+        } else if exp.value.is_none() && exp.exists.is_none() {
+            // Must have at least one of: ComparisonOperator, Value, or Exists.
+            return Err(DynamoDBError::validation(format!(
+                "One or more parameter values were invalid: Value or ComparisonOperator must be \
+                 used in Expected for attribute ({attr_name})"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn validate_no_empty_sets(values: &HashMap<String, AttributeValue>) -> Result<(), DynamoDBError> {
     for (key, val) in values {
         if is_empty_set(val) {
@@ -1630,7 +1798,7 @@ fn validate_filter_no_key_attrs(
     key_schema: &KeySchema,
     names: &HashMap<String, String>,
 ) -> Result<(), DynamoDBError> {
-    let mut paths = HashSet::new();
+    let mut paths: HashSet<String> = HashSet::new();
     collect_paths_from_expr(expr, &mut paths);
     for path_name in &paths {
         // Resolve `#placeholder` references to actual attribute names.
@@ -1903,31 +2071,6 @@ fn validate_update_paths(
 // ReturnValues helpers
 // ---------------------------------------------------------------------------
 
-/// Collect the set of attribute keys that differ between old and new items.
-fn collect_changed_keys(
-    old_item: &HashMap<String, AttributeValue>,
-    new_item: &HashMap<String, AttributeValue>,
-) -> Vec<String> {
-    let mut changed = Vec::new();
-
-    // Attributes in new that are absent or different in old.
-    for (key, new_val) in new_item {
-        match old_item.get(key) {
-            Some(old_val) if old_val == new_val => {}
-            _ => changed.push(key.clone()),
-        }
-    }
-
-    // Attributes in old that are absent in new (removed).
-    for key in old_item.keys() {
-        if !new_item.contains_key(key) {
-            changed.push(key.clone());
-        }
-    }
-
-    changed
-}
-
 /// Check whether an item only contains key attributes (partition key and
 /// optional sort key). Used to detect REMOVE-only updates on non-existent
 /// items where the result would be an item with only key attributes, which
@@ -1939,52 +2082,220 @@ fn item_has_only_key_attrs(item: &HashMap<String, AttributeValue>, key_schema: &
     })
 }
 
-/// Compute the return value attributes for UpdateItem based on the
+/// Collect all target paths from an update expression (SET targets, REMOVE
+/// paths, ADD targets, DELETE targets), with `#name` placeholders resolved.
+fn collect_update_target_paths(
+    update: &UpdateExpr,
+    names: &HashMap<String, String>,
+) -> Vec<Vec<ResolvedPathElement>> {
+    let mut paths = Vec::new();
+    for action in &update.set_actions {
+        paths.push(resolve_path_elements(&action.path, names));
+    }
+    for path in &update.remove_paths {
+        paths.push(resolve_path_elements(path, names));
+    }
+    for action in &update.add_actions {
+        paths.push(resolve_path_elements(&action.path, names));
+    }
+    for action in &update.delete_actions {
+        paths.push(resolve_path_elements(&action.path, names));
+    }
+    paths
+}
+
+/// Look up the value at a resolved path within an item. Returns `None` if
+/// the path does not exist in the item.
+fn lookup_resolved_path_value(
+    item: &HashMap<String, AttributeValue>,
+    path: &[ResolvedPathElement],
+) -> Option<AttributeValue> {
+    if path.is_empty() {
+        return None;
+    }
+
+    let mut current: Option<&AttributeValue> = None;
+    for (i, elem) in path.iter().enumerate() {
+        match elem {
+            ResolvedPathElement::Attribute(name) => {
+                if i == 0 {
+                    current = item.get(name);
+                } else {
+                    let map = current?.as_m()?;
+                    current = map.get(name);
+                }
+            }
+            ResolvedPathElement::Index(idx) => {
+                let list = current?.as_l()?;
+                current = list.get(*idx);
+            }
+        }
+    }
+
+    current.cloned()
+}
+
+/// Insert a value into a result map at a given resolved path, reconstructing
+/// the nested structure. For nested paths like `[Attribute("a"),
+/// Attribute("b")]` with value `"hi"`, this produces `{"a": {"b": "hi"}}`.
+///
+/// For list index paths like `[Attribute("a"), Attribute("c"), Index(1)]`
+/// with value `2`, this produces `{"a": {"c": [2]}}` (a single-element list
+/// containing just the value at that index).
+///
+/// When multiple paths share a common prefix (e.g., `a.b` and `a.c[1]`),
+/// the results are merged into a single nested structure.
+fn insert_at_resolved_path(
+    result: &mut HashMap<String, AttributeValue>,
+    path: &[ResolvedPathElement],
+    value: AttributeValue,
+) {
+    if path.is_empty() {
+        return;
+    }
+
+    // The first element must be an Attribute (top-level key).
+    let ResolvedPathElement::Attribute(top_key) = &path[0] else {
+        return;
+    };
+
+    if path.len() == 1 {
+        // Simple top-level attribute: just insert directly.
+        result.insert(top_key.clone(), value);
+        return;
+    }
+
+    // For nested paths, wrap the value in the appropriate nested structure
+    // and merge with any existing content at the same path.
+    let nested_value = wrap_value_in_nested_path(&path[1..], value);
+
+    match result.get_mut(top_key) {
+        Some(existing) => {
+            merge_attribute_values(existing, nested_value);
+        }
+        None => {
+            result.insert(top_key.clone(), nested_value);
+        }
+    }
+}
+
+/// Wrap a value in nested Map/List structure according to the remaining path
+/// elements. For example, path `[Attribute("b")]` with value `"hi"` produces
+/// `M({"b": "hi"})`. Path `[Attribute("c"), Index(1)]` with value `2`
+/// produces `M({"c": L([2])})`.
+fn wrap_value_in_nested_path(
+    path: &[ResolvedPathElement],
+    value: AttributeValue,
+) -> AttributeValue {
+    if path.is_empty() {
+        return value;
+    }
+
+    match &path[0] {
+        ResolvedPathElement::Attribute(name) => {
+            let inner = wrap_value_in_nested_path(&path[1..], value);
+            let mut map = HashMap::new();
+            map.insert(name.clone(), inner);
+            AttributeValue::M(map)
+        }
+        ResolvedPathElement::Index(_) => {
+            // For list indices, wrap the leaf value in a single-element list.
+            // DynamoDB returns just the single affected element in
+            // UPDATED_OLD / UPDATED_NEW for list index paths.
+            let inner = wrap_value_in_nested_path(&path[1..], value);
+            AttributeValue::L(vec![inner])
+        }
+    }
+}
+
+/// Deep-merge `source` into `target`. When both are maps, merge recursively.
+/// When both are lists, concatenate. Otherwise, `source` overwrites `target`.
+fn merge_attribute_values(target: &mut AttributeValue, source: AttributeValue) {
+    match (target, source) {
+        (AttributeValue::M(target_map), AttributeValue::M(source_map)) => {
+            for (key, source_val) in source_map {
+                match target_map.get_mut(&key) {
+                    Some(existing) => merge_attribute_values(existing, source_val),
+                    None => {
+                        target_map.insert(key, source_val);
+                    }
+                }
+            }
+        }
+        (AttributeValue::L(target_list), AttributeValue::L(source_list)) => {
+            target_list.extend(source_list);
+        }
+        (target, source) => {
+            *target = source;
+        }
+    }
+}
+
+/// Compute the return value attributes for `UpdateItem` based on the
 /// `ReturnValues` parameter.
 ///
 /// - `NONE` / `None`: empty map
 /// - `ALL_OLD`: all attributes of the old item (or empty if no old item)
 /// - `ALL_NEW`: all attributes of the new item
-/// - `UPDATED_OLD`: only the changed attributes from the old item, excluding
-///   key attributes
-/// - `UPDATED_NEW`: only the changed attributes from the new item, excluding
-///   key attributes
+/// - `UPDATED_OLD`: for each path targeted by the update expression, return
+///   the old value if it existed (before the update). Only returns the
+///   specific nested sub-path, not the entire top-level attribute.
+/// - `UPDATED_NEW`: for each path targeted by the update expression, return
+///   the new value if it exists (after the update). For REMOVE'd attributes,
+///   the path no longer exists so it is not returned.
 fn compute_update_return_values(
     return_values: Option<&ReturnValue>,
     old_item: Option<&HashMap<String, AttributeValue>>,
     new_item: &HashMap<String, AttributeValue>,
     key_schema: &KeySchema,
+    parsed_update: Option<&UpdateExpr>,
+    expression_names: &HashMap<String, String>,
 ) -> HashMap<String, AttributeValue> {
-    let empty = HashMap::new();
     match return_values {
         Some(ReturnValue::AllOld) => old_item.cloned().unwrap_or_default(),
         Some(ReturnValue::AllNew) => new_item.clone(),
         Some(ReturnValue::UpdatedOld) => {
-            let old = old_item.unwrap_or(&empty);
-            let changed = collect_changed_keys(old, new_item);
+            let Some(old) = old_item else {
+                return HashMap::new();
+            };
+            let Some(update) = parsed_update else {
+                return HashMap::new();
+            };
+            let paths = collect_update_target_paths(update, expression_names);
             let mut result = HashMap::new();
-            for key in changed {
-                // Exclude key attributes from UPDATED_OLD.
-                if is_key_attribute(&key, key_schema) {
-                    continue;
+            for path in &paths {
+                // Skip key attributes (the first element of the path is the
+                // top-level attribute name).
+                if let Some(ResolvedPathElement::Attribute(name)) = path.first() {
+                    if is_key_attribute(name, key_schema) {
+                        continue;
+                    }
                 }
-                if let Some(val) = old.get(&key) {
-                    result.insert(key, val.clone());
+                // Look up the old value at this exact path.
+                if let Some(old_val) = lookup_resolved_path_value(old, path) {
+                    insert_at_resolved_path(&mut result, path, old_val);
                 }
             }
             result
         }
         Some(ReturnValue::UpdatedNew) => {
-            let old = old_item.unwrap_or(&empty);
-            let changed = collect_changed_keys(old, new_item);
+            let Some(update) = parsed_update else {
+                return HashMap::new();
+            };
+            let paths = collect_update_target_paths(update, expression_names);
             let mut result = HashMap::new();
-            for key in changed {
-                // Exclude key attributes from UPDATED_NEW.
-                if is_key_attribute(&key, key_schema) {
-                    continue;
+            for path in &paths {
+                // Skip key attributes.
+                if let Some(ResolvedPathElement::Attribute(name)) = path.first() {
+                    if is_key_attribute(name, key_schema) {
+                        continue;
+                    }
                 }
-                if let Some(val) = new_item.get(&key) {
-                    result.insert(key, val.clone());
+                // Look up the new value at this exact path. REMOVE'd paths
+                // will not exist in the new item, so they are naturally
+                // excluded.
+                if let Some(new_val) = lookup_resolved_path_value(new_item, path) {
+                    insert_at_resolved_path(&mut result, path, new_val);
                 }
             }
             result
@@ -2822,7 +3133,8 @@ mod tests {
                 attribute_value_list: vec![AttributeValue::N("25".to_owned())],
             },
         )]);
-        let (expr, names, values) = convert_conditions_to_expression(&conditions, None);
+        let (expr, names, values) =
+            convert_conditions_to_expression(&conditions, None, "#lcattr", ":lcval");
         assert!(expr.contains('='));
         assert!(names.values().any(|v| v == "age"));
         assert_eq!(values.len(), 1);
@@ -2840,7 +3152,8 @@ mod tests {
                 ],
             },
         )]);
-        let (expr, names, values) = convert_conditions_to_expression(&conditions, None);
+        let (expr, names, values) =
+            convert_conditions_to_expression(&conditions, None, "#lcattr", ":lcval");
         assert!(expr.contains("BETWEEN"));
         assert!(expr.contains("AND"));
         assert!(names.values().any(|v| v == "score"));
@@ -2859,7 +3172,8 @@ mod tests {
                 ],
             },
         )]);
-        let (expr, names, values) = convert_conditions_to_expression(&conditions, None);
+        let (expr, names, values) =
+            convert_conditions_to_expression(&conditions, None, "#lcattr", ":lcval");
         assert!(expr.contains("IN"));
         assert!(names.values().any(|v| v == "status"));
         assert_eq!(values.len(), 2);
@@ -3016,22 +3330,28 @@ mod tests {
                 AttributeValue::S("bob@example.com".to_owned()),
             ),
         ]);
+        // Simulate: SET name = :val1, email = :val2
+        let update = parse_update("SET #n = :val1, email = :val2").unwrap();
+        let names = HashMap::from([("#n".to_owned(), "name".to_owned())]);
         let changed = compute_update_return_values(
             Some(&ReturnValue::UpdatedOld),
             Some(&old),
             &new,
             &key_schema,
+            Some(&update),
+            &names,
         );
-        // "name" changed: old was Alice, so it should be in result.
+        // "name" was targeted by SET: old was Alice, so it should be in result.
         assert_eq!(
             changed.get("name"),
             Some(&AttributeValue::S("Alice".to_owned()))
         );
-        // "email" is new, no old value so not in UPDATED_OLD result.
+        // "email" was targeted by SET but didn't exist in old, so not in
+        // UPDATED_OLD result.
         assert!(!changed.contains_key("email"));
-        // "pk" is a key attribute, excluded from UPDATED_OLD.
+        // "pk" is not targeted by the update expression.
         assert!(!changed.contains_key("pk"));
-        // "age" did not change.
+        // "age" is not targeted by the update expression.
         assert!(!changed.contains_key("age"));
     }
 
@@ -3056,23 +3376,115 @@ mod tests {
                 AttributeValue::S("bob@example.com".to_owned()),
             ),
         ]);
+        // Simulate: SET name = :val1, email = :val2
+        let update = parse_update("SET #n = :val1, email = :val2").unwrap();
+        let names = HashMap::from([("#n".to_owned(), "name".to_owned())]);
         let changed = compute_update_return_values(
             Some(&ReturnValue::UpdatedNew),
             Some(&old),
             &new,
             &key_schema,
+            Some(&update),
+            &names,
         );
-        // "name" changed: new value is Bob.
+        // "name" was targeted by SET: new value is Bob.
         assert_eq!(
             changed.get("name"),
             Some(&AttributeValue::S("Bob".to_owned()))
         );
-        // "email" is new in the new item.
+        // "email" was targeted by SET: new value in the new item.
         assert_eq!(
             changed.get("email"),
             Some(&AttributeValue::S("bob@example.com".to_owned()))
         );
-        // "pk" is a key attribute, excluded from UPDATED_NEW.
+        // "pk" is not targeted by the update expression.
         assert!(!changed.contains_key("pk"));
+    }
+
+    #[test]
+    fn test_should_compute_update_return_values_nested_paths() {
+        let key_schema = KeySchema {
+            partition_key: KeyAttribute {
+                name: "pk".to_owned(),
+                attr_type: ScalarAttributeType::S,
+            },
+            sort_key: None,
+        };
+        let old = HashMap::from([
+            ("pk".to_owned(), AttributeValue::S("k1".to_owned())),
+            (
+                "a".to_owned(),
+                AttributeValue::M(HashMap::from([
+                    ("b".to_owned(), AttributeValue::S("dog".to_owned())),
+                    (
+                        "c".to_owned(),
+                        AttributeValue::L(vec![
+                            AttributeValue::N("1".to_owned()),
+                            AttributeValue::N("2".to_owned()),
+                            AttributeValue::N("3".to_owned()),
+                        ]),
+                    ),
+                ])),
+            ),
+        ]);
+        let new = HashMap::from([
+            ("pk".to_owned(), AttributeValue::S("k1".to_owned())),
+            (
+                "a".to_owned(),
+                AttributeValue::M(HashMap::from([
+                    ("b".to_owned(), AttributeValue::S("hi".to_owned())),
+                    (
+                        "c".to_owned(),
+                        AttributeValue::L(vec![
+                            AttributeValue::N("1".to_owned()),
+                            AttributeValue::N("2".to_owned()),
+                            AttributeValue::N("3".to_owned()),
+                        ]),
+                    ),
+                ])),
+            ),
+        ]);
+        // Simulate: SET a.b = :val
+        let update = parse_update("SET a.b = :val").unwrap();
+        let names = HashMap::new();
+        let changed = compute_update_return_values(
+            Some(&ReturnValue::UpdatedOld),
+            Some(&old),
+            &new,
+            &key_schema,
+            Some(&update),
+            &names,
+        );
+        // Should return only the nested path a.b, not the entire a attribute.
+        assert_eq!(
+            changed,
+            HashMap::from([(
+                "a".to_owned(),
+                AttributeValue::M(HashMap::from([(
+                    "b".to_owned(),
+                    AttributeValue::S("dog".to_owned()),
+                )])),
+            )])
+        );
+
+        // Test UPDATED_NEW for the same scenario.
+        let changed = compute_update_return_values(
+            Some(&ReturnValue::UpdatedNew),
+            Some(&old),
+            &new,
+            &key_schema,
+            Some(&update),
+            &names,
+        );
+        assert_eq!(
+            changed,
+            HashMap::from([(
+                "a".to_owned(),
+                AttributeValue::M(HashMap::from([(
+                    "b".to_owned(),
+                    AttributeValue::S("hi".to_owned()),
+                )])),
+            )])
+        );
     }
 }

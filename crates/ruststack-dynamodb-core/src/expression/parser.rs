@@ -57,6 +57,12 @@ pub enum ExpressionError {
         /// Explanation.
         message: String,
     },
+    /// A validation error in projection or other expression.
+    #[error("{message}")]
+    Validation {
+        /// Explanation.
+        message: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -741,10 +747,18 @@ impl Parser {
                 }
                 Token::LBracket => {
                     self.advance();
-                    let Token::Number(idx) = self.advance() else {
+                    let tok = self.advance();
+                    // Reject negative indices (minus token inside brackets).
+                    if matches!(tok, Token::Minus) {
+                        return Err(ExpressionError::UnexpectedToken {
+                            expected: "non-negative index".to_owned(),
+                            found: "Syntax error; negative index is not allowed".to_owned(),
+                        });
+                    }
+                    let Token::Number(idx) = tok else {
                         return Err(ExpressionError::UnexpectedToken {
                             expected: "number".to_owned(),
-                            found: "non-number".to_owned(),
+                            found: "Syntax error; expected a non-negative integer index".to_owned(),
                         });
                     };
                     self.expect(&Token::RBracket)?;
@@ -1064,8 +1078,55 @@ pub fn parse_update(input: &str) -> Result<UpdateExpr, ExpressionError> {
 ///
 /// # Errors
 ///
-/// Returns `ExpressionError` if the expression is syntactically invalid.
+/// Returns `ExpressionError` if the expression is syntactically invalid,
+/// contains overlapping or conflicting paths, exceeds nesting depth, or
+/// has duplicate top-level attributes.
 pub fn parse_projection(input: &str) -> Result<Vec<AttributePath>, ExpressionError> {
+    // Reject empty projection expression.
+    if input.trim().is_empty() {
+        return Err(ExpressionError::Validation {
+            message: "Invalid ProjectionExpression: The expression can not be empty;".to_owned(),
+        });
+    }
+
+    // Reject leading commas.
+    if input.trim_start().starts_with(',') {
+        return Err(ExpressionError::Validation {
+            message: "Invalid ProjectionExpression: Syntax error; unexpected comma at start"
+                .to_owned(),
+        });
+    }
+
+    // Reject trailing commas.
+    if input.trim_end().ends_with(',') {
+        return Err(ExpressionError::Validation {
+            message: "Invalid ProjectionExpression: Syntax error; unexpected comma at end"
+                .to_owned(),
+        });
+    }
+
+    // Reject empty segments between commas (e.g., "a,,b").
+    // Check for consecutive commas with optional whitespace between them.
+    {
+        let trimmed = input.trim();
+        let chars: Vec<char> = trimmed.chars().collect();
+        let mut saw_comma = false;
+        for &ch in &chars {
+            if ch == ',' {
+                if saw_comma {
+                    return Err(ExpressionError::Validation {
+                        message: "Invalid ProjectionExpression: Syntax error; empty segment \
+                                  between commas"
+                            .to_owned(),
+                    });
+                }
+                saw_comma = true;
+            } else if !ch.is_ascii_whitespace() {
+                saw_comma = false;
+            }
+        }
+    }
+
     let tokens = Lexer::new(input).tokenize()?;
     let mut parser = Parser::new(tokens);
     let paths = parser.parse_projection_expr()?;
@@ -1075,7 +1136,126 @@ pub fn parse_projection(input: &str) -> Result<Vec<AttributePath>, ExpressionErr
             found: parser.peek().to_string(),
         });
     }
+
+    // Validate nesting depth: DynamoDB limits to 32 levels.
+    for path in &paths {
+        if path.elements.len() > 32 {
+            return Err(ExpressionError::Validation {
+                message: format!(
+                    "Invalid ProjectionExpression: The document path has too many nesting \
+                     levels; nesting levels: {}",
+                    path.elements.len()
+                ),
+            });
+        }
+    }
+
+    // Validate duplicate top-level attributes.
+    {
+        let mut seen: Vec<String> = Vec::new();
+        for path in &paths {
+            let repr = format!("{path}");
+            if seen.contains(&repr) {
+                return Err(ExpressionError::Validation {
+                    message: format!(
+                        "Invalid ProjectionExpression: Two document paths overlap with \
+                         each other; must remove or rewrite one of these paths; path one: \
+                         [{repr}], path two: [{repr}]"
+                    ),
+                });
+            }
+            seen.push(repr);
+        }
+    }
+
+    // Validate overlapping and conflicting paths.
+    validate_projection_paths(&paths)?;
+
     Ok(paths)
+}
+
+/// Represents a resolved element in a projection path for validation purposes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ResolvedPathElement {
+    /// A map attribute access (via dot notation).
+    MapKey(String),
+    /// A list index access (via bracket notation).
+    ListIndex(usize),
+}
+
+/// Convert an `AttributePath` to a vector of `ResolvedPathElement` for comparison.
+fn path_to_resolved(path: &AttributePath) -> Vec<ResolvedPathElement> {
+    path.elements
+        .iter()
+        .map(|e| match e {
+            PathElement::Attribute(name) => ResolvedPathElement::MapKey(name.clone()),
+            PathElement::Index(idx) => ResolvedPathElement::ListIndex(*idx),
+        })
+        .collect()
+}
+
+/// Validate that no two projection paths overlap or conflict.
+///
+/// - **Overlap**: One path is a prefix of another, or two paths are identical.
+/// - **Conflict**: At a shared prefix point, one path accesses via dot (map key)
+///   and the other via index (list), meaning the same node would need to be both
+///   a map and a list simultaneously.
+fn validate_projection_paths(paths: &[AttributePath]) -> Result<(), ExpressionError> {
+    let resolved: Vec<Vec<ResolvedPathElement>> = paths.iter().map(path_to_resolved).collect();
+
+    for i in 0..resolved.len() {
+        for j in (i + 1)..resolved.len() {
+            let a = &resolved[i];
+            let b = &resolved[j];
+            let min_len = a.len().min(b.len());
+
+            // Check the shared prefix for conflicts.
+            let mut prefix_matches = true;
+            for k in 0..min_len {
+                match (&a[k], &b[k]) {
+                    (ResolvedPathElement::MapKey(ka), ResolvedPathElement::MapKey(kb)) => {
+                        if ka != kb {
+                            prefix_matches = false;
+                            break;
+                        }
+                    }
+                    (ResolvedPathElement::ListIndex(ia), ResolvedPathElement::ListIndex(ib)) => {
+                        if ia != ib {
+                            prefix_matches = false;
+                            break;
+                        }
+                    }
+                    // One is a map key and the other is a list index at the same depth:
+                    // this is a conflict.
+                    _ => {
+                        return Err(ExpressionError::Validation {
+                            message: format!(
+                                "Invalid ProjectionExpression: Two document paths conflict \
+                                 with each other; must remove or rewrite one of these paths; \
+                                 path one: [{}], path two: [{}]",
+                                paths[i], paths[j]
+                            ),
+                        });
+                    }
+                }
+            }
+
+            // If the entire shorter path matches as a prefix of the longer one,
+            // they overlap.
+            if prefix_matches && (a.len() != b.len()) {
+                return Err(ExpressionError::Validation {
+                    message: format!(
+                        "Invalid ProjectionExpression: Two document paths overlap with \
+                         each other; must remove or rewrite one of these paths; \
+                         path one: [{}], path two: [{}]",
+                        paths[i], paths[j]
+                    ),
+                });
+            }
+        }
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1406,5 +1586,150 @@ mod tests {
             }
             other => panic!("expected Minus, got {other:?}"),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Projection expression validation tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_should_reject_empty_projection_expression() {
+        let result = parse_projection("");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("empty"), "expected 'empty' in: {err}");
+    }
+
+    #[test]
+    fn test_should_reject_whitespace_only_projection() {
+        let result = parse_projection("   ");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_should_reject_leading_comma_projection() {
+        let result = parse_projection(",a");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("comma") || err.contains("Syntax"),
+            "expected comma/Syntax error in: {err}"
+        );
+    }
+
+    #[test]
+    fn test_should_reject_trailing_comma_projection() {
+        let result = parse_projection("a,");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("comma") || err.contains("Syntax"),
+            "expected comma/Syntax error in: {err}"
+        );
+    }
+
+    #[test]
+    fn test_should_reject_empty_segment_between_commas() {
+        let result = parse_projection("a,,b");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("empty") || err.contains("comma"),
+            "expected empty/comma error in: {err}"
+        );
+    }
+
+    #[test]
+    fn test_should_reject_duplicate_top_level_attributes() {
+        let result = parse_projection("a, a");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("overlap"), "expected 'overlap' in: {err}");
+    }
+
+    #[test]
+    fn test_should_reject_overlapping_paths_prefix() {
+        // "a" is a prefix of "a.b" -- they overlap.
+        let result = parse_projection("a, a.b");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("overlap"), "expected 'overlap' in: {err}");
+    }
+
+    #[test]
+    fn test_should_reject_overlapping_paths_reverse() {
+        let result = parse_projection("a.b, a");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("overlap"), "expected 'overlap' in: {err}");
+    }
+
+    #[test]
+    fn test_should_reject_conflicting_paths_map_vs_index() {
+        // "a.b" treats a as a map, "a[0]" treats a as a list -- conflict.
+        let result = parse_projection("a.b, a[0]");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("conflict"), "expected 'conflict' in: {err}");
+    }
+
+    #[test]
+    fn test_should_reject_nesting_depth_exceeds_32() {
+        // Create a path with 33 elements.
+        let path = (0..33)
+            .map(|i| format!("a{i}"))
+            .collect::<Vec<_>>()
+            .join(".");
+        let result = parse_projection(&path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nesting levels"),
+            "expected 'nesting levels' in: {err}"
+        );
+    }
+
+    #[test]
+    fn test_should_accept_nesting_depth_at_32() {
+        // 32 elements is the maximum allowed.
+        let path = (0..32)
+            .map(|i| format!("a{i}"))
+            .collect::<Vec<_>>()
+            .join(".");
+        let result = parse_projection(&path);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_should_reject_negative_index() {
+        let result = parse_condition("a[-1] = :v");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Syntax error"),
+            "expected 'Syntax error' in: {err}"
+        );
+    }
+
+    #[test]
+    fn test_should_accept_non_overlapping_sibling_paths() {
+        // "a.b" and "a.c" share prefix "a" but are siblings, not overlapping.
+        let result = parse_projection("a.b, a.c");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_should_accept_different_indices() {
+        // "a[0]" and "a[1]" share prefix "a" but are different indices.
+        let result = parse_projection("a[0], a[1]");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_should_reject_identical_nested_paths() {
+        let result = parse_projection("a.b.c, a.b.c");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("overlap"), "expected 'overlap' in: {err}");
     }
 }

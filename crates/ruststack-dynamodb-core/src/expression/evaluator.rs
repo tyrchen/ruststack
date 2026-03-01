@@ -393,11 +393,16 @@ impl EvalContext<'_> {
     ) -> Result<HashMap<String, AttributeValue>, ExpressionError> {
         let mut result = self.item.clone();
 
-        for action in &update.set_actions {
+        // Sort SET actions by their target list index so that out-of-bounds
+        // appends happen in index order, matching DynamoDB behavior.
+        let mut sorted_set_actions: Vec<&SetAction> = update.set_actions.iter().collect();
+        sorted_set_actions.sort_by_key(|action| extract_last_index(&action.path));
+
+        for action in &sorted_set_actions {
             self.apply_set_action(&mut result, action)?;
         }
         for path in &update.remove_paths {
-            apply_remove(&mut result, path, self.names);
+            apply_remove(&mut result, path, self.names)?;
         }
         for action in &update.add_actions {
             self.apply_add_action(&mut result, action)?;
@@ -415,7 +420,7 @@ impl EvalContext<'_> {
         action: &SetAction,
     ) -> Result<(), ExpressionError> {
         let value = self.resolve_set_value(&action.value)?;
-        set_path_value(item, &action.path, value, self.names);
+        set_path_value(item, &action.path, value, self.names)?;
         Ok(())
     }
 
@@ -508,7 +513,7 @@ impl EvalContext<'_> {
         // For nested paths, resolve and modify in place.
         let existing = resolve_path_in_item(item, &action.path, self.names);
         let result = compute_add_result(&add_val, existing.as_ref())?;
-        set_path_value(item, &action.path, result, self.names);
+        set_path_value(item, &action.path, result, self.names)?;
 
         Ok(())
     }
@@ -585,10 +590,14 @@ impl EvalContext<'_> {
             }
             _ => {
                 // Set type mismatch (e.g., deleting SS from NS).
+                let del_type = del_val.type_descriptor();
+                let existing_type = existing.type_descriptor();
                 return Err(ExpressionError::InvalidOperand {
                     operation: "DELETE".to_owned(),
-                    message: "An operand in the update expression has an incorrect data type"
-                        .to_owned(),
+                    message: format!(
+                        "Type mismatch for DELETE; operator type: {del_type}, \
+                         existing type: {existing_type}"
+                    ),
                 });
             }
         }
@@ -856,20 +865,224 @@ fn numeric_arithmetic(
             message: "arithmetic requires number operands".to_owned(),
         });
     };
-    let fa = parse_number(na)?;
-    let fb = parse_number(nb)?;
-    let result = if is_add { fa + fb } else { fa - fb };
-    Ok(AttributeValue::N(format_number(result)))
+    let result = precise_arithmetic(na, nb, is_add)?;
+    Ok(AttributeValue::N(result))
 }
 
-/// Format a number, preferring integer representation when the value is integral.
-fn format_number(v: f64) -> String {
-    // Safe to truncate: we already verified the value is integral and within i64 range.
-    #[allow(clippy::float_cmp, clippy::cast_possible_truncation)]
-    if v == v.trunc() && v.abs() < 1e15 {
-        format!("{}", v as i64)
+/// Parsed number representation: sign, significant digits, and exponent.
+/// The number represents: sign * digits * 10^exponent
+/// e.g. "123.45" → (false, "12345", -2), "-5e3" → (true, "5", 3)
+struct ParsedNumber {
+    negative: bool,
+    /// Significant digits as a string (no leading zeros, no trailing zeros).
+    digits: String,
+    /// Exponent after shifting all digits to integers.
+    exponent: i64,
+}
+
+/// Parse a number string into its components.
+fn parse_number_components(s: &str) -> Result<ParsedNumber, ExpressionError> {
+    let trimmed = s.trim();
+    let (negative, rest) = if let Some(r) = trimmed.strip_prefix('-') {
+        (true, r)
+    } else if let Some(r) = trimmed.strip_prefix('+') {
+        (false, r)
     } else {
-        v.to_string()
+        (false, trimmed)
+    };
+
+    let (mantissa, explicit_exp) = if let Some(pos) = rest.find(['e', 'E']) {
+        let exp: i64 = rest[pos + 1..]
+            .parse()
+            .map_err(|_| ExpressionError::TypeMismatch {
+                message: "invalid number format".to_owned(),
+            })?;
+        (&rest[..pos], exp)
+    } else {
+        (rest, 0i64)
+    };
+
+    // Remove the decimal point and adjust exponent.
+    let (all_digits, frac_len) = if let Some(dot_pos) = mantissa.find('.') {
+        let integer_part = &mantissa[..dot_pos];
+        let frac_part = &mantissa[dot_pos + 1..];
+        let all = format!("{integer_part}{frac_part}");
+        #[allow(clippy::cast_possible_wrap)]
+        let frac = frac_part.len() as i64;
+        (all, frac)
+    } else {
+        (mantissa.to_owned(), 0i64)
+    };
+
+    // Remove leading zeros.
+    let trimmed_digits = all_digits.trim_start_matches('0').to_owned();
+    if trimmed_digits.is_empty() {
+        return Ok(ParsedNumber {
+            negative: false,
+            digits: "0".to_owned(),
+            exponent: 0,
+        });
+    }
+
+    // Remove trailing zeros and adjust exponent.
+    let trailing_zeros = trimmed_digits.len() - trimmed_digits.trim_end_matches('0').len();
+    let final_digits = trimmed_digits.trim_end_matches('0').to_owned();
+    #[allow(clippy::cast_possible_wrap)]
+    let exponent = explicit_exp - frac_len + trailing_zeros as i64;
+
+    Ok(ParsedNumber {
+        negative,
+        digits: final_digits,
+        exponent,
+    })
+}
+
+/// Perform precise arithmetic on two DynamoDB number strings.
+/// Returns the result as a canonical DynamoDB number string.
+fn precise_arithmetic(a: &str, b: &str, is_add: bool) -> Result<String, ExpressionError> {
+    let mut pa = parse_number_components(a)?;
+    let mut pb = parse_number_components(b)?;
+
+    // For subtraction, flip the sign of b.
+    if !is_add {
+        pb.negative = !pb.negative;
+    }
+
+    // If either is zero, return the other.
+    if pa.digits == "0" {
+        return Ok(format_parsed_number(&pb));
+    }
+    if pb.digits == "0" {
+        return Ok(format_parsed_number(&pa));
+    }
+
+    // Align exponents by padding the higher-exponent number with trailing zeros.
+    let min_exp = pa.exponent.min(pb.exponent);
+    // Shifts are always non-negative since min_exp <= both exponents.
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let a_shift = (pa.exponent - min_exp) as usize;
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let b_shift = (pb.exponent - min_exp) as usize;
+    pa.digits.push_str(&"0".repeat(a_shift));
+    pb.digits.push_str(&"0".repeat(b_shift));
+    pa.exponent = min_exp;
+    pb.exponent = min_exp;
+
+    // Check total digit count — if alignment requires too many digits, precision is lost.
+    let max_digits = pa.digits.len().max(pb.digits.len());
+    if max_digits > 38 + 2 {
+        // Precision would be lost in the result.
+        return Err(ExpressionError::Validation {
+            message: "Number overflow. Attempting to store a number with magnitude larger than supported range".to_owned(),
+        });
+    }
+
+    // Convert to i128 for arithmetic (supports up to 38 digits).
+    let a_val: i128 = pa
+        .digits
+        .parse()
+        .map_err(|_| ExpressionError::TypeMismatch {
+            message: "number too large for arithmetic".to_owned(),
+        })?;
+    let b_val: i128 = pb
+        .digits
+        .parse()
+        .map_err(|_| ExpressionError::TypeMismatch {
+            message: "number too large for arithmetic".to_owned(),
+        })?;
+
+    let a_signed = if pa.negative { -a_val } else { a_val };
+    let b_signed = if pb.negative { -b_val } else { b_val };
+    let result = a_signed + b_signed;
+
+    let result_negative = result < 0;
+    let result_abs = result.unsigned_abs();
+    let result_str = result_abs.to_string();
+
+    // Remove trailing zeros and adjust exponent.
+    let trimmed = result_str.trim_end_matches('0');
+    let trailing = result_str.len() - trimmed.len();
+    #[allow(clippy::cast_possible_wrap)]
+    let final_exp = min_exp + trailing as i64;
+
+    if trimmed.is_empty() || trimmed == "0" {
+        return Ok("0".to_owned());
+    }
+
+    // Validate result precision and magnitude.
+    if trimmed.len() > 38 {
+        return Err(ExpressionError::Validation {
+            message: "Number overflow. Attempting to store a number with magnitude larger than supported range".to_owned(),
+        });
+    }
+
+    #[allow(clippy::cast_possible_wrap)]
+    let magnitude = final_exp + trimmed.len() as i64 - 1;
+    if magnitude > 125 {
+        return Err(ExpressionError::Validation {
+            message: "Number overflow. Attempting to store a number with magnitude larger than supported range".to_owned(),
+        });
+    }
+    if magnitude < -130 {
+        return Err(ExpressionError::Validation {
+            message: "Number underflow. Attempting to store a number with magnitude smaller than supported range".to_owned(),
+        });
+    }
+
+    let parsed = ParsedNumber {
+        negative: result_negative,
+        digits: trimmed.to_owned(),
+        exponent: final_exp,
+    };
+    Ok(format_parsed_number(&parsed))
+}
+
+/// Format a `ParsedNumber` into a canonical DynamoDB number string.
+#[allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
+fn format_parsed_number(p: &ParsedNumber) -> String {
+    if p.digits == "0" {
+        return "0".to_owned();
+    }
+
+    let sign = if p.negative { "-" } else { "" };
+    let digits = &p.digits;
+    let exp = p.exponent;
+
+    // The number is: digits * 10^exp
+    // We want to produce the most natural representation.
+    let total_integer_digits = digits.len() as i64 + exp;
+
+    if exp >= 0 && total_integer_digits <= 20 {
+        // Pure integer: append zeros.
+        return format!("{sign}{digits}{}", "0".repeat(exp as usize));
+    }
+
+    if total_integer_digits > 0 && total_integer_digits <= 20 {
+        // Mixed: some integer digits, some fractional.
+        let int_part = &digits[..total_integer_digits as usize];
+        let frac_part = &digits[total_integer_digits as usize..];
+        return format!("{sign}{int_part}.{frac_part}");
+    }
+
+    if ((-6)..=0).contains(&total_integer_digits) {
+        // Small decimal: 0.000...digits
+        let leading_zeros = (-total_integer_digits) as usize;
+        return format!("{sign}0.{}{digits}", "0".repeat(leading_zeros));
+    }
+
+    // Scientific notation for very large or very small numbers.
+    if digits.len() == 1 {
+        let sci_exp = exp + digits.len() as i64 - 1;
+        format!("{sign}{digits}E{sci_exp}")
+    } else {
+        let int_part = &digits[..1];
+        let frac_part = &digits[1..];
+        let sci_exp = exp + digits.len() as i64 - 1;
+        format!("{sign}{int_part}.{frac_part}E{sci_exp}")
     }
 }
 
@@ -897,6 +1110,18 @@ fn is_valid_type_descriptor(s: &str) -> bool {
 }
 
 /// Insert a value at a nested path within a result map, creating intermediate structures.
+/// Resolved path element for deep insertion.
+enum ResolvedElement {
+    /// A map key access.
+    MapKey(String),
+    /// A list index access (value not needed since projection appends densely).
+    ListIndex,
+}
+
+/// Insert a value at the given path into a result map, creating intermediate
+/// maps and lists as needed. Handles nested map and list structures, merging
+/// values with shared prefixes. For list indices, creates sparse lists (filled
+/// with `Null(true)` placeholders) large enough to hold the target index.
 fn deep_insert(
     result: &mut HashMap<String, AttributeValue>,
     path: &AttributePath,
@@ -907,34 +1132,105 @@ fn deep_insert(
         return;
     }
 
-    let top_name = match &path.elements[0] {
-        PathElement::Attribute(name) => {
-            if name.starts_with('#') {
-                names
-                    .get(name.as_str())
-                    .cloned()
-                    .unwrap_or_else(|| name.clone())
-            } else {
-                name.clone()
+    // Build a resolved elements list (replacing `#name` references).
+    let resolved: Vec<ResolvedElement> = path
+        .elements
+        .iter()
+        .map(|e| match e {
+            PathElement::Attribute(name) => {
+                let resolved_name = if name.starts_with('#') {
+                    names
+                        .get(name.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| name.clone())
+                } else {
+                    name.clone()
+                };
+                ResolvedElement::MapKey(resolved_name)
             }
-        }
-        PathElement::Index(_) => return,
+            PathElement::Index(_) => ResolvedElement::ListIndex,
+        })
+        .collect();
+
+    // The first element must be a map key (top-level attribute name).
+    let ResolvedElement::MapKey(ref top_name) = resolved[0] else {
+        return;
     };
 
-    if path.elements.len() == 1 {
-        result.insert(top_name, value);
+    if resolved.len() == 1 {
+        result.insert(top_name.clone(), value);
         return;
     }
 
-    // For nested paths, build the intermediate structure.
+    // For deeper paths, navigate/create intermediate containers.
     let entry = result
-        .entry(top_name)
-        .or_insert_with(|| AttributeValue::M(HashMap::new()));
-    if let AttributeValue::M(map) = entry {
-        let sub_path = AttributePath {
-            elements: path.elements[1..].to_vec(),
-        };
-        deep_insert(map, &sub_path, value, names);
+        .entry(top_name.clone())
+        .or_insert_with(|| match &resolved[1] {
+            ResolvedElement::MapKey(_) => AttributeValue::M(HashMap::new()),
+            ResolvedElement::ListIndex => AttributeValue::L(Vec::new()),
+        });
+
+    deep_insert_into_av(entry, &resolved[1..], value);
+}
+
+/// Recursively insert a value into an `AttributeValue` at the given resolved path.
+fn deep_insert_into_av(
+    target: &mut AttributeValue,
+    resolved: &[ResolvedElement],
+    value: AttributeValue,
+) {
+    if resolved.is_empty() {
+        return;
+    }
+
+    if resolved.len() == 1 {
+        // Base case: set the value.
+        match &resolved[0] {
+            ResolvedElement::MapKey(key) => {
+                if let AttributeValue::M(map) = target {
+                    map.insert(key.clone(), value);
+                }
+            }
+            ResolvedElement::ListIndex => {
+                if let AttributeValue::L(list) = target {
+                    // For projection, we append values without null-padding.
+                    // Each projected index just gets appended to the result list.
+                    list.push(value);
+                }
+            }
+        }
+        return;
+    }
+
+    // Recursive case: navigate into the next level.
+    match &resolved[0] {
+        ResolvedElement::MapKey(key) => {
+            if let AttributeValue::M(map) = target {
+                // Determine what the next element expects.
+                let child = map
+                    .entry(key.clone())
+                    .or_insert_with(|| match &resolved[1] {
+                        ResolvedElement::MapKey(_) => AttributeValue::M(HashMap::new()),
+                        ResolvedElement::ListIndex => AttributeValue::L(Vec::new()),
+                    });
+                deep_insert_into_av(child, &resolved[1..], value);
+            }
+        }
+        ResolvedElement::ListIndex => {
+            if let AttributeValue::L(list) = target {
+                // For projection, find or create a child entry.
+                // We append a new entry if the list is empty or create one.
+                if list.is_empty() {
+                    let child = match &resolved[1] {
+                        ResolvedElement::MapKey(_) => AttributeValue::M(HashMap::new()),
+                        ResolvedElement::ListIndex => AttributeValue::L(Vec::new()),
+                    };
+                    list.push(child);
+                }
+                let child = list.last_mut().expect("just pushed");
+                deep_insert_into_av(child, &resolved[1..], value);
+            }
+        }
     }
 }
 
@@ -997,30 +1293,135 @@ fn resolve_name_ref(name: &str, names: &HashMap<String, String>) -> String {
     }
 }
 
+/// Extract the last `PathElement::Index` value from a path for sorting.
+///
+/// Returns `usize::MAX` for paths that do not end with an index, so they
+/// sort after all indexed paths.
+fn extract_last_index(path: &AttributePath) -> usize {
+    match path.elements.last() {
+        Some(PathElement::Index(idx)) => *idx,
+        _ => usize::MAX,
+    }
+}
+
 /// Set a value at the given path in an item. For top-level paths, this inserts
 /// directly into the map. For nested paths, it traverses/creates intermediate maps.
+///
+/// # Errors
+///
+/// Returns `ExpressionError` if a nested path encounters a type that does not
+/// support the path traversal (e.g., `.field` on a non-map, `[idx]` on a non-list).
 fn set_path_value(
     item: &mut HashMap<String, AttributeValue>,
     path: &AttributePath,
     value: AttributeValue,
     names: &HashMap<String, String>,
-) {
+) -> Result<(), ExpressionError> {
     if path.elements.is_empty() {
-        return;
+        return Ok(());
     }
 
     let PathElement::Attribute(top) = &path.elements[0] else {
-        return;
+        return Ok(());
     };
     let top_name = resolve_name_ref(top, names);
 
     if path.elements.len() == 1 {
         item.insert(top_name, value);
-        return;
+        return Ok(());
     }
+
+    // For nested paths, validate that the existing value supports traversal
+    // before creating any intermediate structures.
+    validate_nested_path_for_set(item, &path.elements, names)?;
 
     // For nested paths, traverse into the value recursively.
     set_value_at_path(item.entry(top_name), &path.elements[1..], value, names);
+    Ok(())
+}
+
+/// Validate that a nested SET path is compatible with the existing item structure.
+///
+/// DynamoDB requires that intermediate containers in a nested path already exist
+/// and have the correct type. For `.field`, the parent must be a map. For `[idx]`,
+/// the parent must be a list. If the parent attribute does not exist at all, it is
+/// also an error.
+fn validate_nested_path_for_set(
+    item: &HashMap<String, AttributeValue>,
+    elements: &[PathElement],
+    names: &HashMap<String, String>,
+) -> Result<(), ExpressionError> {
+    if elements.len() <= 1 {
+        return Ok(());
+    }
+
+    // Resolve the top-level attribute name.
+    let PathElement::Attribute(top) = &elements[0] else {
+        return Ok(());
+    };
+    let top_name = resolve_name_ref(top, names);
+
+    let Some(current) = item.get(&top_name) else {
+        // The top-level attribute doesn't exist. For nested paths, this is an error
+        // because DynamoDB requires existing intermediate containers.
+        return Err(ExpressionError::InvalidOperand {
+            operation: "SET".to_owned(),
+            message: "The document path provided in the update expression \
+                      is invalid for update"
+                .to_owned(),
+        });
+    };
+
+    validate_path_type(current, &elements[1..], names)
+}
+
+/// Recursively validate that a path matches the container types.
+fn validate_path_type(
+    current: &AttributeValue,
+    remaining: &[PathElement],
+    names: &HashMap<String, String>,
+) -> Result<(), ExpressionError> {
+    if remaining.is_empty() {
+        return Ok(());
+    }
+
+    match &remaining[0] {
+        PathElement::Attribute(name) => {
+            let resolved = resolve_name_ref(name, names);
+            match current {
+                AttributeValue::M(map) => {
+                    if remaining.len() > 1 {
+                        if let Some(child) = map.get(&resolved) {
+                            return validate_path_type(child, &remaining[1..], names);
+                        }
+                    }
+                    Ok(())
+                }
+                _ => Err(ExpressionError::InvalidOperand {
+                    operation: "SET".to_owned(),
+                    message: "The document path provided in the update expression \
+                              is invalid for update"
+                        .to_owned(),
+                }),
+            }
+        }
+        PathElement::Index(idx) => match current {
+            AttributeValue::L(list) => {
+                if remaining.len() > 1 {
+                    if let Some(child) = list.get(*idx) {
+                        return validate_path_type(child, &remaining[1..], names);
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(ExpressionError::InvalidOperand {
+                operation: "SET".to_owned(),
+                message: "The document path provided in the update expression \
+                          is invalid for update"
+                    .to_owned(),
+            }),
+        },
+    }
 }
 
 /// Set a value at a subpath starting from an entry in a map.
@@ -1064,11 +1465,15 @@ fn set_value_in_container(
             let AttributeValue::L(list) = container else {
                 return;
             };
-            // DynamoDB behavior: extend list with NULLs if index is beyond bounds.
-            while list.len() <= *idx {
-                list.push(AttributeValue::Null(true));
-            }
-            if remaining.len() == 1 {
+            if *idx >= list.len() {
+                // DynamoDB behavior: if the index is beyond the list length,
+                // append the value at the end of the list (no NULL padding).
+                if remaining.len() == 1 {
+                    list.push(value);
+                }
+                // For deeper nesting with out-of-bounds index, silently ignore
+                // since there is no element to traverse into.
+            } else if remaining.len() == 1 {
                 list[*idx] = value;
             } else {
                 set_value_in_container(&mut list[*idx], &remaining[1..], value, names);
@@ -1078,29 +1483,48 @@ fn set_value_in_container(
 }
 
 /// Remove an attribute at the given path from an item.
+///
+/// # Errors
+///
+/// Returns `ExpressionError` if a nested path encounters a type mismatch
+/// (e.g., `.field` on a non-map when the item exists, `[idx]` on a non-list).
 fn apply_remove(
     item: &mut HashMap<String, AttributeValue>,
     path: &AttributePath,
     names: &HashMap<String, String>,
-) {
+) -> Result<(), ExpressionError> {
     if path.elements.is_empty() {
-        return;
+        return Ok(());
     }
 
     let PathElement::Attribute(top) = &path.elements[0] else {
-        return;
+        return Ok(());
     };
     let top_name = resolve_name_ref(top, names);
 
     if path.elements.len() == 1 {
         item.remove(&top_name);
-        return;
+        return Ok(());
+    }
+
+    // For nested paths, validate the path first.
+    if let Some(existing) = item.get(&top_name) {
+        validate_path_type(existing, &path.elements[1..], names)?;
+    } else {
+        // Path root doesn't exist - this is a validation error for nested paths.
+        return Err(ExpressionError::InvalidOperand {
+            operation: "REMOVE".to_owned(),
+            message: "The document path provided in the update expression \
+                      is invalid for update"
+                .to_owned(),
+        });
     }
 
     // For nested paths, traverse to the parent container and remove.
     if let Some(container) = item.get_mut(&top_name) {
         remove_at_path(container, &path.elements[1..], names);
     }
+    Ok(())
 }
 
 /// Remove a value at a subpath within a container (map or list).
@@ -1232,10 +1656,17 @@ fn compute_add_result(
         // ADD a number or set to non-existing attribute: set it directly
         (_, None) => Ok(add_val.clone()),
         // ADD a number/set to a mismatched existing attribute type
-        (_, Some(_)) => Err(ExpressionError::InvalidOperand {
-            operation: "ADD".to_owned(),
-            message: "An operand in the update expression has an incorrect data type".to_owned(),
-        }),
+        (_, Some(existing_val)) => {
+            let add_type = add_val.type_descriptor();
+            let existing_type = existing_val.type_descriptor();
+            Err(ExpressionError::InvalidOperand {
+                operation: "ADD".to_owned(),
+                message: format!(
+                    "Type mismatch for ADD; operator type: {add_type}, \
+                     existing type: {existing_type}"
+                ),
+            })
+        }
     }
 }
 
@@ -2008,7 +2439,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_should_extend_list_with_nulls_for_out_of_bounds_set() {
+    fn test_should_append_to_list_for_out_of_bounds_set() {
         let item = make_item(&[(
             "items",
             AttributeValue::L(vec![AttributeValue::S("a".to_owned())]),
@@ -2016,6 +2447,8 @@ mod tests {
         let names = empty_names();
         let values = make_values(&[(":val", AttributeValue::S("c".to_owned()))]);
 
+        // DynamoDB behavior: SET with an index beyond the list length appends
+        // the value at the end, without padding with NULLs.
         let update = parse_update("SET items[3] = :val").unwrap();
         let ctx = EvalContext {
             item: &item,
@@ -2025,11 +2458,52 @@ mod tests {
         let result = ctx.apply_update(&update).unwrap();
         match result.get("items") {
             Some(AttributeValue::L(list)) => {
-                assert_eq!(list.len(), 4);
+                assert_eq!(list.len(), 2);
                 assert_eq!(list[0], AttributeValue::S("a".to_owned()));
-                assert_eq!(list[1], AttributeValue::Null(true));
-                assert_eq!(list[2], AttributeValue::Null(true));
-                assert_eq!(list[3], AttributeValue::S("c".to_owned()));
+                assert_eq!(list[1], AttributeValue::S("c".to_owned()));
+            }
+            other => panic!("expected list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_should_append_multiple_out_of_bounds_sorted_by_index() {
+        let item = make_item(&[(
+            "a",
+            AttributeValue::L(vec![
+                AttributeValue::S("one".to_owned()),
+                AttributeValue::S("two".to_owned()),
+                AttributeValue::S("three".to_owned()),
+            ]),
+        )]);
+        let names = empty_names();
+        let values = make_values(&[
+            (":val1", AttributeValue::S("a1".to_owned())),
+            (":val2", AttributeValue::S("a2".to_owned())),
+            (":val3", AttributeValue::S("a3".to_owned())),
+            (":val4", AttributeValue::S("a4".to_owned())),
+        ]);
+
+        // DynamoDB sorts out-of-bounds SET actions by their index.
+        let update =
+            parse_update("SET a[84] = :val1, a[37] = :val2, a[17] = :val3, a[50] = :val4").unwrap();
+        let ctx = EvalContext {
+            item: &item,
+            names: &names,
+            values: &values,
+        };
+        let result = ctx.apply_update(&update).unwrap();
+        match result.get("a") {
+            Some(AttributeValue::L(list)) => {
+                assert_eq!(list.len(), 7);
+                assert_eq!(list[0], AttributeValue::S("one".to_owned()));
+                assert_eq!(list[1], AttributeValue::S("two".to_owned()));
+                assert_eq!(list[2], AttributeValue::S("three".to_owned()));
+                // Sorted by index: 17(a3), 37(a2), 50(a4), 84(a1)
+                assert_eq!(list[3], AttributeValue::S("a3".to_owned()));
+                assert_eq!(list[4], AttributeValue::S("a2".to_owned()));
+                assert_eq!(list[5], AttributeValue::S("a4".to_owned()));
+                assert_eq!(list[6], AttributeValue::S("a1".to_owned()));
             }
             other => panic!("expected list, got {other:?}"),
         }
@@ -2116,5 +2590,194 @@ mod tests {
             result.get("counter"),
             Some(&AttributeValue::N("11".to_owned()))
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Projection: nested paths with list indices and shared prefixes
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_should_project_nested_list_index() {
+        // Projecting "a[0]" on {a: [2, 4, 6]} should return {a: [2]}.
+        let item = make_item(&[(
+            "a",
+            AttributeValue::L(vec![
+                AttributeValue::N("2".to_owned()),
+                AttributeValue::N("4".to_owned()),
+                AttributeValue::N("6".to_owned()),
+            ]),
+        )]);
+        let names = empty_names();
+        let values = HashMap::new();
+
+        let paths = parse_projection("a[0]").unwrap();
+        let ctx = EvalContext {
+            item: &item,
+            names: &names,
+            values: &values,
+        };
+        let result = ctx.apply_projection(&paths);
+        match result.get("a") {
+            Some(AttributeValue::L(list)) => {
+                assert_eq!(list.len(), 1);
+                assert_eq!(list[0], AttributeValue::N("2".to_owned()));
+            }
+            other => panic!("expected L([2]), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_should_project_shared_prefix_nested_map() {
+        // Projecting "a.b[0], a.c" on {a: {b: [2, 4, 6], c: 5, d: 9}}
+        // should return {a: {b: [2], c: 5}}.
+        let mut inner = HashMap::new();
+        inner.insert(
+            "b".to_owned(),
+            AttributeValue::L(vec![
+                AttributeValue::N("2".to_owned()),
+                AttributeValue::N("4".to_owned()),
+                AttributeValue::N("6".to_owned()),
+            ]),
+        );
+        inner.insert("c".to_owned(), AttributeValue::N("5".to_owned()));
+        inner.insert("d".to_owned(), AttributeValue::N("9".to_owned()));
+        let item = make_item(&[("a", AttributeValue::M(inner))]);
+        let names = empty_names();
+        let values = HashMap::new();
+
+        let paths = parse_projection("a.b[0], a.c").unwrap();
+        let ctx = EvalContext {
+            item: &item,
+            names: &names,
+            values: &values,
+        };
+        let result = ctx.apply_projection(&paths);
+        assert_eq!(result.len(), 1);
+        match result.get("a") {
+            Some(AttributeValue::M(map)) => {
+                assert!(map.contains_key("b"));
+                assert!(map.contains_key("c"));
+                assert!(!map.contains_key("d"));
+                match map.get("b") {
+                    Some(AttributeValue::L(list)) => {
+                        assert_eq!(list.len(), 1);
+                        assert_eq!(list[0], AttributeValue::N("2".to_owned()));
+                    }
+                    other => panic!("expected L([2]), got {other:?}"),
+                }
+                assert_eq!(map.get("c"), Some(&AttributeValue::N("5".to_owned())));
+            }
+            other => panic!("expected M, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_should_return_empty_for_out_of_bounds_list_index() {
+        // Projecting "a[10]" on {a: [1, 2]} should return {} (value not found).
+        let item = make_item(&[(
+            "a",
+            AttributeValue::L(vec![
+                AttributeValue::N("1".to_owned()),
+                AttributeValue::N("2".to_owned()),
+            ]),
+        )]);
+        let names = empty_names();
+        let values = HashMap::new();
+
+        let paths = parse_projection("a[10]").unwrap();
+        let ctx = EvalContext {
+            item: &item,
+            names: &names,
+            values: &values,
+        };
+        let result = ctx.apply_projection(&paths);
+        // The item "a" should not appear because the index is out of bounds.
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_should_project_deeply_nested_path() {
+        // Projecting "a.b.c" on {a: {b: {c: 1, d: 2}}} should return {a: {b: {c: 1}}}.
+        let mut c_map = HashMap::new();
+        c_map.insert("c".to_owned(), AttributeValue::N("1".to_owned()));
+        c_map.insert("d".to_owned(), AttributeValue::N("2".to_owned()));
+        let mut b_map = HashMap::new();
+        b_map.insert("b".to_owned(), AttributeValue::M(c_map));
+        let item = make_item(&[("a", AttributeValue::M(b_map))]);
+        let names = empty_names();
+        let values = HashMap::new();
+
+        let paths = parse_projection("a.b.c").unwrap();
+        let ctx = EvalContext {
+            item: &item,
+            names: &names,
+            values: &values,
+        };
+        let result = ctx.apply_projection(&paths);
+        match result.get("a") {
+            Some(AttributeValue::M(a_map)) => match a_map.get("b") {
+                Some(AttributeValue::M(b_map)) => {
+                    assert_eq!(b_map.get("c"), Some(&AttributeValue::N("1".to_owned())));
+                    assert!(!b_map.contains_key("d"));
+                }
+                other => panic!("expected M for b, got {other:?}"),
+            },
+            other => panic!("expected M for a, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_should_return_empty_for_missing_nested_path() {
+        // Projecting "a.b.c" on {a: {x: 1}} should return {} (path not found).
+        let mut inner = HashMap::new();
+        inner.insert("x".to_owned(), AttributeValue::N("1".to_owned()));
+        let item = make_item(&[("a", AttributeValue::M(inner))]);
+        let names = empty_names();
+        let values = HashMap::new();
+
+        let paths = parse_projection("a.b.c").unwrap();
+        let ctx = EvalContext {
+            item: &item,
+            names: &names,
+            values: &values,
+        };
+        let result = ctx.apply_projection(&paths);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_should_project_list_then_map_access() {
+        // Projecting "a[0].name" on {a: [{name: "Alice", age: 30}]}
+        // should return {a: [{name: "Alice"}]}.
+        let mut person = HashMap::new();
+        person.insert("name".to_owned(), AttributeValue::S("Alice".to_owned()));
+        person.insert("age".to_owned(), AttributeValue::N("30".to_owned()));
+        let item = make_item(&[("a", AttributeValue::L(vec![AttributeValue::M(person)]))]);
+        let names = empty_names();
+        let values = HashMap::new();
+
+        let paths = parse_projection("a[0].name").unwrap();
+        let ctx = EvalContext {
+            item: &item,
+            names: &names,
+            values: &values,
+        };
+        let result = ctx.apply_projection(&paths);
+        match result.get("a") {
+            Some(AttributeValue::L(list)) => {
+                assert_eq!(list.len(), 1);
+                match &list[0] {
+                    AttributeValue::M(map) => {
+                        assert_eq!(
+                            map.get("name"),
+                            Some(&AttributeValue::S("Alice".to_owned()))
+                        );
+                        assert!(!map.contains_key("age"));
+                    }
+                    other => panic!("expected M inside list, got {other:?}"),
+                }
+            }
+            other => panic!("expected L, got {other:?}"),
+        }
     }
 }

@@ -159,6 +159,11 @@ pub struct PutItemInput {
     /// Legacy: logical operator for combining multiple expected conditions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conditional_operator: Option<ConditionalOperator>,
+
+    /// Determines whether to return the item attributes on a failed condition check.
+    /// Valid values: `NONE`, `ALL_OLD`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_values_on_condition_check_failure: Option<String>,
 }
 
 /// Input for the `GetItem` operation.
@@ -190,8 +195,8 @@ pub struct GetItemInput {
     pub return_consumed_capacity: Option<ReturnConsumedCapacity>,
 
     /// Legacy: attribute names to retrieve (use `projection_expression` instead).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attributes_to_get: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attributes_to_get: Option<Vec<String>>,
 }
 
 /// Input for the `UpdateItem` operation.
@@ -243,6 +248,11 @@ pub struct UpdateItemInput {
     /// Legacy: logical operator for combining multiple expected conditions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conditional_operator: Option<ConditionalOperator>,
+
+    /// Determines whether to return the item attributes on a failed condition check.
+    /// Valid values: `NONE`, `ALL_OLD`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_values_on_condition_check_failure: Option<String>,
 }
 
 /// Input for the `DeleteItem` operation.
@@ -287,6 +297,11 @@ pub struct DeleteItemInput {
     /// Legacy: logical operator for combining multiple expected conditions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conditional_operator: Option<ConditionalOperator>,
+
+    /// Determines whether to return the item attributes on a failed condition check.
+    /// Valid values: `NONE`, `ALL_OLD`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_values_on_condition_check_failure: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -360,8 +375,8 @@ pub struct QueryInput {
     pub query_filter: HashMap<String, Condition>,
 
     /// Legacy: attribute names to retrieve (use `projection_expression` instead).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attributes_to_get: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attributes_to_get: Option<Vec<String>>,
 
     /// Legacy: logical operator for combining multiple query filter conditions.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -431,8 +446,8 @@ pub struct ScanInput {
     pub scan_filter: HashMap<String, Condition>,
 
     /// Legacy: attribute names to retrieve (use `projection_expression` instead).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attributes_to_get: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attributes_to_get: Option<Vec<String>>,
 
     /// Legacy: logical operator for combining multiple scan filter conditions.
     #[serde(skip_serializing_if = "Option::is_none")]

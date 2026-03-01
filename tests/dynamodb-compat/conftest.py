@@ -265,20 +265,59 @@ def test_table_ss(dynamodb):
 
 
 @pytest.fixture(scope="session")
-def filled_test_table(test_table):
-    """Pre-populate test_table with 329 items for read-intensive tests.
+def filled_test_table(dynamodb):
+    """Pre-populate a dedicated table with 329 items for read-intensive tests.
 
-    Creates items with p='long', c='0000' through c='0328'.
-    Each item has additional attribute 'another' with a string value.
+    Uses its own table to avoid count pollution from other tests that share
+    test_table. The table contains:
+    - 164 items each in a separate partition (p=str(i), c=str(i)), with
+      attribute='xxxxxxx' (7 x's) and another='yyyyyyyyyyyyyyyy' (16 y's).
+    - 164 items in a single 'long' partition (p='long', c=str(i)), with
+      attribute='x'*(1 + i%7) and another='y'*(1 + i%16).
+    - 1 special item (p='hello', c='world') with a 'str' attribute.
+    This matches the original ScyllaDB Alternator conftest fixture layout.
     """
-    items = []
-    for i in range(329):
-        item = {"p": "long", "c": f"{i:04d}", "another": f"value_{i}"}
-        items.append(item)
+    table = create_test_table(
+        dynamodb,
+        KeySchema=[
+            {"AttributeName": "p", "KeyType": "HASH"},
+            {"AttributeName": "c", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "p", "AttributeType": "S"},
+            {"AttributeName": "c", "AttributeType": "S"},
+        ],
+    )
+    count = 164
+    items = [
+        {
+            "p": str(i),
+            "c": str(i),
+            "attribute": "x" * 7,
+            "another": "y" * 16,
+        }
+        for i in range(count)
+    ]
+    items += [
+        {
+            "p": "long",
+            "c": str(i),
+            "attribute": "x" * (1 + i % 7),
+            "another": "y" * (1 + i % 16),
+        }
+        for i in range(count)
+    ]
+    items.append(
+        {
+            "p": "hello",
+            "c": "world",
+            "str": "and now for something completely different",
+        }
+    )
 
-    # Use batch writer for efficiency.
-    with test_table.batch_writer() as batch:
+    with table.batch_writer() as batch:
         for item in items:
             batch.put_item(Item=item)
 
-    yield test_table, items
+    yield table, items
+    table.delete()

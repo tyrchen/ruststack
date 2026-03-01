@@ -351,27 +351,26 @@ pub fn collect_names_from_projection(paths: &[AttributePath], names: &mut HashSe
     }
 }
 
-/// Collect all top-level attribute path names used in a condition/filter
-/// expression AST. Returns the raw first element of each `Operand::Path`,
-/// which may be a bare name like `myAttr` or a `#placeholder` reference.
-/// This is used to validate that FilterExpression does not reference key
-/// attributes.
+/// Collect all top-level attribute path names referenced in a condition/filter
+/// expression AST. For each `Operand::Path`, the first `PathElement::Attribute`
+/// name is included (possibly a `#placeholder`). This is used to check whether
+/// a filter expression references key attributes.
 #[allow(clippy::implicit_hasher)]
 pub fn collect_paths_from_expr(expr: &Expr, paths: &mut HashSet<String>) {
     match expr {
         Expr::Compare { left, right, .. } => {
-            collect_paths_from_operand(left, paths);
-            collect_paths_from_operand(right, paths);
+            collect_top_path_from_operand(left, paths);
+            collect_top_path_from_operand(right, paths);
         }
         Expr::Between { value, low, high } => {
-            collect_paths_from_operand(value, paths);
-            collect_paths_from_operand(low, paths);
-            collect_paths_from_operand(high, paths);
+            collect_top_path_from_operand(value, paths);
+            collect_top_path_from_operand(low, paths);
+            collect_top_path_from_operand(high, paths);
         }
         Expr::In { value, list } => {
-            collect_paths_from_operand(value, paths);
+            collect_top_path_from_operand(value, paths);
             for item in list {
-                collect_paths_from_operand(item, paths);
+                collect_top_path_from_operand(item, paths);
             }
         }
         Expr::Logical { left, right, .. } => {
@@ -381,13 +380,13 @@ pub fn collect_paths_from_expr(expr: &Expr, paths: &mut HashSet<String>) {
         Expr::Not(inner) => collect_paths_from_expr(inner, paths),
         Expr::Function { args, .. } => {
             for arg in args {
-                collect_paths_from_operand(arg, paths);
+                collect_top_path_from_operand(arg, paths);
             }
         }
     }
 }
 
-fn collect_paths_from_operand(operand: &Operand, paths: &mut HashSet<String>) {
+fn collect_top_path_from_operand(operand: &Operand, paths: &mut HashSet<String>) {
     match operand {
         Operand::Path(path) => {
             if let Some(PathElement::Attribute(name)) = path.elements.first() {
@@ -395,7 +394,7 @@ fn collect_paths_from_operand(operand: &Operand, paths: &mut HashSet<String>) {
             }
         }
         Operand::Value(_) => {}
-        Operand::Size(inner) => collect_paths_from_operand(inner, paths),
+        Operand::Size(inner) => collect_top_path_from_operand(inner, paths),
     }
 }
 

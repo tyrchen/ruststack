@@ -129,7 +129,7 @@ fn dispatch(
 fn deserialize<T: serde::de::DeserializeOwned>(body: &[u8]) -> Result<T, DynamoDBError> {
     serde_json::from_slice(body).map_err(|e| {
         let msg = e.to_string();
-        if msg.contains("missing field") {
+        if msg.contains("missing field") || msg.contains("unknown variant") {
             DynamoDBError::validation(format!("1 validation error detected: {msg}"))
         } else {
             DynamoDBError::serialization_exception(format!(

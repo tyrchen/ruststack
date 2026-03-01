@@ -3,7 +3,10 @@
 //! DynamoDB errors use JSON format with a `__type` field containing the
 //! fully-qualified error type name.
 
+use std::collections::HashMap;
 use std::fmt;
+
+use crate::attribute_value::AttributeValue;
 
 /// Well-known DynamoDB error codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -144,6 +147,9 @@ pub struct DynamoDBError {
     pub status_code: http::StatusCode,
     /// The underlying source error, if any.
     pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    /// The existing item to return in the error response (used by
+    /// `ReturnValuesOnConditionCheckFailure=ALL_OLD`).
+    pub item: Option<HashMap<String, AttributeValue>>,
 }
 
 impl fmt::Display for DynamoDBError {
@@ -169,6 +175,7 @@ impl DynamoDBError {
             message: code.as_str().to_owned(),
             code,
             source: None,
+            item: None,
         }
     }
 
@@ -180,6 +187,7 @@ impl DynamoDBError {
             message: message.into(),
             code,
             source: None,
+            item: None,
         }
     }
 
@@ -187,6 +195,14 @@ impl DynamoDBError {
     #[must_use]
     pub fn with_source(mut self, source: impl std::error::Error + Send + Sync + 'static) -> Self {
         self.source = Some(Box::new(source));
+        self
+    }
+
+    /// Attach an existing item to the error response (for
+    /// `ReturnValuesOnConditionCheckFailure=ALL_OLD`).
+    #[must_use]
+    pub fn with_item(mut self, item: HashMap<String, AttributeValue>) -> Self {
+        self.item = Some(item);
         self
     }
 

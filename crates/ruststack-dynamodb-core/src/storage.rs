@@ -151,11 +151,168 @@ impl SortableAttributeValue {
     }
 }
 
-/// Parses a number string to `f64` for comparison purposes.
+// ---------------------------------------------------------------------------
+// Arbitrary-precision decimal number comparison
+// ---------------------------------------------------------------------------
+
+/// A normalized representation of a decimal number for comparison.
 ///
-/// Returns `f64::NAN` if parsing fails, which sorts to the end.
-fn parse_number(s: &str) -> f64 {
-    s.parse::<f64>().unwrap_or(f64::NAN)
+/// The number is represented as `sign * 0.{digits} * 10^exponent`, where
+/// `digits` is a string of significant digits with no leading or trailing zeros.
+/// Zero is represented as `(false, "", 0)`.
+#[derive(Debug)]
+struct NormalizedNumber {
+    /// `true` if the number is negative.
+    negative: bool,
+    /// The significant digits (no leading/trailing zeros). Empty for zero.
+    digits: Vec<u8>,
+    /// The base-10 exponent such that the value is `0.{digits} * 10^exponent`.
+    exponent: i64,
+}
+
+/// Parse a DynamoDB number string into a normalized form for comparison.
+///
+/// Handles integers, decimals, and scientific notation (e.g., "1.5e10", "-3.14", "0.001").
+fn normalize_number(s: &str) -> NormalizedNumber {
+    let s = s.trim();
+    let (negative, s) = if let Some(rest) = s.strip_prefix('-') {
+        (true, rest)
+    } else if let Some(rest) = s.strip_prefix('+') {
+        (false, rest)
+    } else {
+        (false, s)
+    };
+
+    // Split on 'e' or 'E' for scientific notation.
+    let (mantissa_str, explicit_exp) = if let Some(pos) = s.find(['e', 'E']) {
+        let exp: i64 = s[pos + 1..].parse().unwrap_or(0);
+        (&s[..pos], exp)
+    } else {
+        (s, 0_i64)
+    };
+
+    // Split mantissa into integer and fractional parts.
+    let (int_part, frac_part) = if let Some(dot_pos) = mantissa_str.find('.') {
+        (&mantissa_str[..dot_pos], &mantissa_str[dot_pos + 1..])
+    } else {
+        (mantissa_str, "")
+    };
+
+    // Collect all digits and compute the exponent.
+    // The number is `int_part.frac_part * 10^explicit_exp`.
+    // We normalize to `0.{all_digits} * 10^exponent`.
+    let mut all_digits: Vec<u8> = Vec::new();
+    for c in int_part.chars() {
+        if c.is_ascii_digit() {
+            all_digits.push(c as u8 - b'0');
+        }
+    }
+    // The exponent starts at int_part length (since we treat all digits as
+    // fractional: `0.{int_part}{frac_part} * 10^(len(int_part) + explicit_exp)`).
+    // Safety: digit string length is bounded by input and always far below i64::MAX.
+    #[allow(clippy::cast_possible_wrap)]
+    let int_digits_len = all_digits.len() as i64;
+    for c in frac_part.chars() {
+        if c.is_ascii_digit() {
+            all_digits.push(c as u8 - b'0');
+        }
+    }
+
+    let exponent = int_digits_len + explicit_exp;
+
+    // Strip leading zeros from all_digits, adjusting exponent.
+    let leading_zeros = all_digits.iter().take_while(|&&d| d == 0).count();
+    let digits: Vec<u8> = all_digits[leading_zeros..].to_vec();
+    // Safety: leading_zeros count is bounded by digit string length.
+    #[allow(clippy::cast_possible_wrap)]
+    let exponent = exponent - leading_zeros as i64;
+
+    // Strip trailing zeros from digits.
+    let mut digits = digits;
+    while digits.last() == Some(&0) {
+        digits.pop();
+    }
+
+    // If no significant digits remain, the number is zero.
+    if digits.is_empty() {
+        return NormalizedNumber {
+            negative: false,
+            digits: Vec::new(),
+            exponent: 0,
+        };
+    }
+
+    NormalizedNumber {
+        negative,
+        digits,
+        exponent,
+    }
+}
+
+/// Compare two DynamoDB number strings with arbitrary precision.
+fn compare_number_strings(a: &str, b: &str) -> Ordering {
+    let na = normalize_number(a);
+    let nb = normalize_number(b);
+
+    let a_zero = na.digits.is_empty();
+    let b_zero = nb.digits.is_empty();
+
+    // Handle zeros.
+    if a_zero && b_zero {
+        return Ordering::Equal;
+    }
+    if a_zero {
+        return if nb.negative {
+            Ordering::Greater
+        } else {
+            Ordering::Less
+        };
+    }
+    if b_zero {
+        return if na.negative {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        };
+    }
+
+    // Compare signs.
+    match (na.negative, nb.negative) {
+        (true, false) => return Ordering::Less,
+        (false, true) => return Ordering::Greater,
+        _ => {}
+    }
+
+    // Both same sign. Compare magnitude, then flip if negative.
+    let mag_cmp = compare_magnitude(&na, &nb);
+    if na.negative {
+        mag_cmp.reverse()
+    } else {
+        mag_cmp
+    }
+}
+
+/// Compare the magnitude (absolute value) of two normalized numbers.
+fn compare_magnitude(a: &NormalizedNumber, b: &NormalizedNumber) -> Ordering {
+    // First compare exponents (which represent the order of magnitude).
+    match a.exponent.cmp(&b.exponent) {
+        Ordering::Less => return Ordering::Less,
+        Ordering::Greater => return Ordering::Greater,
+        Ordering::Equal => {}
+    }
+
+    // Same exponent: compare digit-by-digit.
+    let max_len = a.digits.len().max(b.digits.len());
+    for i in 0..max_len {
+        let da = a.digits.get(i).copied().unwrap_or(0);
+        let db = b.digits.get(i).copied().unwrap_or(0);
+        match da.cmp(&db) {
+            Ordering::Equal => {}
+            other => return other,
+        }
+    }
+
+    Ordering::Equal
 }
 
 impl PartialEq for SortableAttributeValue {
@@ -176,11 +333,7 @@ impl Ord for SortableAttributeValue {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
             (Self::S(a), Self::S(b)) => a.as_bytes().cmp(b.as_bytes()),
-            (Self::N(a), Self::N(b)) => {
-                let fa = parse_number(a);
-                let fb = parse_number(b);
-                fa.partial_cmp(&fb).unwrap_or(Ordering::Equal)
-            }
+            (Self::N(a), Self::N(b)) => compare_number_strings(a, b),
             (Self::B(a), Self::B(b)) => a.as_ref().cmp(b.as_ref()),
             (Self::Sentinel, Self::Sentinel) => Ordering::Equal,
             // Different variant types should not appear in the same BTreeMap,
@@ -200,7 +353,14 @@ impl std::hash::Hash for SortableAttributeValue {
         core::mem::discriminant(self).hash(state);
         match self {
             Self::S(s) => s.hash(state),
-            Self::N(n) => n.hash(state),
+            Self::N(n) => {
+                // Hash using the normalized form so that equivalent numbers
+                // (e.g., "1e2" and "100") produce the same hash.
+                let norm = normalize_number(n);
+                norm.negative.hash(state);
+                norm.digits.hash(state);
+                norm.exponent.hash(state);
+            }
             Self::B(b) => b.hash(state),
             Self::Sentinel => {}
         }
@@ -377,8 +537,8 @@ impl TableStorage {
     /// Queries items in a single partition with optional sort key conditions.
     ///
     /// Returns a tuple of (items, last_evaluated_key). The last evaluated key
-    /// is `Some` when the result was truncated by the limit, indicating that
-    /// more items are available for pagination.
+    /// is `Some` when the result was truncated by the count limit or the 1 MB
+    /// response size cap, indicating that more items are available for pagination.
     #[must_use]
     pub fn query(
         &self,
@@ -388,21 +548,55 @@ impl TableStorage {
         limit: Option<usize>,
         exclusive_start_key: Option<&SortableAttributeValue>,
     ) -> (Vec<HashMap<String, AttributeValue>>, Option<PrimaryKey>) {
+        /// DynamoDB caps a single Query response at 1 MB.
+        const MAX_RESPONSE_BYTES: u64 = 1_048_576;
+
         let Some(partition) = self.data.get(partition_key) else {
             return (Vec::new(), None);
         };
 
-        let items = collect_matching_items(
+        let all_items = collect_matching_items(
             &partition,
             sort_condition,
             scan_forward,
-            limit,
+            None, // collect all matching items first
             exclusive_start_key,
         );
 
-        let last_key = build_last_evaluated_key(&items, limit, partition_key, &self.key_schema);
+        // Apply the 1 MB size cap and optional count limit.
+        let effective_limit = limit.unwrap_or(usize::MAX);
+        let mut selected: Vec<&StoredItem> = Vec::new();
+        let mut cumulative_size: u64 = 0;
+        let mut size_limited = false;
 
-        let result: Vec<_> = items
+        for item in all_items.iter().take(effective_limit) {
+            let item_size = calculate_item_size(&item.attributes);
+            // Always include at least one item even if it exceeds 1 MB on its
+            // own, matching DynamoDB behaviour.
+            if !selected.is_empty() && cumulative_size + item_size > MAX_RESPONSE_BYTES {
+                size_limited = true;
+                break;
+            }
+            cumulative_size += item_size;
+            selected.push(item);
+        }
+
+        let count_limited =
+            !size_limited && selected.len() == effective_limit && effective_limit < all_items.len();
+        let has_more = size_limited || count_limited;
+
+        let last_key = if has_more {
+            build_last_evaluated_key(
+                &selected,
+                Some(selected.len()),
+                partition_key,
+                &self.key_schema,
+            )
+        } else {
+            None
+        };
+
+        let result: Vec<_> = selected
             .into_iter()
             .map(|stored| stored.attributes.clone())
             .collect();
@@ -413,13 +607,17 @@ impl TableStorage {
     /// Scans all items in the table.
     ///
     /// Returns a tuple of (items, last_evaluated_key). The last evaluated key
-    /// is `Some` when the result was truncated by the limit.
+    /// is `Some` when the result was truncated by the limit or by the 1 MB
+    /// response size cap.
     #[must_use]
     pub fn scan(
         &self,
         limit: Option<usize>,
         exclusive_start_key: Option<&PrimaryKey>,
     ) -> (Vec<HashMap<String, AttributeValue>>, Option<PrimaryKey>) {
+        /// DynamoDB caps a single Scan/Query response at 1 MB.
+        const MAX_RESPONSE_BYTES: u64 = 1_048_576;
+
         // Collect all items sorted deterministically by partition key then sort key.
         let mut all_items: Vec<(AttributeValue, SortableAttributeValue, &StoredItem)> = Vec::new();
 
@@ -451,13 +649,28 @@ impl TableStorage {
         };
 
         let effective_limit = limit.unwrap_or(usize::MAX);
-        let selected: Vec<_> = all_items
-            .iter()
-            .skip(start_idx)
-            .take(effective_limit)
-            .collect();
 
-        let has_more = start_idx + effective_limit < all_items.len();
+        // Select items respecting both the count limit and the 1 MB size cap.
+        let mut selected: Vec<&(AttributeValue, SortableAttributeValue, &StoredItem)> = Vec::new();
+        let mut cumulative_size: u64 = 0;
+        let mut size_limited = false;
+
+        for entry in all_items.iter().skip(start_idx).take(effective_limit) {
+            let item_size = calculate_item_size(&entry.2.attributes);
+            // Always include at least one item even if it exceeds 1 MB on its
+            // own, matching DynamoDB behaviour.
+            if !selected.is_empty() && cumulative_size + item_size > MAX_RESPONSE_BYTES {
+                size_limited = true;
+                break;
+            }
+            cumulative_size += item_size;
+            selected.push(entry);
+        }
+
+        let count_limited = !size_limited
+            && selected.len() == effective_limit
+            && start_idx + effective_limit < all_items.len();
+        let has_more = size_limited || count_limited;
 
         let last_key = if has_more {
             selected.last().map(|(pk, sk, _)| {

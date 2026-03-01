@@ -148,9 +148,10 @@ pub struct DeleteItemOutput {
 #[serde(rename_all = "PascalCase")]
 pub struct QueryOutput {
     /// An array of item attributes that match the query conditions.
-    /// Omitted when `Select=COUNT` (empty vec is not serialized).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub items: Vec<HashMap<String, AttributeValue>>,
+    /// `None` when `Select=COUNT` (omitted from JSON), `Some(vec)` otherwise
+    /// (always serialized, even when empty).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<HashMap<String, AttributeValue>>>,
 
     /// The number of items in the response.
     pub count: i32,
@@ -173,9 +174,10 @@ pub struct QueryOutput {
 #[serde(rename_all = "PascalCase")]
 pub struct ScanOutput {
     /// An array of item attributes that match the scan conditions.
-    /// Omitted when `Select=COUNT` (empty vec is not serialized).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub items: Vec<HashMap<String, AttributeValue>>,
+    /// `None` when `Select=COUNT` (omitted from JSON), `Some(vec)` otherwise
+    /// (always serialized, even when empty).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<HashMap<String, AttributeValue>>>,
 
     /// The number of items in the response.
     pub count: i32,

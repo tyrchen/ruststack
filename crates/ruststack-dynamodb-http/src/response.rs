@@ -19,11 +19,14 @@ pub const CONTENT_TYPE: &str = "application/x-amz-json-1.0";
 /// ```
 #[must_use]
 pub fn error_to_json(error: &DynamoDBError) -> Vec<u8> {
-    serde_json::to_vec(&serde_json::json!({
+    let mut obj = serde_json::json!({
         "__type": error.error_type(),
         "Message": error.message,
-    }))
-    .expect("JSON serialization of error cannot fail")
+    });
+    if let Some(ref item) = error.item {
+        obj["Item"] = serde_json::to_value(item).expect("Item serialization cannot fail");
+    }
+    serde_json::to_vec(&obj).expect("JSON serialization of error cannot fail")
 }
 
 /// Convert a `DynamoDBError` into a complete HTTP error response.
