@@ -137,6 +137,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-dynamodb"
+version = "1.107.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "561bf86e858a2759c6876b517b13f3f4051a6484abbb0d8a1f4dfc5d902cc85a"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 0.2.12",
+ "http 1.4.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-s3"
 version = "1.124.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2003,6 +2027,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruststack-integration"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-s3",
+ "aws-smithy-runtime-api",
+ "bytes",
+ "rand",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "ruststack-s3-core"
 version = "0.1.0"
 dependencies = [
@@ -2066,23 +2107,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ruststack-s3-integration"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "aws-config",
- "aws-credential-types",
- "aws-sdk-s3",
- "aws-smithy-runtime-api",
- "bytes",
- "rand",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "ruststack-s3-model"
 version = "0.1.0"
 dependencies = [
@@ -2090,33 +2114,6 @@ dependencies = [
  "chrono",
  "http 1.4.0",
  "serde",
-]
-
-[[package]]
-name = "ruststack-s3-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "aws-config",
- "aws-credential-types",
- "aws-sdk-s3",
- "aws-smithy-runtime-api",
- "bytes",
- "http 1.4.0",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-s3-core",
- "ruststack-s3-http",
- "ruststack-s3-model",
- "serde",
- "serde_json",
- "tokio",
- "tokio-test",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2129,6 +2126,36 @@ dependencies = [
  "ruststack-s3-model",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "ruststack-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-dynamodb",
+ "aws-sdk-s3",
+ "aws-smithy-runtime-api",
+ "bytes",
+ "http 1.4.0",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "ruststack-auth",
+ "ruststack-core",
+ "ruststack-dynamodb-core",
+ "ruststack-dynamodb-http",
+ "ruststack-s3-core",
+ "ruststack-s3-http",
+ "ruststack-s3-model",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

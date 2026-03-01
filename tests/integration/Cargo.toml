@@ -1,6 +1,6 @@
 [package]
-name = "ruststack-s3-integration"
-description = "Integration tests for RustStack S3 server"
+name = "ruststack-integration"
+description = "Integration tests for RustStack server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

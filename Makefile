@@ -19,8 +19,8 @@ audit:
 deny:
 	@cargo deny check
 
-run-s3:
-	@cargo run -p ruststack-s3-server
+run:
+	@cargo run -p ruststack-server
 
 release:
 	@cargo release tag --execute
@@ -34,20 +34,21 @@ codegen:
 	@cargo +nightly fmt -p ruststack-s3-model
 
 integration:
-	@cargo test -p ruststack-s3-integration -- --ignored
+	@cargo test -p ruststack-integration -- --ignored
 
 mint: mint-start mint-run
 
 mint-build:
-	@cargo build --release -p ruststack-s3-server
+	@cargo build --release -p ruststack-server
 
 mint-start: mint-build
-	@echo "Starting RustStack S3 server..."
+	@echo "Starting RustStack server..."
 	@ACCESS_KEY=minioadmin SECRET_KEY=minioadmin \
 		S3_SKIP_SIGNATURE_VALIDATION=false \
+		DYNAMODB_SKIP_SIGNATURE_VALIDATION=false \
 		GATEWAY_LISTEN=0.0.0.0:4566 \
 		LOG_LEVEL=warn \
-		cargo run --release -p ruststack-s3-server &
+		cargo run --release -p ruststack-server &
 	@for i in $$(seq 1 30); do \
 		if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then \
 			echo "Server is ready"; \
@@ -79,10 +80,10 @@ mint-run:
 		echo "Mint results: $$PASS_COUNT passed, $$FAIL_COUNT failed"
 
 mint-stop:
-	@pkill -f "ruststack-s3-server" 2>/dev/null || true
+	@pkill -f "ruststack-server" 2>/dev/null || true
 	@echo "Server stopped"
 
 update-submodule:
 	@git submodule update --init --recursive --remote
 
-.PHONY: build check test fmt clippy audit deny run-s3 release update-submodule codegen integration mint mint-build mint-start mint-run mint-stop
+.PHONY: build check test fmt clippy audit deny run release update-submodule codegen integration mint mint-build mint-start mint-run mint-stop

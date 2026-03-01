@@ -27,14 +27,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build server
-        run: cargo build --release -p ruststack-s3-server
+        run: cargo build --release -p ruststack-server
 
       - name: Start server in background
         run: |
           S3_SKIP_SIGNATURE_VALIDATION=true \
           GATEWAY_LISTEN=127.0.0.1:4566 \
           LOG_LEVEL=info \
-          cargo run --release -p ruststack-s3-server &
+          cargo run --release -p ruststack-server &
 
           # Wait for the server to be ready.
           for i in $(seq 1 30); do
@@ -50,7 +50,7 @@ jobs:
           done
 
       - name: Run integration tests
-        run: cargo test -p ruststack-s3-integration -- --ignored
+        run: cargo test -p ruststack-integration -- --ignored
         env:
           S3_ENDPOINT_URL: http://127.0.0.1:4566
 
@@ -67,14 +67,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build server
-        run: cargo build --release -p ruststack-s3-server
+        run: cargo build --release -p ruststack-server
 
       - name: Start server in background
         run: |
           S3_SKIP_SIGNATURE_VALIDATION=true \
           GATEWAY_LISTEN=0.0.0.0:4566 \
           LOG_LEVEL=warn \
-          cargo run --release -p ruststack-s3-server &
+          cargo run --release -p ruststack-server &
 
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then

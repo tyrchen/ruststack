@@ -1,6 +1,6 @@
 [package]
-name = "ruststack-s3-server"
-description = "High-performance S3 server compatible with LocalStack"
+name = "ruststack-server"
+description = "High-performance AWS-compatible server (S3 + DynamoDB) for LocalStack"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,15 +11,22 @@ repository.workspace = true
 workspace = true
 
 [[bin]]
-name = "ruststack-s3-server"
+name = "ruststack-server"
 path = "src/main.rs"
 
 [dependencies]
+# Internal crates - shared
 ruststack-core = { workspace = true }
 ruststack-auth = { workspace = true }
+
+# Internal crates - S3
 ruststack-s3-core = { workspace = true }
 ruststack-s3-http = { workspace = true }
 ruststack-s3-model = { workspace = true }
+
+# Internal crates - DynamoDB
+ruststack-dynamodb-core = { workspace = true }
+ruststack-dynamodb-http = { workspace = true }
 
 # Async
 tokio = { workspace = true }
@@ -48,5 +55,6 @@ bytes = { workspace = true }
 tokio-test = { workspace = true }
 aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }
+aws-sdk-dynamodb = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-smithy-runtime-api = { workspace = true }

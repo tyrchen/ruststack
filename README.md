@@ -2,22 +2,25 @@
 
 A high-performance, LocalStack-compatible AWS service emulator written in Rust.
 
-Currently implements **S3** with full protocol support — 70 operations generated from the AWS Smithy model, including versioning, multipart uploads, CORS, tagging, ACLs, object lock, encryption, lifecycle, and more.
+Currently implements **S3** (70 operations from the AWS Smithy model) and **DynamoDB** (12 core operations), providing a unified gateway on a single port.
 
 ## Features
 
 - **Full S3 protocol** — 70 operations covering buckets, objects, multipart uploads, versioning, and bucket configuration
-- **AWS SDK compatible** — Drop-in replacement for LocalStack S3; works with any AWS SDK or CLI
+- **DynamoDB support** — 12 core operations: `CreateTable`, `DeleteTable`, `DescribeTable`, `ListTables`, `UpdateTable`, `PutItem`, `GetItem`, `DeleteItem`, `UpdateItem`, `Query`, `Scan`, `BatchWriteItem`
+- **Unified gateway** — Single port (4566) routes S3 and DynamoDB via `X-Amz-Target` header
+- **AWS SDK compatible** — Drop-in replacement for LocalStack; works with any AWS SDK or CLI
 - **SigV4 authentication** — Optional AWS Signature Version 4 request verification
-- **Virtual-hosted & path-style** addressing for bucket routing
-- **In-memory storage** with automatic disk spillover for large objects (configurable threshold)
-- **Smithy-driven codegen** — Types auto-generated from the official AWS S3 Smithy model
+- **Virtual-hosted & path-style** addressing for S3 bucket routing
+- **In-memory storage** with automatic disk spillover for large S3 objects (configurable threshold)
+- **DynamoDB expressions** — Condition, filter, projection, and update expressions with full parser
+- **Smithy-driven codegen** — S3 types auto-generated from the official AWS Smithy model
 - **Tiny Docker image** — Static musl binary in a scratch container (~15 MB)
 - **Graceful shutdown** and health check endpoints for container orchestration
 
 ## Why RustStack?
 
-If you only need S3 for local development or CI, RustStack gives you a **faster, leaner** alternative to LocalStack:
+If you need S3 and DynamoDB for local development or CI, RustStack gives you a **faster, leaner** alternative to LocalStack:
 
 | | RustStack | LocalStack |
 |---|---|---|
@@ -26,23 +29,24 @@ If you only need S3 for local development or CI, RustStack gives you a **faster,
 | **Startup time** | < 1 second | 10-45 seconds (S3 only); up to 2 min (all services) |
 | **Memory (idle)** | ~10 MB | ~750 MB minimum |
 | **S3 operations** | 70 | ~92 |
+| **DynamoDB operations** | 12 | ~30+ |
 | **CI cold start** | Pull + ready in ~3s | Pull + ready in 30-90s |
 | **Auth support** | SigV4 + SigV2 + presigned URLs | SigV4 (Pro for IAM enforcement) |
 | **License** | MIT, fully open source | Shifting to registration-required; free tier limited |
-| **Multi-service** | S3 only (for now) | 80+ AWS services |
+| **Multi-service** | S3 + DynamoDB | 80+ AWS services |
 
-**When to use RustStack:** You need fast, reliable S3 in CI pipelines or local dev, and don't want to wait 30+ seconds for a 2 GB container to boot. Your tests start in seconds, not minutes.
+**When to use RustStack:** You need fast, reliable S3 and/or DynamoDB in CI pipelines or local dev, and don't want to wait 30+ seconds for a 2 GB container to boot. Your tests start in seconds, not minutes.
 
-**When to use LocalStack:** You need services beyond S3 (Lambda, DynamoDB, SQS, etc.) and are willing to trade startup time and resource usage for broader AWS coverage.
+**When to use LocalStack:** You need services beyond S3 and DynamoDB (Lambda, SQS, etc.) and are willing to trade startup time and resource usage for broader AWS coverage.
 
 ## Quick Start
 
 ```bash
 # Build and run
-cargo run -p ruststack-s3-server
+cargo run -p ruststack-server
 
 # Or use the Makefile
-make run-s3
+make run
 ```
 
 The server listens on `0.0.0.0:4566` by default. Point any AWS SDK or CLI at `http://localhost:4566`:
@@ -56,15 +60,15 @@ aws s3 --endpoint-url http://localhost:4566 ls s3://my-bucket/
 ### Docker
 
 ```bash
-docker build -t ruststack-s3 .
-docker run -p 4566:4566 ruststack-s3
+docker build -t ruststack .
+docker run -p 4566:4566 ruststack
 ```
 
-Multi-arch images (amd64/arm64) are published to `ghcr.io/tyrchen/ruststack-s3` on tagged releases.
+Multi-arch images (amd64/arm64) are published to `ghcr.io/tyrchen/ruststack` on tagged releases.
 
 ## GitHub Action
 
-Use RustStack as a drop-in S3 service in your CI pipelines:
+Use RustStack as a drop-in S3 + DynamoDB service in your CI pipelines:
 
 ```yaml
 steps:
@@ -99,7 +103,7 @@ jobs:
 | Input | Default | Description |
 |-------|---------|-------------|
 | `image-tag` | `latest` | Docker image tag (`latest`, `0.1.0`, etc.) |
-| `port` | `4566` | Host port to bind the S3 service to |
+| `port` | `4566` | Host port to bind the service to |
 | `default-region` | `us-east-1` | Default AWS region |
 | `log-level` | `info` | Log level (`error`, `warn`, `info`, `debug`, `trace`) |
 | `wait-timeout` | `30` | Seconds to wait for the service to become healthy |
@@ -108,7 +112,7 @@ jobs:
 
 | Output | Description |
 |--------|-------------|
-| `endpoint` | The S3 endpoint URL (e.g. `http://localhost:4566`) |
+| `endpoint` | The service endpoint URL (e.g. `http://localhost:4566`) |
 | `container-id` | Docker container ID for advanced usage |
 
 ### Environment Variables Set by the Action
@@ -145,10 +149,11 @@ All settings are controlled via environment variables, matching LocalStack conve
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GATEWAY_LISTEN` | `0.0.0.0:4566` | Bind address and port |
-| `S3_SKIP_SIGNATURE_VALIDATION` | `true` | Skip SigV4 request verification |
+| `S3_SKIP_SIGNATURE_VALIDATION` | `true` | Skip S3 SigV4 request verification |
+| `DYNAMODB_SKIP_SIGNATURE_VALIDATION` | `true` | Skip DynamoDB SigV4 request verification |
 | `S3_VIRTUAL_HOSTING` | `true` | Enable virtual-hosted-style addressing |
 | `S3_DOMAIN` | `s3.localhost.localstack.cloud` | Virtual hosting domain |
-| `S3_MAX_MEMORY_OBJECT_SIZE` | `524288` | Max object size (bytes) kept in memory before disk spillover |
+| `S3_MAX_MEMORY_OBJECT_SIZE` | `524288` | Max S3 object size (bytes) kept in memory before disk spillover |
 | `DEFAULT_REGION` | `us-east-1` | Default AWS region |
 | `LOG_LEVEL` | `info` | Log level (`error`, `warn`, `info`, `debug`, `trace`) |
 | `RUST_LOG` | | Fine-grained tracing filter (overrides `LOG_LEVEL`) |
@@ -207,29 +212,54 @@ ListObjects, ListObjectsV2, ListObjectVersions
 
 </details>
 
+## Supported DynamoDB Operations
+
+| Category | Operations |
+|----------|-----------|
+| Table management | CreateTable, DeleteTable, DescribeTable, ListTables, UpdateTable |
+| Item CRUD | PutItem, GetItem, DeleteItem, UpdateItem |
+| Query & scan | Query, Scan |
+| Batch | BatchWriteItem |
+
+DynamoDB features include: condition expressions, filter expressions, projection expressions, update expressions (SET, REMOVE, ADD, DELETE), key conditions with sort key operators (=, <, <=, >, >=, BETWEEN, begins_with), and consistent/eventually-consistent reads.
+
 ## Architecture
 
 ```
-ruststack-s3-model   — S3 types auto-generated from AWS Smithy model (codegen/)
-ruststack-s3-xml     — XML serialization/deserialization (quick-xml)
-ruststack-s3-auth    — AWS SigV4 authentication
-ruststack-s3-http    — HTTP routing, request/response conversion, hyper service
-ruststack-s3-core    — Business logic, in-memory state, storage engine
-ruststack-core       — Shared types, config, multi-account/region state
-ruststack-s3-server  — Server binary with graceful shutdown
+ruststack-core              — Shared types, config, multi-account/region state
+ruststack-auth              — AWS SigV4/SigV2 authentication
+
+ruststack-s3-model          — S3 types auto-generated from AWS Smithy model (codegen/)
+ruststack-s3-xml            — XML serialization/deserialization (quick-xml)
+ruststack-s3-http           — S3 HTTP routing, request/response conversion, hyper service
+ruststack-s3-core           — S3 business logic, in-memory state, storage engine
+
+ruststack-dynamodb-model    — DynamoDB types (operations, errors, I/O structs)
+ruststack-dynamodb-http     — DynamoDB HTTP dispatch, awsJson1.0 protocol
+ruststack-dynamodb-core     — DynamoDB business logic, B-tree storage, expression engine
+
+ruststack-server            — Unified server binary with gateway routing
 ```
 
 ### Request Pipeline
 
 ```
 HTTP Request
-  → Health check interception
-  → S3Router (path-style / virtual-hosted-style)
-  → Body collection
-  → SigV4 authentication (optional)
-  → Operation dispatch (S3Handler trait)
-  → Business logic (RustStackS3 provider)
-  → XML/JSON response serialization
+  → Gateway health check interception
+  → X-Amz-Target header inspection
+  ├─ DynamoDB_* → DynamoDB HTTP service
+  │   → Body collection → JSON deserialization
+  │   → SigV4 authentication (optional)
+  │   → Operation dispatch (DynamoDBHandler trait)
+  │   → Business logic (RustStackDynamoDB provider)
+  │   → JSON response serialization
+  └─ Otherwise → S3 HTTP service
+      → S3Router (path-style / virtual-hosted-style)
+      → Body collection
+      → SigV4 authentication (optional)
+      → Operation dispatch (S3Handler trait)
+      → Business logic (RustStackS3 provider)
+      → XML/JSON response serialization
   → HTTP Response
 ```
 
@@ -254,10 +284,10 @@ Integration tests use the official AWS SDK for Rust against a running server:
 
 ```bash
 # Terminal 1: start the server
-make run-s3
+make run
 
 # Terminal 2: run integration tests
-cargo test -p ruststack-s3-integration -- --ignored
+cargo test -p ruststack-integration -- --ignored
 ```
 
 Tests cover buckets, objects, multipart uploads, versioning, CORS, error handling, and conditional requests.

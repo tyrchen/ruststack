@@ -1,13 +1,13 @@
-//! RustStack S3 Server - High-performance S3-compatible server.
+//! RustStack Server - High-performance AWS-compatible server (S3 + DynamoDB).
 //!
-//! This binary provides a LocalStack-compatible S3 server built on `ruststack-s3-http`.
-//! It handles S3 protocol translation, virtual-hosted-style addressing,
-//! and exposes health check endpoints for orchestration systems.
+//! This binary provides a LocalStack-compatible server built on `ruststack-s3-http`
+//! and `ruststack-dynamodb-http`. A gateway layer routes requests to the appropriate
+//! service based on the `X-Amz-Target` header.
 //!
 //! # Usage
 //!
 //! ```text
-//! GATEWAY_LISTEN=0.0.0.0:4566 ruststack-s3-server
+//! GATEWAY_LISTEN=0.0.0.0:4566 ruststack-server
 //! ```
 //!
 //! # Environment Variables
@@ -15,11 +15,13 @@
 //! | Variable | Default | Description |
 //! |----------|---------|-------------|
 //! | `GATEWAY_LISTEN` | `0.0.0.0:4566` | Bind address |
-//! | `S3_SKIP_SIGNATURE_VALIDATION` | `true` | Skip SigV4 verification |
+//! | `S3_SKIP_SIGNATURE_VALIDATION` | `true` | Skip S3 SigV4 verification |
+//! | `DYNAMODB_SKIP_SIGNATURE_VALIDATION` | `true` | Skip DynamoDB SigV4 verification |
 //! | `S3_DOMAIN` | `s3.localhost.localstack.cloud` | Virtual hosting domain |
 //! | `LOG_LEVEL` | `info` | Log level filter |
 //! | `RUST_LOG` | *(unset)* | Fine-grained tracing filter (overrides `LOG_LEVEL`) |
 
+mod gateway;
 mod handler;
 
 use std::net::SocketAddr;
@@ -33,9 +35,14 @@ use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
+use ruststack_dynamodb_core::config::DynamoDBConfig;
+use ruststack_dynamodb_core::handler::RustStackDynamoDBHandler;
+use ruststack_dynamodb_core::provider::RustStackDynamoDB;
+use ruststack_dynamodb_http::service::{DynamoDBHttpConfig, DynamoDBHttpService};
 use ruststack_s3_core::{RustStackS3, S3Config};
 use ruststack_s3_http::service::{S3HttpConfig, S3HttpService};
 
+use crate::gateway::GatewayService;
 use crate::handler::RustStackHandler;
 
 /// Server version reported in health check responses.
@@ -61,14 +68,24 @@ fn init_tracing(log_level: &str) -> Result<()> {
 }
 
 /// Build the [`S3HttpConfig`] from the application [`S3Config`].
-fn build_http_config(config: &S3Config) -> S3HttpConfig {
-    // Build a credential provider from environment variables if available.
+fn build_s3_http_config(config: &S3Config) -> S3HttpConfig {
     let credential_provider = build_credential_provider();
 
     S3HttpConfig {
         domain: config.s3_domain.clone(),
         virtual_hosting: config.s3_virtual_hosting,
         skip_signature_validation: config.s3_skip_signature_validation,
+        region: config.default_region.clone(),
+        credential_provider: credential_provider.clone(),
+    }
+}
+
+/// Build the [`DynamoDBHttpConfig`] from the [`DynamoDBConfig`].
+fn build_dynamodb_http_config(config: &DynamoDBConfig) -> DynamoDBHttpConfig {
+    let credential_provider = build_credential_provider();
+
+    DynamoDBHttpConfig {
+        skip_signature_validation: config.skip_signature_validation,
         region: config.default_region.clone(),
         credential_provider,
     }
@@ -95,9 +112,9 @@ fn build_credential_provider() -> Option<Arc<dyn ruststack_auth::CredentialProvi
 }
 
 /// Run the accept loop, serving connections until a shutdown signal is received.
-async fn serve<H: ruststack_s3_http::dispatch::S3Handler>(
+async fn serve(
     listener: TcpListener,
-    service: S3HttpService<H>,
+    service: GatewayService<RustStackHandler, RustStackDynamoDBHandler>,
 ) -> Result<()> {
     let graceful = hyper_util::server::graceful::GracefulShutdown::new();
     let http = HttpConnBuilder::new(TokioExecutor::new());
@@ -166,7 +183,10 @@ async fn run_health_check(addr: &str) -> Result<()> {
     let mut response = String::new();
     reader.read_to_string(&mut response).await?;
 
-    if response.contains("200 OK") && response.contains("\"s3\":\"running\"") {
+    if response.contains("200 OK")
+        && response.contains("\"s3\":\"running\"")
+        && response.contains("\"dynamodb\":\"running\"")
+    {
         Ok(())
     } else {
         anyhow::bail!("unhealthy response from {addr}")
@@ -183,28 +203,41 @@ async fn main() -> Result<()> {
         std::process::exit(i32::from(!healthy));
     }
 
-    let config = S3Config::from_env();
+    let s3_config = S3Config::from_env();
+    let dynamodb_config = DynamoDBConfig::from_env();
 
-    init_tracing(&config.log_level)?;
+    init_tracing(&s3_config.log_level)?;
 
     info!(
-        gateway_listen = %config.gateway_listen,
-        s3_domain = %config.s3_domain,
-        s3_virtual_hosting = config.s3_virtual_hosting,
-        s3_skip_signature_validation = config.s3_skip_signature_validation,
+        gateway_listen = %s3_config.gateway_listen,
+        s3_domain = %s3_config.s3_domain,
+        s3_virtual_hosting = s3_config.s3_virtual_hosting,
+        s3_skip_signature_validation = s3_config.s3_skip_signature_validation,
+        dynamodb_skip_signature_validation = dynamodb_config.skip_signature_validation,
         version = VERSION,
-        "starting RustStack S3 Server",
+        "starting RustStack Server",
     );
 
-    let provider = RustStackS3::new(config.clone());
-    let handler = RustStackHandler(provider);
-    let http_config = build_http_config(&config);
-    let service = S3HttpService::new(handler, http_config);
+    // Initialize S3 service.
+    let s3_provider = RustStackS3::new(s3_config.clone());
+    let s3_handler = RustStackHandler(s3_provider);
+    let s3_http_config = build_s3_http_config(&s3_config);
+    let s3_service = S3HttpService::new(s3_handler, s3_http_config);
 
-    let addr: SocketAddr = config
+    // Initialize DynamoDB service.
+    let dynamodb_provider = RustStackDynamoDB::new(dynamodb_config.clone());
+    let dynamodb_handler = RustStackDynamoDBHandler::new(Arc::new(dynamodb_provider));
+    let dynamodb_http_config = build_dynamodb_http_config(&dynamodb_config);
+    let dynamodb_service =
+        DynamoDBHttpService::new(Arc::new(dynamodb_handler), dynamodb_http_config);
+
+    // Create the gateway that routes between S3 and DynamoDB.
+    let gateway = GatewayService::new(s3_service, dynamodb_service);
+
+    let addr: SocketAddr = s3_config
         .gateway_listen
         .parse()
-        .with_context(|| format!("invalid bind address: {}", config.gateway_listen))?;
+        .with_context(|| format!("invalid bind address: {}", s3_config.gateway_listen))?;
 
     let listener = TcpListener::bind(addr)
         .await
@@ -212,7 +245,7 @@ async fn main() -> Result<()> {
 
     info!(%addr, "listening for connections");
 
-    serve(listener, service).await
+    serve(listener, gateway).await
 }
 
 #[cfg(test)]
@@ -220,15 +253,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_should_build_http_config_from_s3_config() {
+    fn test_should_build_s3_http_config_from_s3_config() {
         let config = S3Config::from_env();
-        let http_config = build_http_config(&config);
+        let http_config = build_s3_http_config(&config);
 
         assert_eq!(http_config.domain, config.s3_domain);
         assert_eq!(http_config.virtual_hosting, config.s3_virtual_hosting);
         assert_eq!(
             http_config.skip_signature_validation,
             config.s3_skip_signature_validation
+        );
+        assert_eq!(http_config.region, config.default_region);
+    }
+
+    #[test]
+    fn test_should_build_dynamodb_http_config_from_dynamodb_config() {
+        let config = DynamoDBConfig::from_env();
+        let http_config = build_dynamodb_http_config(&config);
+
+        assert_eq!(
+            http_config.skip_signature_validation,
+            config.skip_signature_validation
         );
         assert_eq!(http_config.region, config.default_region);
     }

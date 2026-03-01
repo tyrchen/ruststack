@@ -1,5 +1,5 @@
-name: "RustStack S3"
-description: "Start a high-performance S3-compatible server on localhost:4566 (drop-in replacement for LocalStack S3)"
+name: "RustStack"
+description: "Start a high-performance AWS-compatible server (S3 + DynamoDB) on localhost:4566 (drop-in replacement for LocalStack)"
 author: "Tyr Chen"
 
 branding:
@@ -12,7 +12,7 @@ inputs:
     required: false
     default: "latest"
   port:
-    description: "Host port to bind the S3 service to"
+    description: "Host port to bind the service to"
     required: false
     default: "4566"
   default-region:
@@ -30,7 +30,7 @@ inputs:
 
 outputs:
   endpoint:
-    description: "The S3 endpoint URL"
+    description: "The service endpoint URL"
     value: ${{ steps.start.outputs.endpoint }}
   container-id:
     description: "The Docker container ID (for advanced usage)"
@@ -39,21 +39,21 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Pull RustStack S3 image
+    - name: Pull RustStack image
       shell: bash
       run: |
-        docker pull "ghcr.io/tyrchen/ruststack-s3:${{ inputs.image-tag }}"
+        docker pull "ghcr.io/tyrchen/ruststack:${{ inputs.image-tag }}"
 
-    - name: Start RustStack S3
+    - name: Start RustStack
       id: start
       shell: bash
       run: |
         CONTAINER_ID=$(docker run -d \
-          --name ruststack-s3 \
+          --name ruststack \
           -p "${{ inputs.port }}:4566" \
           -e "DEFAULT_REGION=${{ inputs.default-region }}" \
           -e "LOG_LEVEL=${{ inputs.log-level }}" \
-          "ghcr.io/tyrchen/ruststack-s3:${{ inputs.image-tag }}")
+          "ghcr.io/tyrchen/ruststack:${{ inputs.image-tag }}")
 
         echo "container_id=$CONTAINER_ID" >> "$GITHUB_OUTPUT"
         echo "endpoint=http://localhost:${{ inputs.port }}" >> "$GITHUB_OUTPUT"
@@ -65,19 +65,19 @@ runs:
         TIMEOUT=${{ inputs.wait-timeout }}
         ELAPSED=0
 
-        echo "Waiting for RustStack S3 at $ENDPOINT ..."
+        echo "Waiting for RustStack at $ENDPOINT ..."
 
         until curl -sf "$ENDPOINT/_localstack/health" > /dev/null 2>&1; do
           if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
-            echo "::error::RustStack S3 did not become healthy within ${TIMEOUT}s"
-            docker logs ruststack-s3
+            echo "::error::RustStack did not become healthy within ${TIMEOUT}s"
+            docker logs ruststack
             exit 1
           fi
           sleep 0.5
           ELAPSED=$((ELAPSED + 1))
         done
 
-        echo "RustStack S3 is ready at $ENDPOINT"
+        echo "RustStack is ready at $ENDPOINT"
 
     - name: Export environment
       shell: bash

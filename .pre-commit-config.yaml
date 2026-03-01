@@ -58,7 +58,7 @@ repos:
       - id: cargo-test
         name: cargo test
         description: unit test for the project
-        entry: bash -c 'cargo nextest run --all-features --workspace --exclude ruststack-s3-integration -- --include-ignored'
+        entry: bash -c 'cargo nextest run --all-features --workspace --exclude ruststack-integration -- --include-ignored'
         language: rust
         files: \.rs$
         pass_filenames: false
