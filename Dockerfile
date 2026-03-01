@@ -71,6 +71,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM scratch
 
 COPY --from=builder /ruststack-s3-server /ruststack-s3-server
+COPY --from=builder /tmp /tmp
 
 ENV GATEWAY_LISTEN=0.0.0.0:4566
 ENV LOG_LEVEL=info

@@ -118,16 +118,32 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Generate a 1MB file
+          # Generate a 1MB binary file
           dd if=/dev/urandom of=/tmp/large-file.bin bs=1M count=1 2>/dev/null
           ORIG_MD5=$(md5sum /tmp/large-file.bin | cut -d' ' -f1)
 
-          # Upload using put-object (sends Content-Length, avoids chunked encoding)
+          # Upload
           aws s3api put-object --bucket test-bucket-ops --key large/file.bin --body /tmp/large-file.bin
 
           # Download and verify integrity
           aws s3api get-object --bucket test-bucket-ops --key large/file.bin /tmp/large-downloaded.bin
           DL_MD5=$(md5sum /tmp/large-downloaded.bin | cut -d' ' -f1)
+          [ "$ORIG_MD5" = "$DL_MD5" ]
+
+      # ── Large Object via aws s3 cp ──────────────────────────────────
+      - name: "Large Object: 10MB upload via aws s3 cp (auto-multipart)"
+        continue-on-error: true # Requires Docker image with writable /tmp
+        run: |
+          set -euo pipefail
+
+          # Generate a 10MB file
+          dd if=/dev/urandom of=/tmp/large10.bin bs=1M count=10 2>/dev/null
+          ORIG_MD5=$(md5sum /tmp/large10.bin | cut -d' ' -f1)
+
+          aws s3 cp /tmp/large10.bin s3://test-bucket-ops/large/big.bin
+
+          aws s3 cp s3://test-bucket-ops/large/big.bin /tmp/large10-dl.bin
+          DL_MD5=$(md5sum /tmp/large10-dl.bin | cut -d' ' -f1)
           [ "$ORIG_MD5" = "$DL_MD5" ]
 
       # ── Presigned URLs ──────────────────────────────────────────────
