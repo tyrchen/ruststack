@@ -15,6 +15,26 @@ Currently implements **S3** with full protocol support — 70 operations generat
 - **Tiny Docker image** — Static musl binary in a scratch container (~15 MB)
 - **Graceful shutdown** and health check endpoints for container orchestration
 
+## Why RustStack?
+
+If you only need S3 for local development or CI, RustStack gives you a **faster, leaner** alternative to LocalStack:
+
+| | RustStack | LocalStack |
+|---|---|---|
+| **Language** | Rust (static binary) | Python |
+| **Docker image** | ~15 MB (scratch) | ~475 MB compressed / ~1.88 GB on disk |
+| **Startup time** | < 1 second | 10-45 seconds (S3 only); up to 2 min (all services) |
+| **Memory (idle)** | ~10 MB | ~750 MB minimum |
+| **S3 operations** | 70 | ~92 |
+| **CI cold start** | Pull + ready in ~3s | Pull + ready in 30-90s |
+| **Auth support** | SigV4 + SigV2 + presigned URLs | SigV4 (Pro for IAM enforcement) |
+| **License** | MIT, fully open source | Shifting to registration-required; free tier limited |
+| **Multi-service** | S3 only (for now) | 80+ AWS services |
+
+**When to use RustStack:** You need fast, reliable S3 in CI pipelines or local dev, and don't want to wait 30+ seconds for a 2 GB container to boot. Your tests start in seconds, not minutes.
+
+**When to use LocalStack:** You need services beyond S3 (Lambda, DynamoDB, SQS, etc.) and are willing to trade startup time and resource usage for broader AWS coverage.
+
 ## Quick Start
 
 ```bash
