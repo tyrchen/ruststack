@@ -380,21 +380,26 @@ jobs:
             aws s3api put-object --bucket test-listing --key "$key" --body /tmp/listing-obj.txt
           done
 
-          # List all
-          ALL=$(aws s3api list-objects-v2 --bucket test-listing --query "KeyCount" --output text)
+          # List all — count Contents array length instead of KeyCount
+          ALL_RESULT=$(aws s3api list-objects-v2 --bucket test-listing)
+          ALL=$(echo "$ALL_RESULT" | jq '.Contents | length')
+          echo "Total objects: $ALL"
           [ "$ALL" = "6" ]
 
           # List with prefix
-          PHOTOS=$(aws s3api list-objects-v2 --bucket test-listing --prefix "photos/" --query "KeyCount" --output text)
+          PREFIX_RESULT=$(aws s3api list-objects-v2 --bucket test-listing --prefix "photos/")
+          PHOTOS=$(echo "$PREFIX_RESULT" | jq '.Contents | length')
+          echo "Photos: $PHOTOS"
           [ "$PHOTOS" = "3" ]
 
           # List with delimiter (common prefixes)
-          DELIMITED=$(aws s3api list-objects-v2 --bucket test-listing --delimiter "/" --query "CommonPrefixes[].Prefix" --output text)
-          echo "$DELIMITED" | grep -q "photos/"
-          echo "$DELIMITED" | grep -q "docs/"
+          DELIMITED=$(aws s3api list-objects-v2 --bucket test-listing --delimiter "/")
+          echo "$DELIMITED" | jq -r '.CommonPrefixes[].Prefix' | grep -q "photos/"
+          echo "$DELIMITED" | jq -r '.CommonPrefixes[].Prefix' | grep -q "docs/"
 
           # List with max-keys and pagination
           PAGE1=$(aws s3api list-objects-v2 --bucket test-listing --max-keys 2)
+          echo "Page 1: $(echo "$PAGE1" | jq -c '{IsTruncated, KeyCount: (.Contents | length)}')"
           IS_TRUNCATED=$(echo "$PAGE1" | jq -r '.IsTruncated')
           [ "$IS_TRUNCATED" = "true" ]
           NEXT=$(echo "$PAGE1" | jq -r '.NextContinuationToken')
@@ -403,8 +408,8 @@ jobs:
           echo "$PAGE2" | grep -q "Contents"
 
           # List with start-after
-          AFTER=$(aws s3api list-objects-v2 --bucket test-listing --start-after "photos/" --query "Contents[].Key" --output text)
-          echo "$AFTER" | grep -q "root.txt"
+          AFTER=$(aws s3api list-objects-v2 --bucket test-listing --start-after "photos/")
+          echo "$AFTER" | jq -r '.Contents[].Key' | grep -q "root.txt"
 
       # ── POST Object (browser-based upload) ──────────────────────────
       - name: "POST Object: browser-based multipart/form-data upload"
