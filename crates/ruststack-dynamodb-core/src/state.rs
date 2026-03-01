@@ -121,6 +121,8 @@ pub struct DynamoDBTable {
     pub tags: parking_lot::RwLock<Vec<Tag>>,
     /// Table ARN.
     pub arn: String,
+    /// Stable table ID (UUID v4), assigned at creation time.
+    pub table_id: String,
     /// Creation timestamp.
     pub created_at: chrono::DateTime<chrono::Utc>,
     /// Item storage engine.
@@ -131,31 +133,25 @@ impl DynamoDBTable {
     /// Build a `TableDescription` from this table's metadata.
     #[must_use]
     pub fn to_description(&self) -> TableDescription {
+        #[allow(clippy::cast_precision_loss)] // Acceptable: DynamoDB returns epoch seconds as f64
+        let creation_time = self.created_at.timestamp() as f64;
         TableDescription {
             table_name: Some(self.name.clone()),
             table_status: Some(self.status.clone()),
             key_schema: self.key_schema_elements.clone(),
             attribute_definitions: self.attribute_definitions.clone(),
             table_arn: Some(self.arn.clone()),
-            table_id: Some(uuid::Uuid::new_v4().to_string()),
-            #[allow(clippy::cast_precision_loss)] // Acceptable: DynamoDB returns epoch seconds as f64
-            creation_date_time: Some(self.created_at.timestamp() as f64),
+            table_id: Some(self.table_id.clone()),
+            creation_date_time: Some(creation_time),
             item_count: Some(i64::try_from(self.storage.item_count()).unwrap_or(i64::MAX)),
             table_size_bytes: Some(
                 i64::try_from(self.storage.total_size_bytes()).unwrap_or(i64::MAX),
             ),
             billing_mode_summary: Some(BillingModeSummary {
                 billing_mode: Some(self.billing_mode.clone()),
-                last_update_to_pay_per_request_date_time: None,
+                last_update_to_pay_per_request_date_time: Some(creation_time),
             }),
-            provisioned_throughput: self
-                .provisioned_throughput
-                .as_ref()
-                .map(|pt| ProvisionedThroughputDescription {
-                    read_capacity_units: pt.read_capacity_units,
-                    write_capacity_units: pt.write_capacity_units,
-                    ..Default::default()
-                }),
+            provisioned_throughput: Some(self.provisioned_throughput_description()),
             global_secondary_indexes: self
                 .gsi_definitions
                 .iter()
@@ -164,13 +160,13 @@ impl DynamoDBTable {
                     key_schema: gsi.key_schema.clone(),
                     projection: Some(gsi.projection.clone()),
                     index_status: Some(IndexStatus::Active),
-                    provisioned_throughput: gsi.provisioned_throughput.as_ref().map(
-                        |pt| ProvisionedThroughputDescription {
+                    provisioned_throughput: gsi.provisioned_throughput.as_ref().map(|pt| {
+                        ProvisionedThroughputDescription {
                             read_capacity_units: pt.read_capacity_units,
                             write_capacity_units: pt.write_capacity_units,
                             ..Default::default()
-                        },
-                    ),
+                        }
+                    }),
                     index_size_bytes: Some(0),
                     item_count: Some(0),
                     index_arn: Some(format!("{}/index/{}", self.arn, gsi.index_name)),
@@ -197,5 +193,50 @@ impl DynamoDBTable {
             }),
             ..Default::default()
         }
+    }
+
+    /// Build a stripped `TableDescription` for the `DeleteTable` response.
+    ///
+    /// Per DynamoDB specification, `DeleteTable` does not include `KeySchema`,
+    /// `AttributeDefinitions`, `CreationDateTime`, `GlobalSecondaryIndexes`,
+    /// or `LocalSecondaryIndexes` in its response.
+    #[must_use]
+    pub fn to_delete_description(&self) -> TableDescription {
+        #[allow(clippy::cast_precision_loss)]
+        let creation_time = self.created_at.timestamp() as f64;
+        TableDescription {
+            table_name: Some(self.name.clone()),
+            table_status: Some(TableStatus::Deleting),
+            table_arn: Some(self.arn.clone()),
+            table_id: Some(self.table_id.clone()),
+            item_count: Some(i64::try_from(self.storage.item_count()).unwrap_or(i64::MAX)),
+            table_size_bytes: Some(
+                i64::try_from(self.storage.total_size_bytes()).unwrap_or(i64::MAX),
+            ),
+            billing_mode_summary: Some(BillingModeSummary {
+                billing_mode: Some(self.billing_mode.clone()),
+                last_update_to_pay_per_request_date_time: Some(creation_time),
+            }),
+            provisioned_throughput: Some(self.provisioned_throughput_description()),
+            ..Default::default()
+        }
+    }
+
+    /// Build the `ProvisionedThroughputDescription` for this table.
+    fn provisioned_throughput_description(&self) -> ProvisionedThroughputDescription {
+        self.provisioned_throughput.as_ref().map_or_else(
+            || ProvisionedThroughputDescription {
+                read_capacity_units: 0,
+                write_capacity_units: 0,
+                number_of_decreases_today: Some(0),
+                ..Default::default()
+            },
+            |pt| ProvisionedThroughputDescription {
+                read_capacity_units: pt.read_capacity_units,
+                write_capacity_units: pt.write_capacity_units,
+                number_of_decreases_today: Some(0),
+                ..Default::default()
+            },
+        )
     }
 }

@@ -227,7 +227,9 @@ pub enum SortKeyCondition {
     /// Sort key is between the two given values (inclusive).
     Between(SortableAttributeValue, SortableAttributeValue),
     /// Sort key begins with the given string prefix.
-    BeginsWith(String),
+    BeginsWithStr(String),
+    /// Sort key begins with the given binary prefix.
+    BeginsWithBytes(bytes::Bytes),
 }
 
 // ---------------------------------------------------------------------------
@@ -601,8 +603,11 @@ fn collect_with_condition<'a>(
             limit,
             exclusive_start_key,
         ),
-        SortKeyCondition::BeginsWith(prefix) => {
-            collect_begins_with(partition, prefix, scan_forward, limit, exclusive_start_key)
+        SortKeyCondition::BeginsWithStr(prefix) => {
+            collect_begins_with_str(partition, prefix, scan_forward, limit, exclusive_start_key)
+        }
+        SortKeyCondition::BeginsWithBytes(prefix) => {
+            collect_begins_with_bytes(partition, prefix, scan_forward, limit, exclusive_start_key)
         }
     }
 }
@@ -662,7 +667,7 @@ fn collect_range<'a>(
 }
 
 /// Collects items whose string sort key begins with the given prefix.
-fn collect_begins_with<'a>(
+fn collect_begins_with_str<'a>(
     partition: &'a BTreeMap<SortableAttributeValue, StoredItem>,
     prefix: &str,
     scan_forward: bool,
@@ -673,7 +678,7 @@ fn collect_begins_with<'a>(
     let start = SortableAttributeValue::S(prefix.to_owned());
 
     // Compute the upper bound: prefix with the last byte incremented.
-    let upper = compute_prefix_upper_bound(prefix);
+    let upper = compute_str_prefix_upper_bound(prefix);
 
     let lower_bound = match exclusive_start_key {
         Some(esk) if scan_forward && *esk >= start => Bound::Excluded(esk.clone()),
@@ -709,11 +714,58 @@ fn collect_begins_with<'a>(
     }
 }
 
-/// Computes the exclusive upper bound for a prefix scan.
+/// Collects items whose binary sort key begins with the given byte prefix.
+fn collect_begins_with_bytes<'a>(
+    partition: &'a BTreeMap<SortableAttributeValue, StoredItem>,
+    prefix: &[u8],
+    scan_forward: bool,
+    limit: usize,
+    exclusive_start_key: Option<&SortableAttributeValue>,
+) -> Vec<&'a StoredItem> {
+    let start = SortableAttributeValue::B(bytes::Bytes::copy_from_slice(prefix));
+
+    // Compute the upper bound: prefix with the last byte incremented.
+    let upper = compute_bytes_prefix_upper_bound(prefix);
+
+    let lower_bound = match exclusive_start_key {
+        Some(esk) if scan_forward && *esk >= start => Bound::Excluded(esk.clone()),
+        _ => Bound::Included(start),
+    };
+
+    let upper_bound = match &upper {
+        Some(ub) => match exclusive_start_key {
+            Some(esk) if !scan_forward && *esk <= *ub => Bound::Excluded(esk.clone()),
+            _ => Bound::Excluded(ub.clone()),
+        },
+        None => match exclusive_start_key {
+            Some(esk) if !scan_forward => Bound::Excluded(esk.clone()),
+            _ => Bound::Unbounded,
+        },
+    };
+
+    if scan_forward {
+        partition
+            .range((lower_bound, upper_bound))
+            .filter(|(k, _)| matches!(k, SortableAttributeValue::B(b) if b.starts_with(prefix)))
+            .take(limit)
+            .map(|(_, item)| item)
+            .collect()
+    } else {
+        partition
+            .range((lower_bound, upper_bound))
+            .rev()
+            .filter(|(k, _)| matches!(k, SortableAttributeValue::B(b) if b.starts_with(prefix)))
+            .take(limit)
+            .map(|(_, item)| item)
+            .collect()
+    }
+}
+
+/// Computes the exclusive upper bound for a string prefix scan.
 ///
 /// Increments the last byte of the prefix string. Returns `None` if the
 /// prefix is empty or all bytes are `0xFF`.
-fn compute_prefix_upper_bound(prefix: &str) -> Option<SortableAttributeValue> {
+fn compute_str_prefix_upper_bound(prefix: &str) -> Option<SortableAttributeValue> {
     let mut bytes = prefix.as_bytes().to_vec();
     // Pop trailing 0xFF bytes since they cannot be incremented.
     while bytes.last() == Some(&0xFF) {
@@ -732,6 +784,25 @@ fn compute_prefix_upper_bound(prefix: &str) -> Option<SortableAttributeValue> {
     Some(SortableAttributeValue::S(
         String::from_utf8_lossy(&bytes).into_owned(),
     ))
+}
+
+/// Computes the exclusive upper bound for a binary prefix scan.
+///
+/// Increments the last byte of the prefix. Returns `None` if the
+/// prefix is empty or all bytes are `0xFF`.
+fn compute_bytes_prefix_upper_bound(prefix: &[u8]) -> Option<SortableAttributeValue> {
+    let mut bytes = prefix.to_vec();
+    // Pop trailing 0xFF bytes since they cannot be incremented.
+    while bytes.last() == Some(&0xFF) {
+        bytes.pop();
+    }
+    if bytes.is_empty() {
+        return None;
+    }
+    if let Some(last) = bytes.last_mut() {
+        *last += 1;
+    }
+    Some(SortableAttributeValue::B(bytes::Bytes::from(bytes)))
 }
 
 /// Builds the last evaluated key for pagination when a limit was hit.
@@ -1058,11 +1129,11 @@ mod tests {
         }
 
         let pk = AttributeValue::S("partition1".to_owned());
-        let condition = SortKeyCondition::BeginsWith("user#".to_owned());
+        let condition = SortKeyCondition::BeginsWithStr("user#".to_owned());
         let (items, _) = storage.query(&pk, Some(&condition), true, None, None);
         assert_eq!(items.len(), 3);
 
-        let condition = SortKeyCondition::BeginsWith("order#".to_owned());
+        let condition = SortKeyCondition::BeginsWithStr("order#".to_owned());
         let (items, _) = storage.query(&pk, Some(&condition), true, None, None);
         assert_eq!(items.len(), 2);
     }

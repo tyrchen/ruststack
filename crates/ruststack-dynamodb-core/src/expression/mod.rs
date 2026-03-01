@@ -12,6 +12,10 @@ pub mod ast;
 pub mod evaluator;
 pub mod parser;
 
-pub use ast::{AttributePath, Expr, Operand, PathElement, UpdateExpr};
+pub use ast::{
+    AttributePath, Expr, Operand, PathElement, UpdateExpr, collect_names_from_expr,
+    collect_names_from_projection, collect_names_from_update, collect_paths_from_expr,
+    collect_values_from_expr, collect_values_from_update,
+};
 pub use evaluator::EvalContext;
 pub use parser::{ExpressionError, parse_condition, parse_projection, parse_update};

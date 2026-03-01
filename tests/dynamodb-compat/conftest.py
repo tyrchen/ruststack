@@ -281,4 +281,4 @@ def filled_test_table(test_table):
         for item in items:
             batch.put_item(Item=item)
 
-    yield test_table
+    yield test_table, items

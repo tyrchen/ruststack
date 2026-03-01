@@ -1,6 +1,6 @@
-//! DynamoDB provider implementing all 12 MVP operations.
+//! DynamoDB provider implementing all MVP operations.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use ruststack_dynamodb_model::AttributeValue;
@@ -8,20 +8,27 @@ use ruststack_dynamodb_model::error::DynamoDBError;
 use ruststack_dynamodb_model::input::{
     BatchGetItemInput, BatchWriteItemInput, CreateTableInput, DeleteItemInput, DeleteTableInput,
     DescribeTableInput, GetItemInput, ListTablesInput, PutItemInput, QueryInput, ScanInput,
-    UpdateItemInput,
+    UpdateItemInput, UpdateTableInput,
 };
 use ruststack_dynamodb_model::output::{
     BatchGetItemOutput, BatchWriteItemOutput, CreateTableOutput, DeleteItemOutput,
     DeleteTableOutput, DescribeTableOutput, GetItemOutput, ListTablesOutput, PutItemOutput,
-    QueryOutput, ScanOutput, UpdateItemOutput,
+    QueryOutput, ScanOutput, UpdateItemOutput, UpdateTableOutput,
 };
 use ruststack_dynamodb_model::types::{
-    AttributeDefinition, BillingMode, KeyType, ScalarAttributeType, TableStatus,
+    AttributeAction, AttributeDefinition, AttributeValueUpdate, BillingMode, ComparisonOperator,
+    Condition, ConditionalOperator, ExpectedAttributeValue, KeyType, ReturnValue,
+    ScalarAttributeType, Select, TableStatus,
 };
 
 use crate::config::DynamoDBConfig;
 use crate::error::{expression_error_to_dynamodb, storage_error_to_dynamodb};
-use crate::expression::{EvalContext, parse_condition, parse_projection, parse_update};
+use crate::expression::{
+    AttributePath, EvalContext, PathElement, UpdateExpr, collect_names_from_expr,
+    collect_names_from_projection, collect_names_from_update, collect_paths_from_expr,
+    collect_values_from_expr, collect_values_from_update, parse_condition, parse_projection,
+    parse_update,
+};
 use crate::state::{DynamoDBServiceState, DynamoDBTable};
 use crate::storage::{
     KeyAttribute, KeySchema, SortKeyCondition, SortableAttributeValue, TableStorage,
@@ -30,6 +37,133 @@ use crate::storage::{
 
 /// Maximum item size in bytes (400 KB).
 const MAX_ITEM_SIZE_BYTES: u64 = 400 * 1024;
+
+/// Validate a table name against DynamoDB rules: 3-255 characters, `[a-zA-Z0-9._-]+`.
+fn validate_table_name(name: &str) -> Result<(), DynamoDBError> {
+    if name.len() < 3 || name.len() > 255 {
+        return Err(DynamoDBError::validation(format!(
+            "TableName must be at least 3 characters long and at most 255 characters long, \
+             but was {} characters",
+            name.len()
+        )));
+    }
+    if !name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
+    {
+        return Err(DynamoDBError::validation(format!(
+            "1 validation error detected: Value '{name}' at 'tableName' failed to satisfy \
+             constraint: Member must satisfy regular expression pattern: [a-zA-Z0-9_.-]+"
+        )));
+    }
+    Ok(())
+}
+
+/// Validate that key attributes in the given item do not contain empty string/binary values.
+fn validate_key_not_empty(
+    key_schema: &KeySchema,
+    item: &HashMap<String, AttributeValue>,
+) -> Result<(), DynamoDBError> {
+    for ka in std::iter::once(&key_schema.partition_key).chain(key_schema.sort_key.iter()) {
+        if let Some(val) = item.get(&ka.name) {
+            match val {
+                AttributeValue::S(s) if s.is_empty() => {
+                    return Err(DynamoDBError::validation(format!(
+                        "One or more parameter values are not valid. \
+                         The AttributeValue for a key attribute cannot contain an \
+                         empty string value. Key: {}",
+                        ka.name
+                    )));
+                }
+                AttributeValue::B(b) if b.is_empty() => {
+                    return Err(DynamoDBError::validation(format!(
+                        "One or more parameter values are not valid. \
+                         The AttributeValue for a key attribute cannot contain an \
+                         empty string value. Key: {}",
+                        ka.name
+                    )));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate that the `Key` map only contains the key attributes and nothing else.
+fn validate_key_only_has_key_attrs(
+    key_schema: &KeySchema,
+    key: &HashMap<String, AttributeValue>,
+) -> Result<(), DynamoDBError> {
+    for attr_name in key.keys() {
+        if !is_key_attribute(attr_name, key_schema) {
+            return Err(DynamoDBError::validation(format!(
+                "One or more parameter values are not valid. \
+                 Number of user supplied keys don't match number of table schema keys. \
+                 Keys provided: [{}], schema keys: [{}]",
+                format_key_names(key),
+                format_schema_key_names(key_schema),
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Format key attribute names from a key map for error messages.
+fn format_key_names(key: &HashMap<String, AttributeValue>) -> String {
+    let mut names: Vec<&str> = key.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    names.join(", ")
+}
+
+/// Format key schema attribute names for error messages.
+fn format_schema_key_names(key_schema: &KeySchema) -> String {
+    let mut names = vec![key_schema.partition_key.name.as_str()];
+    if let Some(ref sk) = key_schema.sort_key {
+        names.push(sk.name.as_str());
+    }
+    names.join(", ")
+}
+
+/// Validate the `Select` parameter for Query/Scan, checking conflicts with
+/// `ProjectionExpression` and `AttributesToGet`.
+fn validate_select(
+    select: Option<&Select>,
+    has_projection: bool,
+    has_attributes_to_get: bool,
+) -> Result<(), DynamoDBError> {
+    if let Some(sel) = select {
+        match sel {
+            Select::AllProjectedAttributes => {
+                return Err(DynamoDBError::validation(
+                    "ALL_PROJECTED_ATTRIBUTES is only supported for queries on secondary indexes",
+                ));
+            }
+            Select::SpecificAttributes => {
+                if !has_projection && !has_attributes_to_get {
+                    return Err(DynamoDBError::validation(
+                        "SPECIFIC_ATTRIBUTES requires either ProjectionExpression or AttributesToGet",
+                    ));
+                }
+            }
+            Select::AllAttributes | Select::Count => {
+                if has_attributes_to_get {
+                    return Err(DynamoDBError::validation(format!(
+                        "Cannot specify the AttributesToGet when choosing to get {} results",
+                        sel.as_str()
+                    )));
+                }
+                if has_projection {
+                    return Err(DynamoDBError::validation(format!(
+                        "Cannot specify the ProjectionExpression when choosing to get {} results",
+                        sel.as_str()
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Main DynamoDB provider implementing all operations.
 #[derive(Debug)]
@@ -62,12 +196,38 @@ impl RustStackDynamoDB {
 
 impl RustStackDynamoDB {
     /// Handle `CreateTable`.
+    #[allow(clippy::too_many_lines)]
     pub fn handle_create_table(
         &self,
         input: CreateTableInput,
     ) -> Result<CreateTableOutput, DynamoDBError> {
-        // Validate key schema.
+        // Validate table name.
+        validate_table_name(&input.table_name)?;
+
+        // Validate attribute definitions: no duplicate attribute names.
+        validate_attribute_definitions(&input.attribute_definitions)?;
+
+        // Validate key schema structure: exactly 1 HASH, at most 1 RANGE.
+        validate_key_schema_structure(&input.key_schema)?;
+
+        // Validate key schema: all key attributes defined in AttributeDefinitions,
+        // types are valid for keys (S, N, B only).
         let key_schema = parse_key_schema(&input.key_schema, &input.attribute_definitions)?;
+
+        // Validate billing mode.
+        let billing = validate_billing_mode(
+            input.billing_mode.as_ref(),
+            input.provisioned_throughput.as_ref(),
+        )?;
+
+        // Validate no spurious attribute definitions: all defined attributes
+        // must be used as a key in the table or an index.
+        validate_no_spurious_attribute_definitions(
+            &input.attribute_definitions,
+            &input.key_schema,
+            &input.global_secondary_indexes,
+            &input.local_secondary_indexes,
+        )?;
 
         // Build storage.
         let storage = TableStorage::new(key_schema.clone());
@@ -77,8 +237,6 @@ impl RustStackDynamoDB {
             "arn:aws:dynamodb:{}:000000000000:table/{}",
             self.config.default_region, table_name,
         );
-
-        let billing = input.billing_mode.unwrap_or(BillingMode::PayPerRequest);
 
         let table = DynamoDBTable {
             name: table_name,
@@ -94,6 +252,7 @@ impl RustStackDynamoDB {
             sse_specification: input.sse_specification,
             tags: parking_lot::RwLock::new(input.tags),
             arn,
+            table_id: uuid::Uuid::new_v4().to_string(),
             created_at: chrono::Utc::now(),
             storage,
         };
@@ -112,7 +271,7 @@ impl RustStackDynamoDB {
     ) -> Result<DeleteTableOutput, DynamoDBError> {
         let table = self.state.delete_table(&input.table_name)?;
         Ok(DeleteTableOutput {
-            table_description: Some(table.to_description()),
+            table_description: Some(table.to_delete_description()),
         })
     }
 
@@ -134,6 +293,16 @@ impl RustStackDynamoDB {
         &self,
         input: ListTablesInput,
     ) -> Result<ListTablesOutput, DynamoDBError> {
+        // Validate limit: must be 1-100 if specified.
+        if let Some(limit) = input.limit {
+            if !(1..=100).contains(&limit) {
+                return Err(DynamoDBError::validation(format!(
+                    "1 validation error detected: Value '{limit}' at 'limit' failed to satisfy \
+                     constraint: Member must have value less than or equal to 100"
+                )));
+            }
+        }
+
         let all_names = self.state.list_table_names();
         let limit = usize::try_from(input.limit.unwrap_or(100).clamp(1, 100)).unwrap_or(100);
 
@@ -164,6 +333,25 @@ impl RustStackDynamoDB {
             last_evaluated_table_name: last,
         })
     }
+
+    /// Handle `UpdateTable`.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn handle_update_table(
+        &self,
+        input: UpdateTableInput,
+    ) -> Result<UpdateTableOutput, DynamoDBError> {
+        let table = self.state.require_table(&input.table_name)?;
+
+        // For our in-memory emulator, UpdateTable is accepted but most changes
+        // are not enforced (billing mode, provisioned throughput, attribute
+        // definitions are metadata-only in DynamoDB local emulation). We return
+        // the current table description with ACTIVE status, which matches
+        // LocalStack behaviour.
+        let desc = table.to_description();
+        Ok(UpdateTableOutput {
+            table_description: Some(desc),
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -172,8 +360,32 @@ impl RustStackDynamoDB {
 
 impl RustStackDynamoDB {
     /// Handle `PutItem`.
-    pub fn handle_put_item(&self, input: PutItemInput) -> Result<PutItemOutput, DynamoDBError> {
+    pub fn handle_put_item(&self, mut input: PutItemInput) -> Result<PutItemOutput, DynamoDBError> {
         let table = self.state.require_table(&input.table_name)?;
+
+        // Validate return_values: PutItem only supports NONE and ALL_OLD.
+        if let Some(ref rv) = input.return_values {
+            if !matches!(rv, ReturnValue::None | ReturnValue::AllOld) {
+                return Err(DynamoDBError::validation(format!(
+                    "Return values set to invalid value for this operation: {rv}"
+                )));
+            }
+        }
+
+        // Validate key attributes are not empty.
+        validate_key_not_empty(&table.key_schema, &input.item)?;
+
+        // Validate item does not contain empty sets.
+        validate_item_no_empty_sets(&input.item)?;
+
+        // Legacy API: convert Expected to ConditionExpression.
+        if !input.expected.is_empty() && input.condition_expression.is_none() {
+            let (expr, names, values) =
+                convert_expected_to_condition(&input.expected, input.conditional_operator.as_ref());
+            input.condition_expression = Some(expr);
+            merge_expression_names(&mut input.expression_attribute_names, names);
+            merge_expression_values(&mut input.expression_attribute_values, values);
+        }
 
         // Validate item size.
         let size = calculate_item_size(&input.item);
@@ -181,6 +393,22 @@ impl RustStackDynamoDB {
             return Err(DynamoDBError::validation(format!(
                 "Item size has exceeded the maximum allowed size of {MAX_ITEM_SIZE_BYTES} bytes"
             )));
+        }
+
+        // Reject empty condition expression.
+        validate_condition_not_empty(input.condition_expression.as_deref())?;
+
+        // Validate unused expression attribute names/values.
+        {
+            let mut used_names = HashSet::new();
+            let mut used_values = HashSet::new();
+            if let Some(ref condition) = input.condition_expression {
+                let expr = parse_condition(condition).map_err(expression_error_to_dynamodb)?;
+                collect_names_from_expr(&expr, &mut used_names);
+                collect_values_from_expr(&expr, &mut used_values);
+            }
+            validate_no_unused_names(&input.expression_attribute_names, &used_names)?;
+            validate_no_unused_values(&input.expression_attribute_values, &used_values)?;
         }
 
         // Evaluate condition expression if present.
@@ -211,8 +439,9 @@ impl RustStackDynamoDB {
             .put_item(input.item)
             .map_err(storage_error_to_dynamodb)?;
 
+        // ALL_OLD: return the old item if it existed, otherwise omit Attributes.
         let attributes = match input.return_values {
-            Some(rv) if rv.as_str() == "ALL_OLD" => old.unwrap_or_default(),
+            Some(ReturnValue::AllOld) => old.unwrap_or_default(),
             _ => HashMap::new(),
         };
 
@@ -225,15 +454,34 @@ impl RustStackDynamoDB {
 
     /// Handle `GetItem`.
     #[allow(clippy::needless_pass_by_value)]
-    pub fn handle_get_item(&self, input: GetItemInput) -> Result<GetItemOutput, DynamoDBError> {
+    pub fn handle_get_item(&self, mut input: GetItemInput) -> Result<GetItemOutput, DynamoDBError> {
         let table = self.state.require_table(&input.table_name)?;
+
+        // Validate key: no spurious columns, correct types, not empty.
+        validate_key_only_has_key_attrs(&table.key_schema, &input.key)?;
+        validate_key_not_empty(&table.key_schema, &input.key)?;
         let pk = extract_primary_key(&table.key_schema, &input.key)
             .map_err(storage_error_to_dynamodb)?;
+
+        // Legacy API: convert AttributesToGet to ProjectionExpression.
+        if !input.attributes_to_get.is_empty() && input.projection_expression.is_none() {
+            input.projection_expression = Some(convert_attributes_to_get(&input.attributes_to_get));
+        }
+
+        // Validate unused expression attribute names.
+        {
+            let mut used_names = HashSet::new();
+            if let Some(ref proj) = input.projection_expression {
+                let paths = parse_projection(proj).map_err(expression_error_to_dynamodb)?;
+                collect_names_from_projection(&paths, &mut used_names);
+            }
+            validate_no_unused_names(&input.expression_attribute_names, &used_names)?;
+        }
 
         let item = table.storage.get_item(&pk);
 
         // Apply projection if specified.
-        let item = match (item, &input.projection_expression) {
+        let projected = match (item, &input.projection_expression) {
             (Some(item), Some(proj_expr)) => {
                 let paths = parse_projection(proj_expr).map_err(expression_error_to_dynamodb)?;
                 let ctx = EvalContext {
@@ -241,13 +489,14 @@ impl RustStackDynamoDB {
                     names: &input.expression_attribute_names,
                     values: &HashMap::new(),
                 };
-                ctx.apply_projection(&paths)
+                Some(ctx.apply_projection(&paths))
             }
-            (item, _) => item.unwrap_or_default(),
+            (Some(item), None) => Some(item),
+            (None, _) => None,
         };
 
         Ok(GetItemOutput {
-            item,
+            item: projected,
             consumed_capacity: None,
         })
     }
@@ -255,11 +504,49 @@ impl RustStackDynamoDB {
     /// Handle `DeleteItem`.
     pub fn handle_delete_item(
         &self,
-        input: DeleteItemInput,
+        mut input: DeleteItemInput,
     ) -> Result<DeleteItemOutput, DynamoDBError> {
         let table = self.state.require_table(&input.table_name)?;
+
+        // Validate return_values: DeleteItem only supports NONE and ALL_OLD.
+        if let Some(ref rv) = input.return_values {
+            if !matches!(rv, ReturnValue::None | ReturnValue::AllOld) {
+                return Err(DynamoDBError::validation(format!(
+                    "Return values set to invalid value for this operation: {rv}"
+                )));
+            }
+        }
+
+        // Validate key: no spurious columns, correct types, not empty.
+        validate_key_only_has_key_attrs(&table.key_schema, &input.key)?;
+        validate_key_not_empty(&table.key_schema, &input.key)?;
         let pk = extract_primary_key(&table.key_schema, &input.key)
             .map_err(storage_error_to_dynamodb)?;
+
+        // Legacy API: convert Expected to ConditionExpression.
+        if !input.expected.is_empty() && input.condition_expression.is_none() {
+            let (expr, names, values) =
+                convert_expected_to_condition(&input.expected, input.conditional_operator.as_ref());
+            input.condition_expression = Some(expr);
+            merge_expression_names(&mut input.expression_attribute_names, names);
+            merge_expression_values(&mut input.expression_attribute_values, values);
+        }
+
+        // Reject empty condition expression.
+        validate_condition_not_empty(input.condition_expression.as_deref())?;
+
+        // Validate unused expression attribute names/values.
+        {
+            let mut used_names = HashSet::new();
+            let mut used_values = HashSet::new();
+            if let Some(ref condition) = input.condition_expression {
+                let expr = parse_condition(condition).map_err(expression_error_to_dynamodb)?;
+                collect_names_from_expr(&expr, &mut used_names);
+                collect_values_from_expr(&expr, &mut used_values);
+            }
+            validate_no_unused_names(&input.expression_attribute_names, &used_names)?;
+            validate_no_unused_values(&input.expression_attribute_values, &used_values)?;
+        }
 
         // Evaluate condition expression if present.
         if let Some(ref condition) = input.condition_expression {
@@ -282,8 +569,9 @@ impl RustStackDynamoDB {
 
         let old = table.storage.delete_item(&pk);
 
+        // ALL_OLD: return the old item if it existed, otherwise omit Attributes.
         let attributes = match input.return_values {
-            Some(rv) if rv.as_str() == "ALL_OLD" => old.unwrap_or_default(),
+            Some(ReturnValue::AllOld) => old.unwrap_or_default(),
             _ => HashMap::new(),
         };
 
@@ -295,17 +583,110 @@ impl RustStackDynamoDB {
     }
 
     /// Handle `UpdateItem`.
-    #[allow(clippy::needless_pass_by_value)]
+    #[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
     pub fn handle_update_item(
         &self,
-        input: UpdateItemInput,
+        mut input: UpdateItemInput,
     ) -> Result<UpdateItemOutput, DynamoDBError> {
         let table = self.state.require_table(&input.table_name)?;
+
+        // Validate return_values.
+        if let Some(ref rv) = input.return_values {
+            if !matches!(
+                rv,
+                ReturnValue::None
+                    | ReturnValue::AllOld
+                    | ReturnValue::AllNew
+                    | ReturnValue::UpdatedOld
+                    | ReturnValue::UpdatedNew
+            ) {
+                return Err(DynamoDBError::validation(format!(
+                    "Return values set to invalid value for this operation: {rv}"
+                )));
+            }
+        }
+
+        // Reject mixing non-expression parameters with expression parameters.
+        if !input.attribute_updates.is_empty() && input.update_expression.is_some() {
+            return Err(DynamoDBError::validation(
+                "Can not use both expression and non-expression parameters in the same request: \
+                 Non-expression parameters: {AttributeUpdates} Expression parameters: {UpdateExpression}",
+            ));
+        }
+        if !input.attribute_updates.is_empty() && input.condition_expression.is_some() {
+            return Err(DynamoDBError::validation(
+                "Can not use both expression and non-expression parameters in the same request: \
+                 Non-expression parameters: {AttributeUpdates} Expression parameters: {ConditionExpression}",
+            ));
+        }
+        if !input.expected.is_empty() && input.condition_expression.is_some() {
+            return Err(DynamoDBError::validation(
+                "Can not use both expression and non-expression parameters in the same request: \
+                 Non-expression parameters: {Expected} Expression parameters: {ConditionExpression}",
+            ));
+        }
+
+        // Validate key: no spurious columns, correct types, not empty.
+        validate_key_only_has_key_attrs(&table.key_schema, &input.key)?;
+        validate_key_not_empty(&table.key_schema, &input.key)?;
         let pk = extract_primary_key(&table.key_schema, &input.key)
             .map_err(storage_error_to_dynamodb)?;
 
         let existing = table.storage.get_item(&pk);
         let mut item = existing.clone().unwrap_or_else(|| input.key.clone());
+
+        // Legacy API: convert Expected to ConditionExpression.
+        if !input.expected.is_empty() && input.condition_expression.is_none() {
+            let (expr, names, values) =
+                convert_expected_to_condition(&input.expected, input.conditional_operator.as_ref());
+            input.condition_expression = Some(expr);
+            merge_expression_names(&mut input.expression_attribute_names, names);
+            merge_expression_values(&mut input.expression_attribute_values, values);
+        }
+
+        // Legacy API: convert AttributeUpdates to UpdateExpression.
+        if !input.attribute_updates.is_empty() && input.update_expression.is_none() {
+            let (expr, names, values) =
+                convert_attribute_updates_to_expression(&input.attribute_updates);
+            input.update_expression = Some(expr);
+            merge_expression_names(&mut input.expression_attribute_names, names);
+            merge_expression_values(&mut input.expression_attribute_values, values);
+        }
+
+        // Validate expression attribute values contain no empty sets.
+        validate_no_empty_sets(&input.expression_attribute_values)?;
+
+        // Reject empty condition expression.
+        validate_condition_not_empty(input.condition_expression.as_deref())?;
+
+        // Validate unused expression attribute names/values.
+        {
+            let mut used_names = HashSet::new();
+            let mut used_values = HashSet::new();
+            if let Some(ref condition) = input.condition_expression {
+                let expr = parse_condition(condition).map_err(expression_error_to_dynamodb)?;
+                collect_names_from_expr(&expr, &mut used_names);
+                collect_values_from_expr(&expr, &mut used_values);
+            }
+            if let Some(ref update_expr) = input.update_expression {
+                let parsed = parse_update(update_expr).map_err(expression_error_to_dynamodb)?;
+                collect_names_from_update(&parsed, &mut used_names);
+                collect_values_from_update(&parsed, &mut used_values);
+            }
+            validate_no_unused_names(&input.expression_attribute_names, &used_names)?;
+            validate_no_unused_values(&input.expression_attribute_values, &used_values)?;
+        }
+
+        // Validate update expression: key attributes cannot be modified,
+        // and paths must not overlap.
+        if let Some(ref update_expr) = input.update_expression {
+            let parsed = parse_update(update_expr).map_err(expression_error_to_dynamodb)?;
+            validate_update_paths(
+                &parsed,
+                &table.key_schema,
+                &input.expression_attribute_names,
+            )?;
+        }
 
         // Evaluate condition expression.
         if let Some(ref condition) = input.condition_expression {
@@ -325,10 +706,14 @@ impl RustStackDynamoDB {
             }
         }
 
-        // Require update expression.
-        if input.update_expression.is_none() {
-            return Err(DynamoDBError::validation("UpdateExpression is required"));
-        }
+        // Determine if the update is REMOVE-only (for non-existent item logic).
+        let is_remove_only = input.update_expression.as_ref().is_some_and(|expr| {
+            let upper = expr.trim().to_ascii_uppercase();
+            upper.starts_with("REMOVE")
+                && !upper.contains("SET ")
+                && !upper.contains("ADD ")
+                && !upper.contains("DELETE ")
+        });
 
         // Apply update expression.
         if let Some(ref update_expr) = input.update_expression {
@@ -341,6 +726,23 @@ impl RustStackDynamoDB {
             item = ctx
                 .apply_update(&parsed)
                 .map_err(expression_error_to_dynamodb)?;
+        }
+
+        // If the original item didn't exist and the update only contains REMOVE
+        // operations, the resulting item would only have key attributes. In this
+        // case DynamoDB does NOT create the item.
+        let item_not_stored = existing.is_none()
+            && is_remove_only
+            && item_has_only_key_attrs(&item, &table.key_schema);
+
+        if item_not_stored {
+            // Do not store the item. Return empty attributes for all ReturnValues
+            // variants since there is no old item and no new item to return.
+            return Ok(UpdateItemOutput {
+                attributes: HashMap::new(),
+                consumed_capacity: None,
+                item_collection_metrics: None,
+            });
         }
 
         // Validate updated item size.
@@ -357,16 +759,14 @@ impl RustStackDynamoDB {
             .put_item(item.clone())
             .map_err(storage_error_to_dynamodb)?;
 
-        let attributes = match input.return_values {
-            Some(ref rv) if rv.as_str() == "ALL_OLD" => old_item.or(existing).unwrap_or_default(),
-            Some(ref rv) if rv.as_str() == "ALL_NEW" => item,
-            Some(ref rv) if rv.as_str() == "UPDATED_OLD" => {
-                // Return only updated attributes from old item.
-                old_item.or(existing).unwrap_or_default()
-            }
-            Some(ref rv) if rv.as_str() == "UPDATED_NEW" => item,
-            _ => HashMap::new(),
-        };
+        let old_for_return = old_item.or(existing);
+
+        let attributes = compute_update_return_values(
+            input.return_values.as_ref(),
+            old_for_return.as_ref(),
+            &item,
+            &table.key_schema,
+        );
 
         Ok(UpdateItemOutput {
             attributes,
@@ -382,16 +782,134 @@ impl RustStackDynamoDB {
 
 impl RustStackDynamoDB {
     /// Handle `Query`.
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn handle_query(&self, input: QueryInput) -> Result<QueryOutput, DynamoDBError> {
+    #[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
+    pub fn handle_query(&self, mut input: QueryInput) -> Result<QueryOutput, DynamoDBError> {
         let table = self.state.require_table(&input.table_name)?;
 
-        // Parse key condition expression.
+        // Validate Select parameter.
+        validate_select(
+            input.select.as_ref(),
+            input.projection_expression.is_some(),
+            !input.attributes_to_get.is_empty(),
+        )?;
+
+        // Validate Limit: must be > 0 if specified.
+        if let Some(limit) = input.limit {
+            if limit <= 0 {
+                return Err(DynamoDBError::validation("Limit must be greater than 0"));
+            }
+        }
+
+        // Reject mixing non-expression parameter AttributesToGet with expression
+        // parameters (FilterExpression, KeyConditionExpression, ProjectionExpression).
+        if !input.attributes_to_get.is_empty() {
+            let mut expr_params = Vec::new();
+            if input.filter_expression.is_some() {
+                expr_params.push("FilterExpression");
+            }
+            if input.key_condition_expression.is_some() {
+                expr_params.push("KeyConditionExpression");
+            }
+            if input.projection_expression.is_some() {
+                expr_params.push("ProjectionExpression");
+            }
+            if !expr_params.is_empty() {
+                return Err(DynamoDBError::validation(format!(
+                    "Can not use both expression and non-expression parameters in the same \
+                     request: Non-expression parameters: {{AttributesToGet}} Expression \
+                     parameters: {{{}}}",
+                    expr_params.join(", ")
+                )));
+            }
+        }
+
+        // Reject using both KeyConditions and KeyConditionExpression.
+        if !input.key_conditions.is_empty() && input.key_condition_expression.is_some() {
+            return Err(DynamoDBError::validation(
+                "Can not use both expression and non-expression parameters in the same request: \
+                 Non-expression parameters: {KeyConditions} Expression parameters: \
+                 {KeyConditionExpression}",
+            ));
+        }
+
+        // Legacy API: convert KeyConditions to KeyConditionExpression.
+        if !input.key_conditions.is_empty() && input.key_condition_expression.is_none() {
+            let (expr, names, values) = convert_conditions_to_expression(
+                &input.key_conditions,
+                None, // KeyConditions are always AND-joined
+            );
+            input.key_condition_expression = Some(expr);
+            merge_expression_names(&mut input.expression_attribute_names, names);
+            merge_expression_values(&mut input.expression_attribute_values, values);
+        }
+
+        // Legacy API: convert QueryFilter to FilterExpression.
+        if !input.query_filter.is_empty() && input.filter_expression.is_none() {
+            let (expr, names, values) = convert_conditions_to_expression(
+                &input.query_filter,
+                input.conditional_operator.as_ref(),
+            );
+            input.filter_expression = Some(expr);
+            merge_expression_names(&mut input.expression_attribute_names, names);
+            merge_expression_values(&mut input.expression_attribute_values, values);
+        }
+
+        // Legacy API: convert AttributesToGet to ProjectionExpression.
+        if !input.attributes_to_get.is_empty() && input.projection_expression.is_none() {
+            input.projection_expression = Some(convert_attributes_to_get(&input.attributes_to_get));
+        }
+
+        // Parse key condition expression (must exist for Query).
         let key_condition = input.key_condition_expression.as_deref().ok_or_else(|| {
             DynamoDBError::validation("KeyConditionExpression is required for Query")
         })?;
 
+        // Reject empty key condition expression (before parsing attempt).
+        if key_condition.trim().is_empty() {
+            return Err(DynamoDBError::validation(
+                "Invalid KeyConditionExpression: The expression can not be empty;",
+            ));
+        }
+
+        // Reject empty filter expression (before parsing attempt).
+        validate_filter_not_empty(input.filter_expression.as_deref())?;
+
+        // Validate unused expression attribute names/values.
+        {
+            let mut used_names = HashSet::new();
+            let mut used_values = HashSet::new();
+            {
+                let parsed =
+                    parse_condition(key_condition).map_err(expression_error_to_dynamodb)?;
+                collect_names_from_expr(&parsed, &mut used_names);
+                collect_values_from_expr(&parsed, &mut used_values);
+            }
+            if let Some(ref filter) = input.filter_expression {
+                let parsed = parse_condition(filter).map_err(expression_error_to_dynamodb)?;
+                collect_names_from_expr(&parsed, &mut used_names);
+                collect_values_from_expr(&parsed, &mut used_values);
+
+                // FilterExpression must not reference key attributes.
+                validate_filter_no_key_attrs(
+                    &parsed,
+                    &table.key_schema,
+                    &input.expression_attribute_names,
+                )?;
+            }
+            if let Some(ref proj) = input.projection_expression {
+                let paths = parse_projection(proj).map_err(expression_error_to_dynamodb)?;
+                collect_names_from_projection(&paths, &mut used_names);
+            }
+            validate_no_unresolved_names(&input.expression_attribute_names, &used_names)?;
+            validate_no_unused_names(&input.expression_attribute_names, &used_names)?;
+            validate_no_unused_values(&input.expression_attribute_values, &used_values)?;
+        }
+
         let expr = parse_condition(key_condition).map_err(expression_error_to_dynamodb)?;
+
+        // Validate key condition: reject OR, NOT, non-key attributes, forbidden
+        // operators.
+        validate_key_condition_expr(&expr, &table.key_schema, &input.expression_attribute_names)?;
 
         // Extract partition key value and sort condition from the parsed expression.
         let (partition_value, sort_condition) = extract_key_condition(
@@ -473,6 +991,17 @@ impl RustStackDynamoDB {
             build_last_evaluated_key(&table.key_schema, &pk.partition_key, sort_av.as_ref())
         });
 
+        // If Select=COUNT, return only the count (no items).
+        if input.select == Some(Select::Count) {
+            return Ok(QueryOutput {
+                items: Vec::new(),
+                count,
+                scanned_count,
+                last_evaluated_key: last_evaluated_key.unwrap_or_default(),
+                consumed_capacity: None,
+            });
+        }
+
         Ok(QueryOutput {
             items,
             count,
@@ -483,9 +1012,52 @@ impl RustStackDynamoDB {
     }
 
     /// Handle `Scan`.
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn handle_scan(&self, input: ScanInput) -> Result<ScanOutput, DynamoDBError> {
+    #[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
+    pub fn handle_scan(&self, mut input: ScanInput) -> Result<ScanOutput, DynamoDBError> {
         let table = self.state.require_table(&input.table_name)?;
+
+        // Validate Select parameter.
+        validate_select(
+            input.select.as_ref(),
+            input.projection_expression.is_some(),
+            !input.attributes_to_get.is_empty(),
+        )?;
+
+        // Legacy API: convert ScanFilter to FilterExpression.
+        if !input.scan_filter.is_empty() && input.filter_expression.is_none() {
+            let (expr, names, values) = convert_conditions_to_expression(
+                &input.scan_filter,
+                input.conditional_operator.as_ref(),
+            );
+            input.filter_expression = Some(expr);
+            merge_expression_names(&mut input.expression_attribute_names, names);
+            merge_expression_values(&mut input.expression_attribute_values, values);
+        }
+
+        // Legacy API: convert AttributesToGet to ProjectionExpression.
+        if !input.attributes_to_get.is_empty() && input.projection_expression.is_none() {
+            input.projection_expression = Some(convert_attributes_to_get(&input.attributes_to_get));
+        }
+
+        // Reject empty filter expression (before parsing attempt).
+        validate_filter_not_empty(input.filter_expression.as_deref())?;
+
+        // Validate unused expression attribute names/values.
+        {
+            let mut used_names = HashSet::new();
+            let mut used_values = HashSet::new();
+            if let Some(ref filter) = input.filter_expression {
+                let parsed = parse_condition(filter).map_err(expression_error_to_dynamodb)?;
+                collect_names_from_expr(&parsed, &mut used_names);
+                collect_values_from_expr(&parsed, &mut used_values);
+            }
+            if let Some(ref proj) = input.projection_expression {
+                let paths = parse_projection(proj).map_err(expression_error_to_dynamodb)?;
+                collect_names_from_projection(&paths, &mut used_names);
+            }
+            validate_no_unused_names(&input.expression_attribute_names, &used_names)?;
+            validate_no_unused_values(&input.expression_attribute_values, &used_values)?;
+        }
 
         let limit = input
             .limit
@@ -550,6 +1122,17 @@ impl RustStackDynamoDB {
                 .and_then(SortableAttributeValue::to_attribute_value);
             build_last_evaluated_key(&table.key_schema, &pk.partition_key, sort_av.as_ref())
         });
+
+        // If Select=COUNT, return only the count (no items).
+        if input.select == Some(Select::Count) {
+            return Ok(ScanOutput {
+                items: Vec::new(),
+                count,
+                scanned_count,
+                last_evaluated_key: last_evaluated_key.unwrap_or_default(),
+                consumed_capacity: None,
+            });
+        }
 
         Ok(ScanOutput {
             items,
@@ -669,8 +1252,880 @@ impl RustStackDynamoDB {
 }
 
 // ---------------------------------------------------------------------------
+// Legacy API conversion functions
+// ---------------------------------------------------------------------------
+
+/// Convert a legacy `Condition` map (used by `KeyConditions`, `QueryFilter`,
+/// `ScanFilter`) into an expression string with synthetic attribute name and
+/// value placeholders.
+///
+/// Returns `(expression_string, name_map, value_map)`.
+fn convert_conditions_to_expression(
+    conditions: &HashMap<String, Condition>,
+    conditional_operator: Option<&ConditionalOperator>,
+) -> (
+    String,
+    HashMap<String, String>,
+    HashMap<String, AttributeValue>,
+) {
+    let joiner = match conditional_operator {
+        Some(ConditionalOperator::Or) => " OR ",
+        _ => " AND ",
+    };
+
+    let mut names: HashMap<String, String> = HashMap::new();
+    let mut values: HashMap<String, AttributeValue> = HashMap::new();
+    let mut parts: Vec<String> = Vec::new();
+    let mut counter: usize = 0;
+
+    // Sort keys for deterministic output (important for tests).
+    let mut sorted_keys: Vec<&String> = conditions.keys().collect();
+    sorted_keys.sort();
+
+    for attr_name in sorted_keys {
+        let Some(condition) = conditions.get(attr_name) else {
+            continue;
+        };
+        let name_placeholder = format!("#lcattr{counter}");
+        names.insert(name_placeholder.clone(), attr_name.clone());
+
+        let fragment = build_condition_fragment(
+            &name_placeholder,
+            &condition.comparison_operator,
+            &condition.attribute_value_list,
+            &mut values,
+            &mut counter,
+        );
+        parts.push(fragment);
+        counter += 1;
+    }
+
+    (parts.join(joiner), names, values)
+}
+
+/// Convert a legacy `Expected` map into a `ConditionExpression` string.
+///
+/// Returns `(expression_string, name_map, value_map)`.
+fn convert_expected_to_condition(
+    expected: &HashMap<String, ExpectedAttributeValue>,
+    conditional_operator: Option<&ConditionalOperator>,
+) -> (
+    String,
+    HashMap<String, String>,
+    HashMap<String, AttributeValue>,
+) {
+    let joiner = match conditional_operator {
+        Some(ConditionalOperator::Or) => " OR ",
+        _ => " AND ",
+    };
+
+    let mut names: HashMap<String, String> = HashMap::new();
+    let mut values: HashMap<String, AttributeValue> = HashMap::new();
+    let mut parts: Vec<String> = Vec::new();
+    let mut counter: usize = 0;
+
+    // Sort keys for deterministic output.
+    let mut sorted_keys: Vec<&String> = expected.keys().collect();
+    sorted_keys.sort();
+
+    for attr_name in sorted_keys {
+        let Some(exp) = expected.get(attr_name) else {
+            continue;
+        };
+        let name_placeholder = format!("#lcattr{counter}");
+        names.insert(name_placeholder.clone(), attr_name.clone());
+
+        if let Some(ref comp_op) = exp.comparison_operator {
+            // Extended form: uses comparison_operator with attribute_value_list.
+            let fragment = build_condition_fragment(
+                &name_placeholder,
+                comp_op,
+                &exp.attribute_value_list,
+                &mut values,
+                &mut counter,
+            );
+            parts.push(fragment);
+        } else if let Some(ref value) = exp.value {
+            // Simple form with value: attribute must equal value.
+            let val_placeholder = format!(":lcval{counter}");
+            values.insert(val_placeholder.clone(), value.clone());
+            parts.push(format!("{name_placeholder} = {val_placeholder}"));
+        } else if let Some(false) = exp.exists {
+            // exists=false means attribute must not exist.
+            parts.push(format!("attribute_not_exists({name_placeholder})"));
+        } else {
+            // exists=true (or default): attribute must exist.
+            parts.push(format!("attribute_exists({name_placeholder})"));
+        }
+
+        counter += 1;
+    }
+
+    if parts.is_empty() {
+        // Fallback: should not happen with non-empty expected map, but be safe.
+        return (String::new(), names, values);
+    }
+
+    (parts.join(joiner), names, values)
+}
+
+/// Convert a legacy `AttributeUpdates` map into an `UpdateExpression` string.
+///
+/// Returns `(expression_string, name_map, value_map)`.
+fn convert_attribute_updates_to_expression(
+    updates: &HashMap<String, AttributeValueUpdate>,
+) -> (
+    String,
+    HashMap<String, String>,
+    HashMap<String, AttributeValue>,
+) {
+    let mut names: HashMap<String, String> = HashMap::new();
+    let mut values: HashMap<String, AttributeValue> = HashMap::new();
+
+    let mut set_parts: Vec<String> = Vec::new();
+    let mut remove_parts: Vec<String> = Vec::new();
+    let mut add_parts: Vec<String> = Vec::new();
+    let mut delete_parts: Vec<String> = Vec::new();
+
+    let mut counter: usize = 0;
+
+    // Sort keys for deterministic output.
+    let mut sorted_keys: Vec<&String> = updates.keys().collect();
+    sorted_keys.sort();
+
+    for attr_name in sorted_keys {
+        let Some(update) = updates.get(attr_name) else {
+            continue;
+        };
+        let name_placeholder = format!("#lcattr{counter}");
+        names.insert(name_placeholder.clone(), attr_name.clone());
+
+        let action = update.action.clone().unwrap_or(AttributeAction::Put);
+
+        match action {
+            AttributeAction::Put => {
+                if let Some(ref val) = update.value {
+                    let val_placeholder = format!(":lcval{counter}");
+                    values.insert(val_placeholder.clone(), val.clone());
+                    set_parts.push(format!("{name_placeholder} = {val_placeholder}"));
+                }
+                // PUT without value is a no-op per DynamoDB behaviour.
+            }
+            AttributeAction::Add => {
+                if let Some(ref val) = update.value {
+                    let val_placeholder = format!(":lcval{counter}");
+                    values.insert(val_placeholder.clone(), val.clone());
+                    add_parts.push(format!("{name_placeholder} {val_placeholder}"));
+                }
+            }
+            AttributeAction::Delete => {
+                if let Some(ref val) = update.value {
+                    // DELETE with value: remove elements from a set.
+                    let val_placeholder = format!(":lcval{counter}");
+                    values.insert(val_placeholder.clone(), val.clone());
+                    delete_parts.push(format!("{name_placeholder} {val_placeholder}"));
+                } else {
+                    // DELETE without value: remove the attribute entirely.
+                    remove_parts.push(name_placeholder.clone());
+                }
+            }
+        }
+
+        counter += 1;
+    }
+
+    let mut clauses: Vec<String> = Vec::new();
+    if !set_parts.is_empty() {
+        clauses.push(format!("SET {}", set_parts.join(", ")));
+    }
+    if !remove_parts.is_empty() {
+        clauses.push(format!("REMOVE {}", remove_parts.join(", ")));
+    }
+    if !add_parts.is_empty() {
+        clauses.push(format!("ADD {}", add_parts.join(", ")));
+    }
+    if !delete_parts.is_empty() {
+        clauses.push(format!("DELETE {}", delete_parts.join(", ")));
+    }
+
+    (clauses.join(" "), names, values)
+}
+
+/// Convert a legacy `AttributesToGet` list into a `ProjectionExpression` string.
+///
+/// Since attribute names may contain reserved words or special characters,
+/// we emit them directly (without placeholders) joined by commas. This is
+/// sufficient because `AttributesToGet` was always simple top-level attribute
+/// names.
+fn convert_attributes_to_get(attrs: &[String]) -> String {
+    attrs.join(", ")
+}
+
+/// Build a single condition fragment for a given comparison operator and values.
+fn build_condition_fragment(
+    name_placeholder: &str,
+    op: &ComparisonOperator,
+    value_list: &[AttributeValue],
+    values: &mut HashMap<String, AttributeValue>,
+    counter: &mut usize,
+) -> String {
+    match op {
+        ComparisonOperator::Eq => {
+            let val_ph = format!(":lcval{counter}");
+            if let Some(v) = value_list.first() {
+                values.insert(val_ph.clone(), v.clone());
+            }
+            format!("{name_placeholder} = {val_ph}")
+        }
+        ComparisonOperator::Ne => {
+            let val_ph = format!(":lcval{counter}");
+            if let Some(v) = value_list.first() {
+                values.insert(val_ph.clone(), v.clone());
+            }
+            format!("{name_placeholder} <> {val_ph}")
+        }
+        ComparisonOperator::Lt => {
+            let val_ph = format!(":lcval{counter}");
+            if let Some(v) = value_list.first() {
+                values.insert(val_ph.clone(), v.clone());
+            }
+            format!("{name_placeholder} < {val_ph}")
+        }
+        ComparisonOperator::Le => {
+            let val_ph = format!(":lcval{counter}");
+            if let Some(v) = value_list.first() {
+                values.insert(val_ph.clone(), v.clone());
+            }
+            format!("{name_placeholder} <= {val_ph}")
+        }
+        ComparisonOperator::Gt => {
+            let val_ph = format!(":lcval{counter}");
+            if let Some(v) = value_list.first() {
+                values.insert(val_ph.clone(), v.clone());
+            }
+            format!("{name_placeholder} > {val_ph}")
+        }
+        ComparisonOperator::Ge => {
+            let val_ph = format!(":lcval{counter}");
+            if let Some(v) = value_list.first() {
+                values.insert(val_ph.clone(), v.clone());
+            }
+            format!("{name_placeholder} >= {val_ph}")
+        }
+        ComparisonOperator::Null => {
+            format!("attribute_not_exists({name_placeholder})")
+        }
+        ComparisonOperator::NotNull => {
+            format!("attribute_exists({name_placeholder})")
+        }
+        ComparisonOperator::Contains => {
+            let val_ph = format!(":lcval{counter}");
+            if let Some(v) = value_list.first() {
+                values.insert(val_ph.clone(), v.clone());
+            }
+            format!("contains({name_placeholder}, {val_ph})")
+        }
+        ComparisonOperator::NotContains => {
+            let val_ph = format!(":lcval{counter}");
+            if let Some(v) = value_list.first() {
+                values.insert(val_ph.clone(), v.clone());
+            }
+            format!("NOT contains({name_placeholder}, {val_ph})")
+        }
+        ComparisonOperator::BeginsWith => {
+            let val_ph = format!(":lcval{counter}");
+            if let Some(v) = value_list.first() {
+                values.insert(val_ph.clone(), v.clone());
+            }
+            format!("begins_with({name_placeholder}, {val_ph})")
+        }
+        ComparisonOperator::In => {
+            let mut in_vals = Vec::new();
+            for (i, v) in value_list.iter().enumerate() {
+                let val_ph = format!(":lcval{counter}i{i}");
+                values.insert(val_ph.clone(), v.clone());
+                in_vals.push(val_ph);
+            }
+            format!("{name_placeholder} IN ({})", in_vals.join(", "))
+        }
+        ComparisonOperator::Between => {
+            let low_ph = format!(":lcval{counter}lo");
+            let high_ph = format!(":lcval{counter}hi");
+            if let Some(v) = value_list.first() {
+                values.insert(low_ph.clone(), v.clone());
+            }
+            if let Some(v) = value_list.get(1) {
+                values.insert(high_ph.clone(), v.clone());
+            }
+            format!("{name_placeholder} BETWEEN {low_ph} AND {high_ph}")
+        }
+    }
+}
+
+/// Merge generated expression attribute names into an existing map.
+fn merge_expression_names(target: &mut HashMap<String, String>, source: HashMap<String, String>) {
+    for (k, v) in source {
+        target.entry(k).or_insert(v);
+    }
+}
+
+/// Merge generated expression attribute values into an existing map.
+fn merge_expression_values(
+    target: &mut HashMap<String, AttributeValue>,
+    source: HashMap<String, AttributeValue>,
+) {
+    for (k, v) in source {
+        target.entry(k).or_insert(v);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Expression attribute name/value usage validation
+// ---------------------------------------------------------------------------
+
+/// Validate that expression attribute values do not contain empty sets.
+///
+/// DynamoDB does not allow empty sets (SS, NS, BS with zero elements).
+fn validate_no_empty_sets(values: &HashMap<String, AttributeValue>) -> Result<(), DynamoDBError> {
+    for (key, val) in values {
+        if is_empty_set(val) {
+            return Err(DynamoDBError::validation(format!(
+                "One or more parameter values are not valid. The AttributeValue for a member \
+                 of the ExpressionAttributeValues ({key}) contains an empty set"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Reject an empty condition expression.
+fn validate_condition_not_empty(condition: Option<&str>) -> Result<(), DynamoDBError> {
+    if let Some(cond) = condition {
+        if cond.trim().is_empty() {
+            return Err(DynamoDBError::validation(
+                "Invalid ConditionExpression: The expression can not be empty;",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Reject an empty filter expression.
+fn validate_filter_not_empty(filter: Option<&str>) -> Result<(), DynamoDBError> {
+    if let Some(f) = filter {
+        if f.trim().is_empty() {
+            return Err(DynamoDBError::validation(
+                "Invalid FilterExpression: The expression can not be empty;",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validate that a FilterExpression does not reference any key attributes
+/// (partition key or sort key). DynamoDB forbids filtering on key attributes;
+/// users must use `KeyConditionExpression` instead.
+fn validate_filter_no_key_attrs(
+    expr: &crate::expression::Expr,
+    key_schema: &KeySchema,
+    names: &HashMap<String, String>,
+) -> Result<(), DynamoDBError> {
+    let mut paths = HashSet::new();
+    collect_paths_from_expr(expr, &mut paths);
+    for path_name in &paths {
+        // Resolve `#placeholder` references to actual attribute names.
+        let resolved = if path_name.starts_with('#') {
+            names.get(path_name.as_str()).map(String::as_str)
+        } else {
+            Some(path_name.as_str())
+        };
+        if let Some(attr_name) = resolved {
+            if is_key_attribute(attr_name, key_schema) {
+                return Err(DynamoDBError::validation(format!(
+                    "Filter Expression can not contain key attribute {attr_name}",
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate that an item's attributes do not contain empty sets.
+fn validate_item_no_empty_sets(
+    item: &HashMap<String, AttributeValue>,
+) -> Result<(), DynamoDBError> {
+    for val in item.values() {
+        if contains_empty_set(val) {
+            return Err(DynamoDBError::validation(
+                "One or more parameter values were invalid: An number of elements of the \
+                 input set is empty",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Check if an `AttributeValue` is an empty set.
+fn is_empty_set(val: &AttributeValue) -> bool {
+    matches!(val, AttributeValue::Ss(v) if v.is_empty())
+        || matches!(val, AttributeValue::Ns(v) if v.is_empty())
+        || matches!(val, AttributeValue::Bs(v) if v.is_empty())
+}
+
+/// Check if an `AttributeValue` contains an empty set (including nested).
+fn contains_empty_set(val: &AttributeValue) -> bool {
+    if is_empty_set(val) {
+        return true;
+    }
+    match val {
+        AttributeValue::L(list) => list.iter().any(contains_empty_set),
+        AttributeValue::M(map) => map.values().any(contains_empty_set),
+        _ => false,
+    }
+}
+
+/// Validate that all provided expression attribute names and values are
+/// actually used in the parsed expressions. DynamoDB returns a
+/// `ValidationException` if any unused names or values are present.
+///
+/// The `used_names` and `used_values` sets should be pre-populated by calling
+/// the `collect_*` functions on all parsed expression ASTs.
+fn validate_no_unused_names(
+    provided_names: &HashMap<String, String>,
+    used_names: &HashSet<String>,
+) -> Result<(), DynamoDBError> {
+    let unused: Vec<&str> = provided_names
+        .keys()
+        .filter(|k| !used_names.contains(k.as_str()))
+        .map(String::as_str)
+        .collect();
+    if !unused.is_empty() {
+        return Err(DynamoDBError::validation(format!(
+            "Value provided in ExpressionAttributeNames unused in expressions: keys: {{{}}}",
+            unused.join(", ")
+        )));
+    }
+    Ok(())
+}
+
+/// Validate that all provided expression attribute values are used.
+fn validate_no_unused_values(
+    provided_values: &HashMap<String, AttributeValue>,
+    used_values: &HashSet<String>,
+) -> Result<(), DynamoDBError> {
+    let unused: Vec<&str> = provided_values
+        .keys()
+        .filter(|k| !used_values.contains(k.as_str()))
+        .map(String::as_str)
+        .collect();
+    if !unused.is_empty() {
+        return Err(DynamoDBError::validation(format!(
+            "Value provided in ExpressionAttributeValues unused in expressions: keys: {{{}}}",
+            unused.join(", ")
+        )));
+    }
+    Ok(())
+}
+
+/// Validate that all expression attribute name references used in expressions
+/// are provided in `ExpressionAttributeNames`.
+fn validate_no_unresolved_names(
+    provided_names: &HashMap<String, String>,
+    used_names: &HashSet<String>,
+) -> Result<(), DynamoDBError> {
+    for name in used_names {
+        if name.starts_with('#') && !provided_names.contains_key(name.as_str()) {
+            return Err(DynamoDBError::validation(format!(
+                "Value provided in ExpressionAttributeNames unused in expressions: \
+                 unresolved attribute name reference: {name}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Update expression validation
+// ---------------------------------------------------------------------------
+
+/// Resolve the top-level attribute name from a path element.
+fn resolve_path_top_name(path: &AttributePath, names: &HashMap<String, String>) -> Option<String> {
+    let PathElement::Attribute(name) = path.elements.first()? else {
+        return None;
+    };
+    if name.starts_with('#') {
+        names.get(name.as_str()).cloned()
+    } else {
+        Some(name.clone())
+    }
+}
+
+/// Resolve all path elements to concrete names/indices for comparison.
+fn resolve_path_elements(
+    path: &AttributePath,
+    names: &HashMap<String, String>,
+) -> Vec<ResolvedPathElement> {
+    path.elements
+        .iter()
+        .map(|elem| match elem {
+            PathElement::Attribute(name) => {
+                let resolved = if name.starts_with('#') {
+                    names
+                        .get(name.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| name.clone())
+                } else {
+                    name.clone()
+                };
+                ResolvedPathElement::Attribute(resolved)
+            }
+            PathElement::Index(idx) => ResolvedPathElement::Index(*idx),
+        })
+        .collect()
+}
+
+/// A resolved path element (after `#name` substitution).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ResolvedPathElement {
+    /// A resolved attribute name.
+    Attribute(String),
+    /// A list index.
+    Index(usize),
+}
+
+/// Check whether two resolved paths overlap (one is a prefix of the other or they are equal).
+fn paths_overlap(a: &[ResolvedPathElement], b: &[ResolvedPathElement]) -> bool {
+    let min_len = a.len().min(b.len());
+    for i in 0..min_len {
+        if a[i] != b[i] {
+            return false;
+        }
+    }
+    true
+}
+
+/// Check whether two resolved paths conflict (one uses dot access and the other uses
+/// index access at the same position).
+fn paths_conflict(a: &[ResolvedPathElement], b: &[ResolvedPathElement]) -> bool {
+    let min_len = a.len().min(b.len());
+    for i in 0..min_len {
+        match (&a[i], &b[i]) {
+            // Same attribute or same index: continue
+            (ResolvedPathElement::Attribute(na), ResolvedPathElement::Attribute(nb)) => {
+                if na != nb {
+                    return false;
+                }
+            }
+            (ResolvedPathElement::Index(ia), ResolvedPathElement::Index(ib)) => {
+                if ia != ib {
+                    return false;
+                }
+            }
+            // One uses dot, other uses index at same position: conflict
+            (ResolvedPathElement::Attribute(_), ResolvedPathElement::Index(_))
+            | (ResolvedPathElement::Index(_), ResolvedPathElement::Attribute(_)) => {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Validate update expression paths: reject key attribute modifications and overlapping paths.
+fn validate_update_paths(
+    update: &UpdateExpr,
+    key_schema: &KeySchema,
+    names: &HashMap<String, String>,
+) -> Result<(), DynamoDBError> {
+    // Collect all target paths from the update expression.
+    let mut all_paths: Vec<&AttributePath> = Vec::new();
+    for action in &update.set_actions {
+        all_paths.push(&action.path);
+    }
+    for path in &update.remove_paths {
+        all_paths.push(path);
+    }
+    for action in &update.add_actions {
+        all_paths.push(&action.path);
+    }
+    for action in &update.delete_actions {
+        all_paths.push(&action.path);
+    }
+
+    // Check that no path targets a key attribute (top-level only).
+    let key_names: Vec<&str> = {
+        let mut v = vec![key_schema.partition_key.name.as_str()];
+        if let Some(ref sk) = key_schema.sort_key {
+            v.push(sk.name.as_str());
+        }
+        v
+    };
+
+    for path in &all_paths {
+        if let Some(top_name) = resolve_path_top_name(path, names) {
+            // Only top-level paths that directly target a key attribute are rejected.
+            // Nested paths like key_attr.sub_attr are not key modifications.
+            if path.elements.len() == 1 && key_names.contains(&top_name.as_str()) {
+                return Err(DynamoDBError::validation(format!(
+                    "Cannot update attribute ({top_name}). This attribute is part of the key"
+                )));
+            }
+        }
+    }
+
+    // Check for overlapping or conflicting paths.
+    let resolved: Vec<Vec<ResolvedPathElement>> = all_paths
+        .iter()
+        .map(|p| resolve_path_elements(p, names))
+        .collect();
+
+    for i in 0..resolved.len() {
+        for j in (i + 1)..resolved.len() {
+            if paths_overlap(&resolved[i], &resolved[j]) {
+                return Err(DynamoDBError::validation(
+                    "Invalid UpdateExpression: Two document paths overlap with each other; \
+                     must remove or rewrite one of these paths",
+                ));
+            }
+            if paths_conflict(&resolved[i], &resolved[j]) {
+                return Err(DynamoDBError::validation(
+                    "Invalid UpdateExpression: Two document paths conflict with each other; \
+                     must remove or rewrite one of these paths",
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// ReturnValues helpers
+// ---------------------------------------------------------------------------
+
+/// Collect the set of attribute keys that differ between old and new items.
+fn collect_changed_keys(
+    old_item: &HashMap<String, AttributeValue>,
+    new_item: &HashMap<String, AttributeValue>,
+) -> Vec<String> {
+    let mut changed = Vec::new();
+
+    // Attributes in new that are absent or different in old.
+    for (key, new_val) in new_item {
+        match old_item.get(key) {
+            Some(old_val) if old_val == new_val => {}
+            _ => changed.push(key.clone()),
+        }
+    }
+
+    // Attributes in old that are absent in new (removed).
+    for key in old_item.keys() {
+        if !new_item.contains_key(key) {
+            changed.push(key.clone());
+        }
+    }
+
+    changed
+}
+
+/// Check whether an item only contains key attributes (partition key and
+/// optional sort key). Used to detect REMOVE-only updates on non-existent
+/// items where the result would be an item with only key attributes, which
+/// DynamoDB does not store.
+fn item_has_only_key_attrs(item: &HashMap<String, AttributeValue>, key_schema: &KeySchema) -> bool {
+    item.keys().all(|k| {
+        k == &key_schema.partition_key.name
+            || key_schema.sort_key.as_ref().is_some_and(|sk| k == &sk.name)
+    })
+}
+
+/// Compute the return value attributes for UpdateItem based on the
+/// `ReturnValues` parameter.
+///
+/// - `NONE` / `None`: empty map
+/// - `ALL_OLD`: all attributes of the old item (or empty if no old item)
+/// - `ALL_NEW`: all attributes of the new item
+/// - `UPDATED_OLD`: only the changed attributes from the old item, excluding
+///   key attributes
+/// - `UPDATED_NEW`: only the changed attributes from the new item, excluding
+///   key attributes
+fn compute_update_return_values(
+    return_values: Option<&ReturnValue>,
+    old_item: Option<&HashMap<String, AttributeValue>>,
+    new_item: &HashMap<String, AttributeValue>,
+    key_schema: &KeySchema,
+) -> HashMap<String, AttributeValue> {
+    let empty = HashMap::new();
+    match return_values {
+        Some(ReturnValue::AllOld) => old_item.cloned().unwrap_or_default(),
+        Some(ReturnValue::AllNew) => new_item.clone(),
+        Some(ReturnValue::UpdatedOld) => {
+            let old = old_item.unwrap_or(&empty);
+            let changed = collect_changed_keys(old, new_item);
+            let mut result = HashMap::new();
+            for key in changed {
+                // Exclude key attributes from UPDATED_OLD.
+                if is_key_attribute(&key, key_schema) {
+                    continue;
+                }
+                if let Some(val) = old.get(&key) {
+                    result.insert(key, val.clone());
+                }
+            }
+            result
+        }
+        Some(ReturnValue::UpdatedNew) => {
+            let old = old_item.unwrap_or(&empty);
+            let changed = collect_changed_keys(old, new_item);
+            let mut result = HashMap::new();
+            for key in changed {
+                // Exclude key attributes from UPDATED_NEW.
+                if is_key_attribute(&key, key_schema) {
+                    continue;
+                }
+                if let Some(val) = new_item.get(&key) {
+                    result.insert(key, val.clone());
+                }
+            }
+            result
+        }
+        _ => HashMap::new(),
+    }
+}
+
+/// Check if an attribute name is a key attribute (partition or sort key).
+fn is_key_attribute(name: &str, key_schema: &KeySchema) -> bool {
+    name == key_schema.partition_key.name
+        || key_schema
+            .sort_key
+            .as_ref()
+            .is_some_and(|sk| name == sk.name)
+}
+
+// ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// CreateTable validation helpers
+// ---------------------------------------------------------------------------
+
+/// Validate `KeySchema` structure: exactly 1 HASH, at most 1 RANGE, max 2 elements.
+fn validate_key_schema_structure(
+    elements: &[ruststack_dynamodb_model::types::KeySchemaElement],
+) -> Result<(), DynamoDBError> {
+    let hash_count = elements
+        .iter()
+        .filter(|e| e.key_type == KeyType::Hash)
+        .count();
+    let range_count = elements
+        .iter()
+        .filter(|e| e.key_type == KeyType::Range)
+        .count();
+
+    if hash_count != 1 {
+        return Err(DynamoDBError::validation(
+            "Invalid KeySchema: Some index key schema element is not valid",
+        ));
+    }
+    if range_count > 1 {
+        return Err(DynamoDBError::validation(
+            "Too many KeySchema elements; expected at most 2",
+        ));
+    }
+    if elements.len() > 2 {
+        return Err(DynamoDBError::validation(
+            "Too many KeySchema elements; expected at most 2",
+        ));
+    }
+    Ok(())
+}
+
+/// Validate `AttributeDefinitions` for duplicates.
+fn validate_attribute_definitions(
+    definitions: &[AttributeDefinition],
+) -> Result<(), DynamoDBError> {
+    let mut seen = HashSet::new();
+    for def in definitions {
+        if !seen.insert(&def.attribute_name) {
+            return Err(DynamoDBError::validation(format!(
+                "Duplicate AttributeName in AttributeDefinitions: {}",
+                def.attribute_name,
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Validate billing mode: unknown values rejected, consistency between billing
+/// mode and provisioned throughput.
+fn validate_billing_mode(
+    billing_mode: Option<&BillingMode>,
+    provisioned_throughput: Option<&ruststack_dynamodb_model::types::ProvisionedThroughput>,
+) -> Result<BillingMode, DynamoDBError> {
+    let mode = billing_mode.cloned().unwrap_or(BillingMode::Provisioned);
+    match &mode {
+        BillingMode::Unknown(val) => {
+            return Err(DynamoDBError::validation(format!(
+                "1 validation error detected: Value '{val}' at 'billingMode' failed to satisfy \
+                 constraint: Member must satisfy enum value set: [PROVISIONED, PAY_PER_REQUEST]"
+            )));
+        }
+        BillingMode::PayPerRequest => {
+            if provisioned_throughput.is_some() {
+                return Err(DynamoDBError::validation(
+                    "One or more parameter values were invalid: Neither ReadCapacityUnits nor \
+                     WriteCapacityUnits can be specified when BillingMode is PAY_PER_REQUEST",
+                ));
+            }
+        }
+        BillingMode::Provisioned => {
+            if provisioned_throughput.is_none() {
+                return Err(DynamoDBError::validation(
+                    "No provisioned throughput specified for the table",
+                ));
+            }
+        }
+    }
+    Ok(mode)
+}
+
+/// Validate that all defined attributes are used as keys in the table or indexes.
+fn validate_no_spurious_attribute_definitions(
+    definitions: &[AttributeDefinition],
+    key_schema: &[ruststack_dynamodb_model::types::KeySchemaElement],
+    gsi_definitions: &[ruststack_dynamodb_model::types::GlobalSecondaryIndex],
+    lsi_definitions: &[ruststack_dynamodb_model::types::LocalSecondaryIndex],
+) -> Result<(), DynamoDBError> {
+    let mut used_attrs = HashSet::new();
+    for elem in key_schema {
+        used_attrs.insert(elem.attribute_name.as_str());
+    }
+    for gsi in gsi_definitions {
+        for elem in &gsi.key_schema {
+            used_attrs.insert(elem.attribute_name.as_str());
+        }
+    }
+    for lsi in lsi_definitions {
+        for elem in &lsi.key_schema {
+            used_attrs.insert(elem.attribute_name.as_str());
+        }
+    }
+
+    let spurious: Vec<&str> = definitions
+        .iter()
+        .filter(|d| !used_attrs.contains(d.attribute_name.as_str()))
+        .map(|d| d.attribute_name.as_str())
+        .collect();
+
+    if !spurious.is_empty() {
+        return Err(DynamoDBError::validation(
+            "Number of attributes in AttributeDefinitions does not exactly match number of \
+             attributes in KeySchema and secondary indexes",
+        ));
+    }
+    Ok(())
+}
 
 /// Parse key schema elements and attribute definitions into a `KeySchema`.
 fn parse_key_schema(
@@ -691,8 +2146,11 @@ fn parse_key_schema(
         .ok_or_else(|| DynamoDBError::validation("Key schema must contain a HASH key element"))?;
 
     let pk_type = find_attribute_type(definitions, &pk_name)?;
+    validate_key_attribute_type(&pk_type, &pk_name)?;
+
     let sk_attr = if let Some(ref sk) = sort_key {
         let sk_type = find_attribute_type(definitions, sk)?;
+        validate_key_attribute_type(&sk_type, sk)?;
         Some(KeyAttribute {
             name: sk.clone(),
             attr_type: sk_type,
@@ -710,6 +2168,20 @@ fn parse_key_schema(
     })
 }
 
+/// Validate that a key attribute type is one of the allowed types (S, N, B).
+fn validate_key_attribute_type(
+    attr_type: &ScalarAttributeType,
+    _attr_name: &str,
+) -> Result<(), DynamoDBError> {
+    if attr_type.is_valid_key_type() {
+        Ok(())
+    } else {
+        Err(DynamoDBError::validation(format!(
+            "Member must satisfy enum value set: [S, N, B], got '{attr_type}'"
+        )))
+    }
+}
+
 fn find_attribute_type(
     definitions: &[AttributeDefinition],
     name: &str,
@@ -720,14 +2192,191 @@ fn find_attribute_type(
         .map(|d| d.attribute_type.clone())
         .ok_or_else(|| {
             DynamoDBError::validation(format!(
-                "Attribute {name} referenced in key schema but not defined in AttributeDefinitions"
+                "One or more parameter values were invalid: Some index key schema elements are \
+                 not valid. The following index key schema element does not have a matching \
+                 AttributeDefinition: {name}"
             ))
         })
+}
+
+/// Resolve an attribute path operand to its real name (resolving `#name` references).
+///
+/// Returns `Some((resolved_name, is_nested))` if the operand is a path, or `None` for
+/// value references.
+fn resolve_kce_path_name(
+    operand: &crate::expression::ast::Operand,
+    names: &HashMap<String, String>,
+) -> Option<(String, bool)> {
+    if let crate::expression::ast::Operand::Path(path) = operand {
+        if path.elements.len() > 1 {
+            return Some(("__nested__".to_owned(), true));
+        }
+        if let Some(crate::expression::ast::PathElement::Attribute(name)) = path.elements.first() {
+            let resolved = if name.starts_with('#') {
+                names
+                    .get(name.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| name.clone())
+            } else {
+                name.clone()
+            };
+            return Some((resolved, false));
+        }
+    }
+    None
+}
+
+/// Validate a resolved path name is a key attribute, rejecting nested paths.
+fn validate_kce_path_is_key(
+    resolved: &str,
+    nested: bool,
+    key_schema: &KeySchema,
+) -> Result<(), DynamoDBError> {
+    if nested {
+        return Err(DynamoDBError::validation(
+            "Key condition expression does not support nested attribute paths",
+        ));
+    }
+    if !is_key_attribute(resolved, key_schema) {
+        return Err(DynamoDBError::validation(format!(
+            "Query condition missed key schema element: {}",
+            key_schema.partition_key.name,
+        )));
+    }
+    Ok(())
+}
+
+/// Recursively count key attribute references in a key condition expression,
+/// rejecting illegal constructs (OR, NOT, IN, `<>`, non-key attributes, etc.).
+fn collect_kce_key_refs(
+    expr: &crate::expression::Expr,
+    key_schema: &KeySchema,
+    names: &HashMap<String, String>,
+    pk_count: &mut u32,
+    sk_count: &mut u32,
+) -> Result<(), DynamoDBError> {
+    use crate::expression::ast::{CompareOp, Expr, FunctionName, LogicalOp};
+
+    match expr {
+        Expr::Compare { left, op, right } => {
+            // Both sides: check path references are key attributes.
+            for operand in [left.as_ref(), right.as_ref()] {
+                if let Some((resolved, nested)) = resolve_kce_path_name(operand, names) {
+                    validate_kce_path_is_key(&resolved, nested, key_schema)?;
+                }
+            }
+            // Count which key attribute this condition references.
+            for operand in [left.as_ref(), right.as_ref()] {
+                if let Some((resolved, _)) = resolve_kce_path_name(operand, names) {
+                    if resolved == key_schema.partition_key.name {
+                        if *op != CompareOp::Eq {
+                            return Err(DynamoDBError::validation(
+                                "Query key condition not supported",
+                            ));
+                        }
+                        *pk_count += 1;
+                    } else if key_schema
+                        .sort_key
+                        .as_ref()
+                        .is_some_and(|sk| sk.name == resolved)
+                    {
+                        if *op == CompareOp::Ne {
+                            return Err(DynamoDBError::validation(
+                                "Unsupported operator on KeyConditionExpression: operator: <>",
+                            ));
+                        }
+                        *sk_count += 1;
+                    }
+                }
+            }
+            Ok(())
+        }
+        Expr::Between { value, .. } => {
+            if let Some((resolved, nested)) = resolve_kce_path_name(value, names) {
+                validate_kce_path_is_key(&resolved, nested, key_schema)?;
+                if resolved == key_schema.partition_key.name {
+                    return Err(DynamoDBError::validation(
+                        "Query key condition not supported",
+                    ));
+                }
+                *sk_count += 1;
+            }
+            Ok(())
+        }
+        Expr::In { .. } => Err(DynamoDBError::validation(
+            "Unsupported operator on KeyConditionExpression: operator: IN",
+        )),
+        Expr::Logical { op, left, right } => {
+            if *op == LogicalOp::Or {
+                return Err(DynamoDBError::validation(
+                    "Unsupported operator in KeyConditionExpression: OR",
+                ));
+            }
+            collect_kce_key_refs(left, key_schema, names, pk_count, sk_count)?;
+            collect_kce_key_refs(right, key_schema, names, pk_count, sk_count)
+        }
+        Expr::Not(_) => Err(DynamoDBError::validation(
+            "Unsupported operator in KeyConditionExpression: NOT",
+        )),
+        Expr::Function { name, args, .. } => match name {
+            FunctionName::BeginsWith => {
+                if let Some(first_arg) = args.first() {
+                    if let Some((resolved, nested)) = resolve_kce_path_name(first_arg, names) {
+                        validate_kce_path_is_key(&resolved, nested, key_schema)?;
+                        if resolved == key_schema.partition_key.name {
+                            return Err(DynamoDBError::validation(
+                                "Query key condition not supported",
+                            ));
+                        }
+                        *sk_count += 1;
+                    }
+                }
+                Ok(())
+            }
+            other => Err(DynamoDBError::validation(format!(
+                "Unsupported function in KeyConditionExpression: {other}",
+            ))),
+        },
+    }
+}
+
+/// Validate a parsed key condition expression.
+///
+/// Rejects patterns not allowed in `KeyConditionExpression`:
+/// - OR operator, NOT operator
+/// - `<>` (not-equal) and `IN` operators
+/// - Non-key attributes, nested attribute paths
+/// - Functions other than `begins_with`
+/// - Multiple conditions on the same key attribute
+/// - Non-equality conditions on the partition key
+fn validate_key_condition_expr(
+    expr: &crate::expression::Expr,
+    key_schema: &KeySchema,
+    names: &HashMap<String, String>,
+) -> Result<(), DynamoDBError> {
+    let mut pk_count = 0u32;
+    let mut sk_count = 0u32;
+    collect_kce_key_refs(expr, key_schema, names, &mut pk_count, &mut sk_count)?;
+
+    if pk_count == 0 {
+        return Err(DynamoDBError::validation(format!(
+            "Query condition missed key schema element: {}",
+            key_schema.partition_key.name,
+        )));
+    }
+    if pk_count > 1 || sk_count > 1 {
+        return Err(DynamoDBError::validation(
+            "KeyConditionExpressions must only contain one condition per key",
+        ));
+    }
+    Ok(())
 }
 
 /// Extract partition key value and optional sort key condition from a parsed
 /// key condition expression. This is a simplified extraction that handles the
 /// common patterns: `pk = :val` and `pk = :val AND sk <op> :val2`.
+///
+/// Also validates that the value types match the key schema types.
 fn extract_key_condition(
     expr: &crate::expression::Expr,
     key_schema: &KeySchema,
@@ -745,6 +2394,7 @@ fn extract_key_condition(
         } => {
             let pk_val =
                 resolve_key_value(left, right, &key_schema.partition_key.name, names, values)?;
+            validate_key_value_type(&pk_val, &key_schema.partition_key)?;
             Ok((pk_val, None))
         }
         // AND: pk = :val AND sk <op> :val2
@@ -756,11 +2406,17 @@ fn extract_key_condition(
             // Try left as partition, right as sort.
             if let Ok((pk_val, _)) = extract_key_condition(left, key_schema, names, values) {
                 let sort_cond = extract_sort_condition(right, key_schema, names, values)?;
+                if let (Some(sk), Some(cond)) = (&key_schema.sort_key, &sort_cond) {
+                    validate_sort_condition_type(cond, sk)?;
+                }
                 return Ok((pk_val, sort_cond));
             }
             // Try right as partition, left as sort.
             if let Ok((pk_val, _)) = extract_key_condition(right, key_schema, names, values) {
                 let sort_cond = extract_sort_condition(left, key_schema, names, values)?;
+                if let (Some(sk), Some(cond)) = (&key_schema.sort_key, &sort_cond) {
+                    validate_sort_condition_type(cond, sk)?;
+                }
                 return Ok((pk_val, sort_cond));
             }
             Err(DynamoDBError::validation(
@@ -773,7 +2429,65 @@ fn extract_key_condition(
     }
 }
 
+/// Validate that the provided attribute value matches the expected key attribute type.
+fn validate_key_value_type(
+    value: &AttributeValue,
+    key_attr: &KeyAttribute,
+) -> Result<(), DynamoDBError> {
+    if !matches!(
+        (&key_attr.attr_type, value),
+        (ScalarAttributeType::S, AttributeValue::S(_))
+            | (ScalarAttributeType::N, AttributeValue::N(_))
+            | (ScalarAttributeType::B, AttributeValue::B(_))
+    ) {
+        return Err(DynamoDBError::validation(format!(
+            "Condition parameter type does not match schema type for key attribute '{}'",
+            key_attr.name,
+        )));
+    }
+    Ok(())
+}
+
+/// Validate that the sort key condition values match the expected sort key type.
+fn validate_sort_condition_type(
+    cond: &SortKeyCondition,
+    sk: &KeyAttribute,
+) -> Result<(), DynamoDBError> {
+    let validate = |sort_val: &SortableAttributeValue| -> Result<(), DynamoDBError> {
+        if !matches!(
+            (&sk.attr_type, sort_val),
+            (ScalarAttributeType::S, SortableAttributeValue::S(_))
+                | (ScalarAttributeType::N, SortableAttributeValue::N(_))
+                | (ScalarAttributeType::B, SortableAttributeValue::B(_))
+        ) {
+            return Err(DynamoDBError::validation(format!(
+                "Condition parameter type does not match schema type for key attribute '{}'",
+                sk.name,
+            )));
+        }
+        Ok(())
+    };
+
+    match cond {
+        SortKeyCondition::Eq(v)
+        | SortKeyCondition::Lt(v)
+        | SortKeyCondition::Le(v)
+        | SortKeyCondition::Gt(v)
+        | SortKeyCondition::Ge(v) => validate(v),
+        SortKeyCondition::Between(low, high) => {
+            validate(low)?;
+            validate(high)
+        }
+        SortKeyCondition::BeginsWithStr(_) | SortKeyCondition::BeginsWithBytes(_) => {
+            // begins_with type checking is handled elsewhere (string/binary only)
+            Ok(())
+        }
+    }
+}
+
 /// Extract a sort key condition from an expression node.
+///
+/// Handles reversed comparisons: `:val < key` is equivalent to `key > :val`.
 fn extract_sort_condition(
     expr: &crate::expression::Expr,
     key_schema: &KeySchema,
@@ -789,9 +2503,12 @@ fn extract_sort_condition(
 
     match expr {
         Expr::Compare { left, op, right } => {
-            let val = resolve_sort_value(left, right, sk_name, names, values)?;
+            // Determine whether the key path is on the left or right side.
+            // If reversed (value on left, key on right), flip the operator.
+            let (val, effective_op) =
+                resolve_sort_value_with_direction(left, right, sk_name, names, values, *op)?;
             let sortable = to_sortable(sk_name, &val)?;
-            let cond = match op {
+            let cond = match effective_op {
                 CompareOp::Eq => SortKeyCondition::Eq(sortable),
                 CompareOp::Lt => SortKeyCondition::Lt(sortable),
                 CompareOp::Le => SortKeyCondition::Le(sortable),
@@ -822,9 +2539,10 @@ fn extract_sort_condition(
         } if args.len() == 2 => {
             let prefix_val = resolve_operand_value(&args[1], names, values)?;
             match prefix_val {
-                AttributeValue::S(s) => Ok(Some(SortKeyCondition::BeginsWith(s))),
+                AttributeValue::S(s) => Ok(Some(SortKeyCondition::BeginsWithStr(s))),
+                AttributeValue::B(b) => Ok(Some(SortKeyCondition::BeginsWithBytes(b))),
                 _ => Err(DynamoDBError::validation(
-                    "begins_with requires a string argument",
+                    "begins_with requires a string or binary argument",
                 )),
             }
         }
@@ -894,15 +2612,58 @@ fn resolve_key_value(
     }
 }
 
-/// Same as `resolve_key_value` but for sort key.
-fn resolve_sort_value(
+/// Resolve a sort key comparison, detecting whether the key path is on the
+/// left or right side. If the key is on the right (reversed comparison like
+/// `:val < key`), the operator is flipped (`<` becomes `>`, etc.).
+fn resolve_sort_value_with_direction(
     left: &crate::expression::ast::Operand,
     right: &crate::expression::ast::Operand,
     key_name: &str,
     names: &HashMap<String, String>,
     values: &HashMap<String, AttributeValue>,
-) -> Result<AttributeValue, DynamoDBError> {
-    resolve_key_value(left, right, key_name, names, values)
+    op: crate::expression::ast::CompareOp,
+) -> Result<(AttributeValue, crate::expression::ast::CompareOp), DynamoDBError> {
+    use crate::expression::ast::{CompareOp, Operand};
+
+    let is_key_path = |operand: &Operand| -> bool {
+        if let Operand::Path(path) = operand {
+            if path.elements.len() == 1 {
+                if let crate::expression::ast::PathElement::Attribute(name) = &path.elements[0] {
+                    let resolved = if name.starts_with('#') {
+                        names
+                            .get(name.as_str())
+                            .map_or(name.as_str(), String::as_str)
+                    } else {
+                        name.as_str()
+                    };
+                    return resolved == key_name;
+                }
+            }
+        }
+        false
+    };
+
+    if is_key_path(left) {
+        // Normal order: key <op> value
+        let val = resolve_operand_value(right, names, values)?;
+        Ok((val, op))
+    } else if is_key_path(right) {
+        // Reversed: value <op> key -> key <flipped_op> value
+        let val = resolve_operand_value(left, names, values)?;
+        let flipped = match op {
+            CompareOp::Eq => CompareOp::Eq,
+            CompareOp::Ne => CompareOp::Ne,
+            CompareOp::Lt => CompareOp::Gt,
+            CompareOp::Le => CompareOp::Ge,
+            CompareOp::Gt => CompareOp::Lt,
+            CompareOp::Ge => CompareOp::Le,
+        };
+        Ok((val, flipped))
+    } else {
+        Err(DynamoDBError::validation(format!(
+            "KeyConditionExpression must reference key attribute '{key_name}'"
+        )))
+    }
 }
 
 /// Convert an `AttributeValue` to a `SortableAttributeValue` for key conditions.
@@ -954,6 +2715,7 @@ mod tests {
                 attribute_name: "pk".to_owned(),
                 attribute_type: ScalarAttributeType::S,
             }],
+            billing_mode: Some(BillingMode::PayPerRequest),
             ..Default::default()
         };
         provider.handle_create_table(input).unwrap();
@@ -961,7 +2723,8 @@ mod tests {
     }
 
     #[test]
-    fn test_should_error_on_update_item_without_update_expression() {
+    fn test_should_allow_update_item_without_update_expression() {
+        // UpdateItem without update_expression should create the item from key.
         let provider = setup_provider_with_table();
         let input = UpdateItemInput {
             table_name: "TestTable".to_owned(),
@@ -970,10 +2733,7 @@ mod tests {
             ..Default::default()
         };
         let result = provider.handle_update_item(input);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.code, DynamoDBErrorCode::ValidationException);
-        assert!(err.message.contains("UpdateExpression is required"));
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -1051,5 +2811,268 @@ mod tests {
         let operand = Operand::Value("missing".to_owned());
         let result = resolve_operand_value(&operand, &names, &values);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_should_convert_conditions_eq() {
+        let conditions = HashMap::from([(
+            "age".to_owned(),
+            Condition {
+                comparison_operator: ComparisonOperator::Eq,
+                attribute_value_list: vec![AttributeValue::N("25".to_owned())],
+            },
+        )]);
+        let (expr, names, values) = convert_conditions_to_expression(&conditions, None);
+        assert!(expr.contains('='));
+        assert!(names.values().any(|v| v == "age"));
+        assert_eq!(values.len(), 1);
+    }
+
+    #[test]
+    fn test_should_convert_conditions_between() {
+        let conditions = HashMap::from([(
+            "score".to_owned(),
+            Condition {
+                comparison_operator: ComparisonOperator::Between,
+                attribute_value_list: vec![
+                    AttributeValue::N("10".to_owned()),
+                    AttributeValue::N("90".to_owned()),
+                ],
+            },
+        )]);
+        let (expr, names, values) = convert_conditions_to_expression(&conditions, None);
+        assert!(expr.contains("BETWEEN"));
+        assert!(expr.contains("AND"));
+        assert!(names.values().any(|v| v == "score"));
+        assert_eq!(values.len(), 2);
+    }
+
+    #[test]
+    fn test_should_convert_conditions_in() {
+        let conditions = HashMap::from([(
+            "status".to_owned(),
+            Condition {
+                comparison_operator: ComparisonOperator::In,
+                attribute_value_list: vec![
+                    AttributeValue::S("active".to_owned()),
+                    AttributeValue::S("pending".to_owned()),
+                ],
+            },
+        )]);
+        let (expr, names, values) = convert_conditions_to_expression(&conditions, None);
+        assert!(expr.contains("IN"));
+        assert!(names.values().any(|v| v == "status"));
+        assert_eq!(values.len(), 2);
+    }
+
+    #[test]
+    fn test_should_convert_expected_exists_false() {
+        let expected = HashMap::from([(
+            "email".to_owned(),
+            ExpectedAttributeValue {
+                exists: Some(false),
+                ..Default::default()
+            },
+        )]);
+        let (expr, names, _values) = convert_expected_to_condition(&expected, None);
+        assert!(expr.contains("attribute_not_exists"));
+        assert!(names.values().any(|v| v == "email"));
+    }
+
+    #[test]
+    fn test_should_convert_expected_value_equality() {
+        let expected = HashMap::from([(
+            "name".to_owned(),
+            ExpectedAttributeValue {
+                value: Some(AttributeValue::S("Alice".to_owned())),
+                ..Default::default()
+            },
+        )]);
+        let (expr, names, values) = convert_expected_to_condition(&expected, None);
+        assert!(expr.contains('='));
+        assert!(names.values().any(|v| v == "name"));
+        assert_eq!(values.len(), 1);
+    }
+
+    #[test]
+    fn test_should_convert_attribute_updates_set_and_remove() {
+        let updates = HashMap::from([
+            (
+                "name".to_owned(),
+                AttributeValueUpdate {
+                    value: Some(AttributeValue::S("Bob".to_owned())),
+                    action: Some(AttributeAction::Put),
+                },
+            ),
+            (
+                "old_field".to_owned(),
+                AttributeValueUpdate {
+                    value: None,
+                    action: Some(AttributeAction::Delete),
+                },
+            ),
+        ]);
+        let (expr, names, values) = convert_attribute_updates_to_expression(&updates);
+        assert!(expr.contains("SET"));
+        assert!(expr.contains("REMOVE"));
+        assert!(names.values().any(|v| v == "name"));
+        assert!(names.values().any(|v| v == "old_field"));
+        assert_eq!(values.len(), 1); // Only SET has a value
+    }
+
+    #[test]
+    fn test_should_convert_attributes_to_get() {
+        let attrs = vec!["id".to_owned(), "name".to_owned(), "email".to_owned()];
+        let result = convert_attributes_to_get(&attrs);
+        assert_eq!(result, "id, name, email");
+    }
+
+    #[test]
+    fn test_should_return_none_for_missing_get_item() {
+        let provider = setup_provider_with_table();
+        let input = GetItemInput {
+            table_name: "TestTable".to_owned(),
+            key: HashMap::from([("pk".to_owned(), AttributeValue::S("nonexistent".to_owned()))]),
+            ..Default::default()
+        };
+        let result = provider.handle_get_item(input).unwrap();
+        assert!(result.item.is_none());
+    }
+
+    #[test]
+    fn test_should_delete_table_with_deleting_status() {
+        let provider = setup_provider_with_table();
+        let input = DeleteTableInput {
+            table_name: "TestTable".to_owned(),
+        };
+        let result = provider.handle_delete_table(input).unwrap();
+        let desc = result.table_description.unwrap();
+        assert_eq!(desc.table_status, Some(TableStatus::Deleting));
+    }
+
+    #[test]
+    fn test_should_reject_invalid_return_values_for_put_item() {
+        let provider = setup_provider_with_table();
+        let input = PutItemInput {
+            table_name: "TestTable".to_owned(),
+            item: HashMap::from([("pk".to_owned(), AttributeValue::S("k1".to_owned()))]),
+            return_values: Some(ruststack_dynamodb_model::types::ReturnValue::AllNew),
+            ..Default::default()
+        };
+        let result = provider.handle_put_item(input);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, DynamoDBErrorCode::ValidationException);
+    }
+
+    #[test]
+    fn test_should_reject_invalid_return_values_for_delete_item() {
+        let provider = setup_provider_with_table();
+        let input = DeleteItemInput {
+            table_name: "TestTable".to_owned(),
+            key: HashMap::from([("pk".to_owned(), AttributeValue::S("k1".to_owned()))]),
+            return_values: Some(ruststack_dynamodb_model::types::ReturnValue::AllNew),
+            ..Default::default()
+        };
+        let result = provider.handle_delete_item(input);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, DynamoDBErrorCode::ValidationException);
+    }
+
+    #[test]
+    fn test_should_handle_update_table() {
+        let provider = setup_provider_with_table();
+        let input = UpdateTableInput {
+            table_name: "TestTable".to_owned(),
+            ..Default::default()
+        };
+        let result = provider.handle_update_table(input);
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.table_description.is_some());
+    }
+
+    #[test]
+    fn test_should_compute_update_return_values_updated_old() {
+        let key_schema = KeySchema {
+            partition_key: KeyAttribute {
+                name: "pk".to_owned(),
+                attr_type: ScalarAttributeType::S,
+            },
+            sort_key: None,
+        };
+        let old = HashMap::from([
+            ("pk".to_owned(), AttributeValue::S("k1".to_owned())),
+            ("name".to_owned(), AttributeValue::S("Alice".to_owned())),
+            ("age".to_owned(), AttributeValue::N("30".to_owned())),
+        ]);
+        let new = HashMap::from([
+            ("pk".to_owned(), AttributeValue::S("k1".to_owned())),
+            ("name".to_owned(), AttributeValue::S("Bob".to_owned())),
+            ("age".to_owned(), AttributeValue::N("30".to_owned())),
+            (
+                "email".to_owned(),
+                AttributeValue::S("bob@example.com".to_owned()),
+            ),
+        ]);
+        let changed = compute_update_return_values(
+            Some(&ReturnValue::UpdatedOld),
+            Some(&old),
+            &new,
+            &key_schema,
+        );
+        // "name" changed: old was Alice, so it should be in result.
+        assert_eq!(
+            changed.get("name"),
+            Some(&AttributeValue::S("Alice".to_owned()))
+        );
+        // "email" is new, no old value so not in UPDATED_OLD result.
+        assert!(!changed.contains_key("email"));
+        // "pk" is a key attribute, excluded from UPDATED_OLD.
+        assert!(!changed.contains_key("pk"));
+        // "age" did not change.
+        assert!(!changed.contains_key("age"));
+    }
+
+    #[test]
+    fn test_should_compute_update_return_values_updated_new() {
+        let key_schema = KeySchema {
+            partition_key: KeyAttribute {
+                name: "pk".to_owned(),
+                attr_type: ScalarAttributeType::S,
+            },
+            sort_key: None,
+        };
+        let old = HashMap::from([
+            ("pk".to_owned(), AttributeValue::S("k1".to_owned())),
+            ("name".to_owned(), AttributeValue::S("Alice".to_owned())),
+        ]);
+        let new = HashMap::from([
+            ("pk".to_owned(), AttributeValue::S("k1".to_owned())),
+            ("name".to_owned(), AttributeValue::S("Bob".to_owned())),
+            (
+                "email".to_owned(),
+                AttributeValue::S("bob@example.com".to_owned()),
+            ),
+        ]);
+        let changed = compute_update_return_values(
+            Some(&ReturnValue::UpdatedNew),
+            Some(&old),
+            &new,
+            &key_schema,
+        );
+        // "name" changed: new value is Bob.
+        assert_eq!(
+            changed.get("name"),
+            Some(&AttributeValue::S("Bob".to_owned()))
+        );
+        // "email" is new in the new item.
+        assert_eq!(
+            changed.get("email"),
+            Some(&AttributeValue::S("bob@example.com".to_owned()))
+        );
+        // "pk" is a key attribute, excluded from UPDATED_NEW.
+        assert!(!changed.contains_key("pk"));
     }
 }

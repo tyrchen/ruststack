@@ -44,6 +44,15 @@ pub struct DescribeTableOutput {
     pub table: Option<TableDescription>,
 }
 
+/// Output for the `UpdateTable` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UpdateTableOutput {
+    /// The properties of the updated table.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub table_description: Option<TableDescription>,
+}
+
 /// Output for the `ListTables` operation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -85,9 +94,9 @@ pub struct PutItemOutput {
 #[serde(rename_all = "PascalCase")]
 pub struct GetItemOutput {
     /// A map of attribute names to `AttributeValue` objects for the retrieved
-    /// item. Returns an empty map if the item does not exist.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub item: HashMap<String, AttributeValue>,
+    /// item. Returns `None` if the item does not exist.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<HashMap<String, AttributeValue>>,
 
     /// The capacity units consumed by the operation.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -139,7 +148,8 @@ pub struct DeleteItemOutput {
 #[serde(rename_all = "PascalCase")]
 pub struct QueryOutput {
     /// An array of item attributes that match the query conditions.
-    #[serde(default)]
+    /// Omitted when `Select=COUNT` (empty vec is not serialized).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<HashMap<String, AttributeValue>>,
 
     /// The number of items in the response.
@@ -163,7 +173,8 @@ pub struct QueryOutput {
 #[serde(rename_all = "PascalCase")]
 pub struct ScanOutput {
     /// An array of item attributes that match the scan conditions.
-    #[serde(default)]
+    /// Omitted when `Select=COUNT` (empty vec is not serialized).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<HashMap<String, AttributeValue>>,
 
     /// The number of items in the response.

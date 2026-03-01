@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::attribute_value::AttributeValue;
 use crate::types::{
-    AttributeDefinition, BillingMode, GlobalSecondaryIndex, KeySchemaElement, KeysAndAttributes,
+    AttributeDefinition, AttributeValueUpdate, BillingMode, Condition, ConditionalOperator,
+    ExpectedAttributeValue, GlobalSecondaryIndex, KeySchemaElement, KeysAndAttributes,
     LocalSecondaryIndex, ProvisionedThroughput, ReturnConsumedCapacity,
     ReturnItemCollectionMetrics, ReturnValue, SSESpecification, Select, StreamSpecification, Tag,
     WriteRequest,
@@ -31,6 +32,7 @@ pub struct CreateTableInput {
     pub key_schema: Vec<KeySchemaElement>,
 
     /// The attribute definitions for the key schema and index key attributes.
+    #[serde(default)]
     pub attribute_definitions: Vec<AttributeDefinition>,
 
     /// The billing mode for the table (`PROVISIONED` or `PAY_PER_REQUEST`).
@@ -68,6 +70,26 @@ pub struct CreateTableInput {
 pub struct DeleteTableInput {
     /// The name of the table to delete.
     pub table_name: String,
+}
+
+/// Input for the `UpdateTable` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UpdateTableInput {
+    /// The name of the table to update.
+    pub table_name: String,
+
+    /// The new billing mode for the table.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub billing_mode: Option<BillingMode>,
+
+    /// The new provisioned throughput settings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provisioned_throughput: Option<ProvisionedThroughput>,
+
+    /// New attribute definitions (for GSI changes).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attribute_definitions: Vec<AttributeDefinition>,
 }
 
 /// Input for the `DescribeTable` operation.
@@ -129,6 +151,14 @@ pub struct PutItemInput {
     /// Determines whether item collection metrics are returned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_item_collection_metrics: Option<ReturnItemCollectionMetrics>,
+
+    /// Legacy: expected conditions for conditional writes.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub expected: HashMap<String, ExpectedAttributeValue>,
+
+    /// Legacy: logical operator for combining multiple expected conditions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conditional_operator: Option<ConditionalOperator>,
 }
 
 /// Input for the `GetItem` operation.
@@ -158,6 +188,10 @@ pub struct GetItemInput {
     /// Determines the level of detail about provisioned throughput consumption.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_consumed_capacity: Option<ReturnConsumedCapacity>,
+
+    /// Legacy: attribute names to retrieve (use `projection_expression` instead).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attributes_to_get: Vec<String>,
 }
 
 /// Input for the `UpdateItem` operation.
@@ -197,6 +231,18 @@ pub struct UpdateItemInput {
     /// Determines whether item collection metrics are returned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_item_collection_metrics: Option<ReturnItemCollectionMetrics>,
+
+    /// Legacy: attribute updates map (use `update_expression` instead).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub attribute_updates: HashMap<String, AttributeValueUpdate>,
+
+    /// Legacy: expected conditions for conditional writes.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub expected: HashMap<String, ExpectedAttributeValue>,
+
+    /// Legacy: logical operator for combining multiple expected conditions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conditional_operator: Option<ConditionalOperator>,
 }
 
 /// Input for the `DeleteItem` operation.
@@ -233,6 +279,14 @@ pub struct DeleteItemInput {
     /// Determines whether item collection metrics are returned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_item_collection_metrics: Option<ReturnItemCollectionMetrics>,
+
+    /// Legacy: expected conditions for conditional writes.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub expected: HashMap<String, ExpectedAttributeValue>,
+
+    /// Legacy: logical operator for combining multiple expected conditions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conditional_operator: Option<ConditionalOperator>,
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +350,22 @@ pub struct QueryInput {
     /// Determines the level of detail about provisioned throughput consumption.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_consumed_capacity: Option<ReturnConsumedCapacity>,
+
+    /// Legacy: key conditions (use `key_condition_expression` instead).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub key_conditions: HashMap<String, Condition>,
+
+    /// Legacy: query filter (use `filter_expression` instead).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub query_filter: HashMap<String, Condition>,
+
+    /// Legacy: attribute names to retrieve (use `projection_expression` instead).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attributes_to_get: Vec<String>,
+
+    /// Legacy: logical operator for combining multiple query filter conditions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conditional_operator: Option<ConditionalOperator>,
 }
 
 /// Input for the `Scan` operation.
@@ -355,6 +425,18 @@ pub struct ScanInput {
     /// Determines the level of detail about provisioned throughput consumption.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_consumed_capacity: Option<ReturnConsumedCapacity>,
+
+    /// Legacy: scan filter (use `filter_expression` instead).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub scan_filter: HashMap<String, Condition>,
+
+    /// Legacy: attribute names to retrieve (use `projection_expression` instead).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attributes_to_get: Vec<String>,
+
+    /// Legacy: logical operator for combining multiple scan filter conditions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conditional_operator: Option<ConditionalOperator>,
 }
 
 // ---------------------------------------------------------------------------

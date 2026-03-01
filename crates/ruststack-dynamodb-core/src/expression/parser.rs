@@ -273,14 +273,16 @@ impl<'a> Lexer<'a> {
             c if is_ident_start(c) => Ok(self.read_identifier_or_keyword()),
             _ => Err(ExpressionError::UnexpectedToken {
                 expected: "valid token".to_owned(),
-                found: format!("'{ch}'"),
+                found: format!("'{ch}'; syntax error near '{ch}'"),
             }),
         }
     }
 
     fn read_expr_attr_name(&mut self) -> Result<Token, ExpressionError> {
         self.chars.next(); // consume '#'
-        let name = self.read_ident_chars();
+        // After '#', the reference name can start with any alphanumeric or underscore
+        // character (unlike bare identifiers which must start with a letter).
+        let name = self.read_ref_chars();
         if name.is_empty() {
             return Err(ExpressionError::UnexpectedToken {
                 expected: "attribute name after '#'".to_owned(),
@@ -292,7 +294,9 @@ impl<'a> Lexer<'a> {
 
     fn read_expr_attr_value(&mut self) -> Result<Token, ExpressionError> {
         self.chars.next(); // consume ':'
-        let name = self.read_ident_chars();
+        // After ':', the reference name can start with any alphanumeric or underscore
+        // character (unlike bare identifiers which must start with a letter).
+        let name = self.read_ref_chars();
         if name.is_empty() {
             return Err(ExpressionError::UnexpectedToken {
                 expected: "value name after ':'".to_owned(),
@@ -355,19 +359,44 @@ impl<'a> Lexer<'a> {
         s
     }
 
+    /// Read characters for a reference name (after `#` or `:`).
+    ///
+    /// Unlike bare identifiers, references allow any alphanumeric or underscore
+    /// character in any position (including leading digits and underscores).
+    fn read_ref_chars(&mut self) -> String {
+        let mut s = String::new();
+        while let Some(&c) = self.chars.peek() {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                s.push(c);
+                self.chars.next();
+            } else {
+                break;
+            }
+        }
+        s
+    }
+
     fn read_identifier_or_keyword(&mut self) -> Token {
         let ident = self.read_ident_chars();
         let lower = ident.to_ascii_lowercase();
+
+        // Keywords (case-insensitive): SET, REMOVE, ADD, DELETE, AND, OR, NOT,
+        // BETWEEN, IN.
         match lower.as_str() {
-            "and" => Token::And,
-            "or" => Token::Or,
-            "not" => Token::Not,
-            "between" => Token::Between,
-            "in" => Token::In,
-            "set" => Token::Set,
-            "remove" => Token::Remove,
-            "add" => Token::Add,
-            "delete" => Token::Delete,
+            "and" => return Token::And,
+            "or" => return Token::Or,
+            "not" => return Token::Not,
+            "between" => return Token::Between,
+            "in" => return Token::In,
+            "set" => return Token::Set,
+            "remove" => return Token::Remove,
+            "add" => return Token::Add,
+            "delete" => return Token::Delete,
+            _ => {}
+        }
+
+        // Function names (case-sensitive per DynamoDB specification).
+        match ident.as_str() {
             "attribute_exists" => Token::AttributeExists,
             "attribute_not_exists" => Token::AttributeNotExists,
             "attribute_type" => Token::AttributeType,
@@ -382,8 +411,11 @@ impl<'a> Lexer<'a> {
 }
 
 /// Returns `true` if `c` can start an identifier.
+///
+/// DynamoDB identifiers must start with an alphabetic character. Underscores
+/// and digits are NOT valid as the first character of an attribute name token.
 fn is_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_'
+    c.is_ascii_alphabetic()
 }
 
 /// Returns `true` if `c` can continue an identifier.
@@ -430,6 +462,12 @@ impl Parser {
 
     fn at_end(&self) -> bool {
         matches!(self.peek(), Token::Eof)
+    }
+
+    /// Check if the current Identifier token is followed by `(`, indicating
+    /// a function call.
+    fn is_function_call_ahead(&self) -> bool {
+        matches!(self.tokens.get(self.pos + 1), Some(Token::LParen))
     }
 }
 
@@ -486,6 +524,37 @@ impl Parser {
             let expr = self.parse_or_expr()?;
             self.expect(&Token::RParen)?;
             return Ok(expr);
+        }
+
+        // Reject update-only functions (if_not_exists, list_append) used in
+        // condition expressions.
+        if matches!(self.peek(), Token::IfNotExists | Token::ListAppend) {
+            let name = if matches!(self.peek(), Token::IfNotExists) {
+                "if_not_exists"
+            } else {
+                "list_append"
+            };
+            // Consume the function name and its arguments to give a clean error.
+            self.advance();
+            if matches!(self.peek(), Token::LParen) {
+                self.advance();
+                let mut depth = 1u32;
+                while depth > 0 && !matches!(self.peek(), Token::Eof) {
+                    match self.advance() {
+                        Token::LParen => depth += 1,
+                        Token::RParen => depth -= 1,
+                        _ => {}
+                    }
+                }
+            }
+            // Check if followed by a comparison operator (used as operand in comparison).
+            return Err(ExpressionError::InvalidOperand {
+                operation: name.to_owned(),
+                message: format!(
+                    "The function is not allowed to be used this way in an expression; \
+                     function: {name}"
+                ),
+            });
         }
 
         // Function call as expression (attribute_exists, attribute_not_exists, etc.)
@@ -549,6 +618,13 @@ impl Parser {
             Token::In => {
                 self.advance();
                 self.expect(&Token::LParen)?;
+                // Empty IN list is a syntax error.
+                if matches!(self.peek(), Token::RParen) {
+                    return Err(ExpressionError::UnexpectedToken {
+                        expected: "operand".to_owned(),
+                        found: "Syntax error; IN list must have at least one element".to_owned(),
+                    });
+                }
                 let mut list = vec![self.parse_operand()?];
                 while matches!(self.peek(), Token::Comma) {
                     self.advance();
@@ -560,9 +636,30 @@ impl Parser {
                     list,
                 })
             }
+            Token::LParen => {
+                // The left operand looks like a function call (e.g., `dog(...)` or
+                // `BEGINS_WITH(...)`), but the identifier was not recognized as a
+                // valid function name.
+                let func_name = match &left {
+                    Operand::Path(path) => path.to_string(),
+                    other => format!("{other:?}"),
+                };
+                Err(ExpressionError::UnexpectedToken {
+                    expected: "valid function name".to_owned(),
+                    found: format!(
+                        "'{func_name}' is not a valid function; valid functions are: \
+                        attribute_exists, attribute_not_exists, attribute_type, begins_with, \
+                        contains, size"
+                    ),
+                })
+            }
             _ => Err(ExpressionError::UnexpectedToken {
-                expected: "comparison operator, BETWEEN, or IN".to_owned(),
-                found: self.peek().to_string(),
+                expected: "comparison operator, BETWEEN, or IN after operand".to_owned(),
+                found: format!(
+                    "Syntax error; a standalone value or path is not a valid condition; \
+                     found: {}",
+                    self.peek()
+                ),
             }),
         }
     }
@@ -601,9 +698,27 @@ impl Parser {
             Token::Size => {
                 self.advance();
                 self.expect(&Token::LParen)?;
-                let path = self.parse_attribute_path()?;
+                let inner = self.parse_operand()?;
+                // Check for extra arguments: size() takes exactly 1 argument.
+                if matches!(self.peek(), Token::Comma) {
+                    // Count extra args.
+                    let mut count = 1;
+                    while matches!(self.peek(), Token::Comma) {
+                        self.advance();
+                        let _ = self.parse_operand()?;
+                        count += 1;
+                    }
+                    let _ = self.expect(&Token::RParen);
+                    return Err(ExpressionError::InvalidOperand {
+                        operation: "size".to_owned(),
+                        message: format!(
+                            "Incorrect number of operands for operator or function; \
+                             operator or function: size, number of operands: {count}"
+                        ),
+                    });
+                }
                 self.expect(&Token::RParen)?;
-                Ok(Operand::Size(path))
+                Ok(Operand::Size(Box::new(inner)))
             }
             _ => {
                 let path = self.parse_attribute_path()?;
@@ -671,6 +786,9 @@ impl Parser {
 
 impl Parser {
     /// Parse a complete update expression (SET, REMOVE, ADD, DELETE clauses).
+    ///
+    /// Each clause type (SET, REMOVE, ADD, DELETE) can only appear once.
+    /// Within a clause, multiple actions are separated by commas.
     fn parse_update_expr(&mut self) -> Result<UpdateExpr, ExpressionError> {
         let mut update = UpdateExpr {
             set_actions: Vec::new(),
@@ -679,21 +797,58 @@ impl Parser {
             delete_actions: Vec::new(),
         };
 
+        let mut seen_set = false;
+        let mut seen_remove = false;
+        let mut seen_add = false;
+        let mut seen_delete = false;
+
         while !self.at_end() {
             match self.peek() {
                 Token::Set => {
+                    if seen_set {
+                        return Err(ExpressionError::InvalidOperand {
+                            operation: "UpdateExpression".to_owned(),
+                            message:
+                                "The \"SET\" section can only be used once in an update expression"
+                                    .to_owned(),
+                        });
+                    }
+                    seen_set = true;
                     self.advance();
                     self.parse_set_clause(&mut update.set_actions)?;
                 }
                 Token::Remove => {
+                    if seen_remove {
+                        return Err(ExpressionError::InvalidOperand {
+                            operation: "UpdateExpression".to_owned(),
+                            message: "The \"REMOVE\" section can only be used once in an update expression".to_owned(),
+                        });
+                    }
+                    seen_remove = true;
                     self.advance();
                     self.parse_remove_clause(&mut update.remove_paths)?;
                 }
                 Token::Add => {
+                    if seen_add {
+                        return Err(ExpressionError::InvalidOperand {
+                            operation: "UpdateExpression".to_owned(),
+                            message:
+                                "The \"ADD\" section can only be used once in an update expression"
+                                    .to_owned(),
+                        });
+                    }
+                    seen_add = true;
                     self.advance();
                     self.parse_add_clause(&mut update.add_actions)?;
                 }
                 Token::Delete => {
+                    if seen_delete {
+                        return Err(ExpressionError::InvalidOperand {
+                            operation: "UpdateExpression".to_owned(),
+                            message: "The \"DELETE\" section can only be used once in an update expression".to_owned(),
+                        });
+                    }
+                    seen_delete = true;
                     self.advance();
                     self.parse_delete_clause(&mut update.delete_actions)?;
                 }
@@ -727,28 +882,53 @@ impl Parser {
 
     /// Parse the right-hand side of a SET action, which may be a simple operand,
     /// arithmetic (`a + b`, `a - b`), `if_not_exists(path, val)`, or `list_append(a, b)`.
+    /// Supports compound expressions like `if_not_exists(path, :zero) + :one`.
     fn parse_set_value(&mut self) -> Result<SetValue, ExpressionError> {
-        // Check for if_not_exists and list_append first
-        match self.peek() {
-            Token::IfNotExists => return self.parse_if_not_exists(),
-            Token::ListAppend => return self.parse_list_append(),
-            _ => {}
-        }
+        // Parse primary value (operand, if_not_exists, list_append, or unknown function)
+        let primary = self.parse_set_value_primary()?;
 
-        let first = self.parse_operand()?;
-
+        // Check for trailing + or -
         match self.peek() {
             Token::Plus => {
                 self.advance();
-                let second = self.parse_operand()?;
-                Ok(SetValue::Plus(first, second))
+                let right = self.parse_set_value_primary()?;
+                Ok(SetValue::Plus(Box::new(primary), Box::new(right)))
             }
             Token::Minus => {
                 self.advance();
-                let second = self.parse_operand()?;
-                Ok(SetValue::Minus(first, second))
+                let right = self.parse_set_value_primary()?;
+                Ok(SetValue::Minus(Box::new(primary), Box::new(right)))
             }
-            _ => Ok(SetValue::Operand(first)),
+            _ => Ok(primary),
+        }
+    }
+
+    /// Parse a primary SET value (without checking for trailing arithmetic operators).
+    fn parse_set_value_primary(&mut self) -> Result<SetValue, ExpressionError> {
+        match self.peek() {
+            Token::IfNotExists => self.parse_if_not_exists(),
+            Token::ListAppend => self.parse_list_append(),
+            // Check if an identifier is followed by `(` - this is a function call.
+            // DynamoDB accepts any identifier as a function name in the parser,
+            // but rejects unknown function names later.
+            Token::Identifier(_) if self.is_function_call_ahead() => {
+                let Token::Identifier(name) = self.advance() else {
+                    return Err(ExpressionError::UnexpectedEof);
+                };
+                // Skip over the function arguments.
+                self.expect(&Token::LParen)?;
+                self.parse_operand()?;
+                while matches!(self.peek(), Token::Comma) {
+                    self.advance();
+                    self.parse_operand()?;
+                }
+                self.expect(&Token::RParen)?;
+                Err(ExpressionError::InvalidOperand {
+                    operation: "UpdateExpression".to_owned(),
+                    message: format!("Invalid function name; function: {name}"),
+                })
+            }
+            _ => Ok(SetValue::Operand(self.parse_operand()?)),
         }
     }
 
@@ -1194,5 +1374,37 @@ mod tests {
     fn test_should_error_on_whitespace_only_update_expression() {
         let result = parse_update("   ");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_should_parse_if_not_exists_plus_value() {
+        let update = parse_update("SET #c = if_not_exists(#c, :zero) + :one").unwrap();
+        assert_eq!(update.set_actions.len(), 1);
+        assert!(matches!(&update.set_actions[0].value, SetValue::Plus(_, _)));
+        // The left side should be IfNotExists, the right side an Operand.
+        match &update.set_actions[0].value {
+            SetValue::Plus(left, right) => {
+                assert!(matches!(left.as_ref(), SetValue::IfNotExists(_, _)));
+                assert!(
+                    matches!(right.as_ref(), SetValue::Operand(Operand::Value(v)) if v == "one")
+                );
+            }
+            other => panic!("expected Plus, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_should_parse_if_not_exists_minus_value() {
+        let update = parse_update("SET #c = if_not_exists(#c, :ten) - :one").unwrap();
+        assert_eq!(update.set_actions.len(), 1);
+        match &update.set_actions[0].value {
+            SetValue::Minus(left, right) => {
+                assert!(matches!(left.as_ref(), SetValue::IfNotExists(_, _)));
+                assert!(
+                    matches!(right.as_ref(), SetValue::Operand(Operand::Value(v)) if v == "one")
+                );
+            }
+            other => panic!("expected Minus, got {other:?}"),
+        }
     }
 }

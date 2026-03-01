@@ -10,6 +10,8 @@ pub enum DynamoDBOperation {
     CreateTable,
     /// Delete a table.
     DeleteTable,
+    /// Update a table's settings.
+    UpdateTable,
     /// Describe a table.
     DescribeTable,
     /// List all tables.
@@ -45,6 +47,7 @@ impl DynamoDBOperation {
         match self {
             Self::CreateTable => "CreateTable",
             Self::DeleteTable => "DeleteTable",
+            Self::UpdateTable => "UpdateTable",
             Self::DescribeTable => "DescribeTable",
             Self::ListTables => "ListTables",
             Self::PutItem => "PutItem",
@@ -64,6 +67,7 @@ impl DynamoDBOperation {
         match name {
             "CreateTable" => Some(Self::CreateTable),
             "DeleteTable" => Some(Self::DeleteTable),
+            "UpdateTable" => Some(Self::UpdateTable),
             "DescribeTable" => Some(Self::DescribeTable),
             "ListTables" => Some(Self::ListTables),
             "PutItem" => Some(Self::PutItem),

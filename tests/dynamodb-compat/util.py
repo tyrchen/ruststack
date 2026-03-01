@@ -30,7 +30,7 @@ def random_string(length=10):
 
 def random_bytes(length=10):
     """Generate random bytes of given length."""
-    return bytes(_random.getrandbits(8) for _ in range(length))
+    return bytearray(_random.getrandbits(8) for _ in range(length))
 
 
 # ---------------------------------------------------------------------------
@@ -127,21 +127,24 @@ def full_query(table, **kwargs):
 
 
 def full_query_and_counts(table, **kwargs):
-    """Like full_query but also returns Count and ScannedCount."""
+    """Like full_query but also returns ScannedCount, Count, page count, and items."""
     items = []
-    count = 0
-    scanned_count = 0
+    prefilter_count = 0
+    postfilter_count = 0
+    pages = 0
     response = table.query(**kwargs)
     items.extend(response.get("Items", []))
-    count += response.get("Count", 0)
-    scanned_count += response.get("ScannedCount", 0)
+    pages += 1
+    postfilter_count += response.get("Count", 0)
+    prefilter_count += response.get("ScannedCount", 0)
     while "LastEvaluatedKey" in response:
         kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
         response = table.query(**kwargs)
         items.extend(response.get("Items", []))
-        count += response.get("Count", 0)
-        scanned_count += response.get("ScannedCount", 0)
-    return items, count, scanned_count
+        pages += 1
+        postfilter_count += response.get("Count", 0)
+        prefilter_count += response.get("ScannedCount", 0)
+    return (prefilter_count, postfilter_count, pages, items)
 
 
 # ---------------------------------------------------------------------------

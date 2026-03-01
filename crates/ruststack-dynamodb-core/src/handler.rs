@@ -63,6 +63,11 @@ fn dispatch(
             let output = provider.handle_delete_table(input)?;
             serialize(&output, &request_id)
         }
+        DynamoDBOperation::UpdateTable => {
+            let input = deserialize(body)?;
+            let output = provider.handle_update_table(input)?;
+            serialize(&output, &request_id)
+        }
         DynamoDBOperation::DescribeTable => {
             let input = deserialize(body)?;
             let output = provider.handle_describe_table(input)?;
@@ -117,9 +122,20 @@ fn dispatch(
 }
 
 /// Deserialize a JSON request body into the input type.
+///
+/// Serde errors for missing required fields (e.g., `missing field 'AttributeName'`)
+/// are mapped to `ValidationException` to match DynamoDB behaviour, while other
+/// deserialization errors remain `SerializationException`.
 fn deserialize<T: serde::de::DeserializeOwned>(body: &[u8]) -> Result<T, DynamoDBError> {
     serde_json::from_slice(body).map_err(|e| {
-        DynamoDBError::serialization_exception(format!("Failed to deserialize request body: {e}"))
+        let msg = e.to_string();
+        if msg.contains("missing field") {
+            DynamoDBError::validation(format!("1 validation error detected: {msg}"))
+        } else {
+            DynamoDBError::serialization_exception(format!(
+                "Failed to deserialize request body: {e}"
+            ))
+        }
     })
 }
 

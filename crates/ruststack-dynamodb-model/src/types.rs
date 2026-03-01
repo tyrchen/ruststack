@@ -54,7 +54,11 @@ impl std::fmt::Display for KeyType {
 }
 
 /// Scalar attribute types supported in key schema and attribute definitions.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// DynamoDB only allows `S`, `N`, and `B` for key attributes, but the wire
+/// protocol may receive other values which must be rejected with a
+/// `ValidationException` rather than a deserialization error.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ScalarAttributeType {
     /// String type.
     S,
@@ -62,16 +66,43 @@ pub enum ScalarAttributeType {
     N,
     /// Binary type.
     B,
+    /// An unknown/invalid attribute type received from the client.
+    Unknown(String),
 }
 
 impl ScalarAttributeType {
     /// Returns the DynamoDB wire-format string representation.
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::S => "S",
             Self::N => "N",
             Self::B => "B",
+            Self::Unknown(s) => s.as_str(),
+        }
+    }
+
+    /// Returns `true` if this is a valid key attribute type (S, N, or B).
+    #[must_use]
+    pub fn is_valid_key_type(&self) -> bool {
+        matches!(self, Self::S | Self::N | Self::B)
+    }
+}
+
+impl Serialize for ScalarAttributeType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ScalarAttributeType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "S" => Ok(Self::S),
+            "N" => Ok(Self::N),
+            "B" => Ok(Self::B),
+            _ => Ok(Self::Unknown(s)),
         }
     }
 }
@@ -131,24 +162,42 @@ impl std::fmt::Display for TableStatus {
 }
 
 /// Billing mode for a DynamoDB table.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum BillingMode {
     /// Provisioned capacity mode with explicit RCU/WCU settings.
-    #[serde(rename = "PROVISIONED")]
     Provisioned,
     /// On-demand capacity mode (pay per request).
     #[default]
-    #[serde(rename = "PAY_PER_REQUEST")]
     PayPerRequest,
+    /// An unknown billing mode value received from the client.
+    Unknown(String),
 }
 
 impl BillingMode {
     /// Returns the DynamoDB wire-format string representation.
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::Provisioned => "PROVISIONED",
             Self::PayPerRequest => "PAY_PER_REQUEST",
+            Self::Unknown(s) => s.as_str(),
+        }
+    }
+}
+
+impl Serialize for BillingMode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for BillingMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "PROVISIONED" => Ok(Self::Provisioned),
+            "PAY_PER_REQUEST" => Ok(Self::PayPerRequest),
+            _ => Ok(Self::Unknown(s)),
         }
     }
 }
@@ -1014,6 +1063,76 @@ pub struct Condition {
     /// The comparison operator.
     pub comparison_operator: ComparisonOperator,
     /// The attribute values to compare against.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attribute_value_list: Vec<AttributeValue>,
+}
+
+// ---------------------------------------------------------------------------
+// Structs - Legacy API Types
+// ---------------------------------------------------------------------------
+
+/// Action to perform on an attribute during an `UpdateItem` operation (legacy API).
+///
+/// Used with `AttributeUpdates` parameter. Modern applications should use
+/// `UpdateExpression` instead.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum AttributeAction {
+    /// Set the attribute value.
+    #[default]
+    #[serde(rename = "PUT")]
+    Put,
+    /// Delete the attribute (for scalars) or remove elements from a set.
+    #[serde(rename = "DELETE")]
+    Delete,
+    /// Add to a number or set attribute.
+    #[serde(rename = "ADD")]
+    Add,
+}
+
+impl AttributeAction {
+    /// Returns the DynamoDB wire-format string representation.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Put => "PUT",
+            Self::Delete => "DELETE",
+            Self::Add => "ADD",
+        }
+    }
+}
+
+impl std::fmt::Display for AttributeAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// An attribute value update for the legacy `AttributeUpdates` parameter.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AttributeValueUpdate {
+    /// The new value for the attribute.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<AttributeValue>,
+    /// The action to perform on the attribute.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<AttributeAction>,
+}
+
+/// Expected attribute value for the legacy `Expected` parameter (conditional writes).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ExpectedAttributeValue {
+    /// The value to compare against (legacy simple form).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<AttributeValue>,
+    /// Whether the attribute must exist (`true`) or not exist (`false`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exists: Option<bool>,
+    /// The comparison operator (extended form).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comparison_operator: Option<ComparisonOperator>,
+    /// The attribute values to compare against (extended form).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attribute_value_list: Vec<AttributeValue>,
 }
