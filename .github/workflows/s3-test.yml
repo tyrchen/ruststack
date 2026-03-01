@@ -1,0 +1,458 @@
+name: s3-test
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  s3-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start RustStack S3
+        id: ruststack
+        uses: tyrchen/ruststack@v0
+
+      # ── Bucket Operations ───────────────────────────────────────────
+      - name: "Bucket Operations: create, head, list, locate, delete"
+        run: |
+          set -euo pipefail
+
+          # Create buckets
+          aws s3api create-bucket --bucket test-bucket-ops
+          aws s3api create-bucket --bucket test-bucket-delete-me
+
+          # Head bucket
+          aws s3api head-bucket --bucket test-bucket-ops
+
+          # List buckets — verify our buckets appear
+          aws s3api list-buckets | grep -q "test-bucket-ops"
+
+          # Get bucket location
+          LOCATION=$(aws s3api get-bucket-location --bucket test-bucket-ops --query "LocationConstraint" --output text)
+          echo "Bucket location: $LOCATION"
+
+          # Delete an empty bucket
+          aws s3api delete-bucket --bucket test-bucket-delete-me
+          # Verify it's gone
+          ! aws s3api head-bucket --bucket test-bucket-delete-me 2>/dev/null
+
+      # ── Object CRUD ─────────────────────────────────────────────────
+      - name: "Object CRUD: put, get, head, copy, delete, batch delete"
+        run: |
+          set -euo pipefail
+
+          echo "hello world" > /tmp/test-object.txt
+
+          # Put object
+          aws s3api put-object --bucket test-bucket-ops --key greeting.txt --body /tmp/test-object.txt
+
+          # Get object
+          aws s3api get-object --bucket test-bucket-ops --key greeting.txt /tmp/downloaded.txt
+          diff /tmp/test-object.txt /tmp/downloaded.txt
+
+          # Head object
+          HEAD=$(aws s3api head-object --bucket test-bucket-ops --key greeting.txt)
+          echo "$HEAD" | grep -q "ContentLength"
+
+          # Copy object
+          aws s3api copy-object \
+            --bucket test-bucket-ops \
+            --key greeting-copy.txt \
+            --copy-source test-bucket-ops/greeting.txt
+          aws s3api get-object --bucket test-bucket-ops --key greeting-copy.txt /tmp/copied.txt
+          diff /tmp/test-object.txt /tmp/copied.txt
+
+          # Delete single object
+          aws s3api delete-object --bucket test-bucket-ops --key greeting-copy.txt
+          ! aws s3api head-object --bucket test-bucket-ops --key greeting-copy.txt 2>/dev/null
+
+          # Put multiple objects for batch delete
+          echo "a" > /tmp/a.txt && echo "b" > /tmp/b.txt && echo "c" > /tmp/c.txt
+          aws s3api put-object --bucket test-bucket-ops --key batch/a.txt --body /tmp/a.txt
+          aws s3api put-object --bucket test-bucket-ops --key batch/b.txt --body /tmp/b.txt
+          aws s3api put-object --bucket test-bucket-ops --key batch/c.txt --body /tmp/c.txt
+
+          # Batch delete
+          aws s3api delete-objects --bucket test-bucket-ops --delete '{
+            "Objects": [
+              {"Key": "batch/a.txt"},
+              {"Key": "batch/b.txt"},
+              {"Key": "batch/c.txt"}
+            ]
+          }'
+          # Verify all gone
+          COUNT=$(aws s3api list-objects-v2 --bucket test-bucket-ops --prefix "batch/" --query "KeyCount" --output text)
+          [ "$COUNT" = "0" ] || [ "$COUNT" = "None" ]
+
+      # ── Object Metadata ─────────────────────────────────────────────
+      - name: "Object Metadata: content-type, cache-control, user metadata"
+        run: |
+          set -euo pipefail
+
+          echo '{"status":"ok"}' > /tmp/meta.json
+
+          aws s3api put-object \
+            --bucket test-bucket-ops \
+            --key meta/data.json \
+            --body /tmp/meta.json \
+            --content-type "application/json" \
+            --cache-control "max-age=3600" \
+            --content-disposition "attachment; filename=report.json" \
+            --metadata '{"project":"ruststack","env":"test"}'
+
+          HEAD=$(aws s3api head-object --bucket test-bucket-ops --key meta/data.json)
+          echo "$HEAD" | grep -q "application/json"
+          echo "$HEAD" | grep -q "max-age=3600"
+          echo "$HEAD" | grep -q "attachment"
+          echo "$HEAD" | grep -q "ruststack"
+
+      # ── Large Object / Multipart via aws s3 cp ──────────────────────
+      - name: "Large Object: 10MB upload via aws s3 cp (auto-multipart)"
+        run: |
+          set -euo pipefail
+
+          # Generate a 10MB file
+          dd if=/dev/urandom of=/tmp/large-file.bin bs=1M count=10 2>/dev/null
+          ORIG_MD5=$(md5sum /tmp/large-file.bin | cut -d' ' -f1)
+
+          # Upload using high-level aws s3 cp (triggers multipart for files > 8MB)
+          aws s3 cp /tmp/large-file.bin s3://test-bucket-ops/large/file.bin
+
+          # Download and verify
+          aws s3 cp s3://test-bucket-ops/large/file.bin /tmp/large-downloaded.bin
+          DL_MD5=$(md5sum /tmp/large-downloaded.bin | cut -d' ' -f1)
+          [ "$ORIG_MD5" = "$DL_MD5" ]
+
+      # ── Presigned URLs ──────────────────────────────────────────────
+      - name: "Presigned URLs: GET and PUT"
+        run: |
+          set -euo pipefail
+
+          echo "presigned content" > /tmp/presign.txt
+          aws s3api put-object --bucket test-bucket-ops --key presigned/file.txt --body /tmp/presign.txt
+
+          # Presigned GET — download via curl without AWS credentials
+          GET_URL=$(aws s3 presign s3://test-bucket-ops/presigned/file.txt --expires-in 300)
+          BODY=$(curl -sf "$GET_URL")
+          [ "$BODY" = "presigned content" ]
+
+          # Presigned PUT — upload via curl without AWS credentials
+          PUT_URL=$(aws s3 presign s3://test-bucket-ops/presigned/put-test.txt --expires-in 300)
+          curl -sf -X PUT -d "uploaded via presigned" "$PUT_URL"
+          aws s3api get-object --bucket test-bucket-ops --key presigned/put-test.txt /tmp/presign-put-result.txt
+          grep -q "uploaded via presigned" /tmp/presign-put-result.txt
+
+      # ── Versioning ──────────────────────────────────────────────────
+      - name: "Versioning: enable, put versions, list, get by version, delete marker"
+        run: |
+          set -euo pipefail
+
+          aws s3api create-bucket --bucket test-versioning
+
+          # Enable versioning
+          aws s3api put-bucket-versioning --bucket test-versioning \
+            --versioning-configuration Status=Enabled
+          STATUS=$(aws s3api get-bucket-versioning --bucket test-versioning --query "Status" --output text)
+          [ "$STATUS" = "Enabled" ]
+
+          # Put two versions of the same key
+          echo "version 1" > /tmp/v1.txt
+          echo "version 2" > /tmp/v2.txt
+          V1=$(aws s3api put-object --bucket test-versioning --key doc.txt --body /tmp/v1.txt --query "VersionId" --output text)
+          V2=$(aws s3api put-object --bucket test-versioning --key doc.txt --body /tmp/v2.txt --query "VersionId" --output text)
+
+          # Latest should be version 2
+          aws s3api get-object --bucket test-versioning --key doc.txt /tmp/latest.txt
+          grep -q "version 2" /tmp/latest.txt
+
+          # Get specific version
+          aws s3api get-object --bucket test-versioning --key doc.txt --version-id "$V1" /tmp/got-v1.txt
+          grep -q "version 1" /tmp/got-v1.txt
+
+          # List object versions
+          VERSIONS=$(aws s3api list-object-versions --bucket test-versioning --prefix doc.txt)
+          echo "$VERSIONS" | grep -q "$V1"
+          echo "$VERSIONS" | grep -q "$V2"
+
+          # Delete creates a delete marker
+          DEL=$(aws s3api delete-object --bucket test-versioning --key doc.txt)
+          echo "$DEL" | grep -q "DeleteMarker"
+
+          # Object is now "gone" via normal GET
+          ! aws s3api get-object --bucket test-versioning --key doc.txt /tmp/gone.txt 2>/dev/null
+
+          # But specific version still accessible
+          aws s3api get-object --bucket test-versioning --key doc.txt --version-id "$V1" /tmp/still-v1.txt
+          grep -q "version 1" /tmp/still-v1.txt
+
+      # ── Object Tagging ──────────────────────────────────────────────
+      - name: "Object Tagging: put, get, delete"
+        run: |
+          set -euo pipefail
+
+          echo "tagged" > /tmp/tagged.txt
+          aws s3api put-object --bucket test-bucket-ops --key tagged/file.txt --body /tmp/tagged.txt
+
+          # Put tagging
+          aws s3api put-object-tagging --bucket test-bucket-ops --key tagged/file.txt \
+            --tagging '{"TagSet": [{"Key": "env", "Value": "test"}, {"Key": "project", "Value": "ruststack"}]}'
+
+          # Get tagging
+          TAGS=$(aws s3api get-object-tagging --bucket test-bucket-ops --key tagged/file.txt)
+          echo "$TAGS" | grep -q "env"
+          echo "$TAGS" | grep -q "ruststack"
+
+          # Delete tagging
+          aws s3api delete-object-tagging --bucket test-bucket-ops --key tagged/file.txt
+          TAGS_AFTER=$(aws s3api get-object-tagging --bucket test-bucket-ops --key tagged/file.txt --query "TagSet" --output text)
+          [ "$TAGS_AFTER" = "None" ] || [ -z "$TAGS_AFTER" ]
+
+      # ── Bucket Configuration ────────────────────────────────────────
+      - name: "Bucket Config: CORS, lifecycle, encryption, tagging, website"
+        run: |
+          set -euo pipefail
+
+          aws s3api create-bucket --bucket test-config
+
+          # CORS
+          aws s3api put-bucket-cors --bucket test-config --cors-configuration '{
+            "CORSRules": [{
+              "AllowedOrigins": ["https://example.com"],
+              "AllowedMethods": ["GET", "PUT"],
+              "AllowedHeaders": ["*"],
+              "MaxAgeSeconds": 3600
+            }]
+          }'
+          aws s3api get-bucket-cors --bucket test-config | grep -q "example.com"
+
+          # Lifecycle
+          aws s3api put-bucket-lifecycle-configuration --bucket test-config \
+            --lifecycle-configuration '{
+              "Rules": [{
+                "ID": "expire-old",
+                "Status": "Enabled",
+                "Filter": {"Prefix": "logs/"},
+                "Expiration": {"Days": 30}
+              }]
+            }'
+          aws s3api get-bucket-lifecycle-configuration --bucket test-config | grep -q "expire-old"
+
+          # Encryption
+          aws s3api put-bucket-encryption --bucket test-config \
+            --server-side-encryption-configuration '{
+              "Rules": [{
+                "ApplyServerSideEncryptionByDefault": {
+                  "SSEAlgorithm": "AES256"
+                }
+              }]
+            }'
+          aws s3api get-bucket-encryption --bucket test-config | grep -q "AES256"
+
+          # Tagging
+          aws s3api put-bucket-tagging --bucket test-config \
+            --tagging '{"TagSet": [{"Key": "env", "Value": "ci"}, {"Key": "team", "Value": "platform"}]}'
+          aws s3api get-bucket-tagging --bucket test-config | grep -q "platform"
+
+          # Website
+          aws s3api put-bucket-website --bucket test-config \
+            --website-configuration '{
+              "IndexDocument": {"Suffix": "index.html"},
+              "ErrorDocument": {"Key": "error.html"}
+            }'
+          aws s3api get-bucket-website --bucket test-config | grep -q "index.html"
+
+      # ── Object Lock ─────────────────────────────────────────────────
+      - name: "Object Lock: retention and legal hold"
+        run: |
+          set -euo pipefail
+
+          aws s3api create-bucket --bucket test-lock \
+            --object-lock-enabled-for-bucket
+
+          aws s3api put-object-lock-configuration --bucket test-lock \
+            --object-lock-configuration '{
+              "ObjectLockEnabled": "Enabled",
+              "Rule": {
+                "DefaultRetention": {
+                  "Mode": "GOVERNANCE",
+                  "Days": 1
+                }
+              }
+            }'
+
+          echo "locked content" > /tmp/locked.txt
+          aws s3api put-object --bucket test-lock --key locked.txt --body /tmp/locked.txt
+
+          # Put and get retention
+          RETAIN_UNTIL=$(date -u -d "+2 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+2d +%Y-%m-%dT%H:%M:%SZ)
+          aws s3api put-object-retention --bucket test-lock --key locked.txt \
+            --retention "{\"Mode\": \"GOVERNANCE\", \"RetainUntilDate\": \"$RETAIN_UNTIL\"}"
+          aws s3api get-object-retention --bucket test-lock --key locked.txt | grep -q "GOVERNANCE"
+
+          # Put and get legal hold
+          aws s3api put-object-legal-hold --bucket test-lock --key locked.txt \
+            --legal-hold '{"Status": "ON"}'
+          aws s3api get-object-legal-hold --bucket test-lock --key locked.txt | grep -q "ON"
+
+      # ── Explicit Multipart Upload ───────────────────────────────────
+      - name: "Multipart Upload: create, upload parts, list, complete, abort"
+        run: |
+          set -euo pipefail
+
+          # --- Test complete multipart upload ---
+          UPLOAD=$(aws s3api create-multipart-upload --bucket test-bucket-ops --key multipart/assembled.bin)
+          UPLOAD_ID=$(echo "$UPLOAD" | jq -r '.UploadId')
+
+          # Create two 5MB parts
+          dd if=/dev/urandom of=/tmp/part1.bin bs=1M count=5 2>/dev/null
+          dd if=/dev/urandom of=/tmp/part2.bin bs=1M count=5 2>/dev/null
+
+          ETAG1=$(aws s3api upload-part --bucket test-bucket-ops --key multipart/assembled.bin \
+            --upload-id "$UPLOAD_ID" --part-number 1 --body /tmp/part1.bin --query "ETag" --output text)
+          ETAG2=$(aws s3api upload-part --bucket test-bucket-ops --key multipart/assembled.bin \
+            --upload-id "$UPLOAD_ID" --part-number 2 --body /tmp/part2.bin --query "ETag" --output text)
+
+          # List parts
+          aws s3api list-parts --bucket test-bucket-ops --key multipart/assembled.bin \
+            --upload-id "$UPLOAD_ID" | grep -q "PartNumber"
+
+          # Complete
+          aws s3api complete-multipart-upload --bucket test-bucket-ops --key multipart/assembled.bin \
+            --upload-id "$UPLOAD_ID" \
+            --multipart-upload "{
+              \"Parts\": [
+                {\"PartNumber\": 1, \"ETag\": $ETAG1},
+                {\"PartNumber\": 2, \"ETag\": $ETAG2}
+              ]
+            }"
+
+          # Verify assembled object
+          aws s3api head-object --bucket test-bucket-ops --key multipart/assembled.bin | grep -q "ContentLength"
+
+          # --- Test abort multipart upload ---
+          UPLOAD2=$(aws s3api create-multipart-upload --bucket test-bucket-ops --key multipart/aborted.bin)
+          UPLOAD_ID2=$(echo "$UPLOAD2" | jq -r '.UploadId')
+
+          aws s3api upload-part --bucket test-bucket-ops --key multipart/aborted.bin \
+            --upload-id "$UPLOAD_ID2" --part-number 1 --body /tmp/part1.bin > /dev/null
+
+          # Abort
+          aws s3api abort-multipart-upload --bucket test-bucket-ops --key multipart/aborted.bin \
+            --upload-id "$UPLOAD_ID2"
+
+      # ── Listing (list-objects-v2) ────────────────────────────────────
+      - name: "Listing: prefix, delimiter, max-keys, pagination"
+        run: |
+          set -euo pipefail
+
+          aws s3api create-bucket --bucket test-listing
+
+          # Create objects with a directory-like structure
+          for key in "photos/2024/jan.jpg" "photos/2024/feb.jpg" "photos/2025/mar.jpg" "docs/readme.txt" "docs/guide.txt" "root.txt"; do
+            echo "$key" | aws s3api put-object --bucket test-listing --key "$key" --body /dev/stdin > /dev/null
+          done
+
+          # List all
+          ALL=$(aws s3api list-objects-v2 --bucket test-listing --query "KeyCount" --output text)
+          [ "$ALL" = "6" ]
+
+          # List with prefix
+          PHOTOS=$(aws s3api list-objects-v2 --bucket test-listing --prefix "photos/" --query "KeyCount" --output text)
+          [ "$PHOTOS" = "3" ]
+
+          # List with delimiter (common prefixes)
+          DELIMITED=$(aws s3api list-objects-v2 --bucket test-listing --delimiter "/" --query "CommonPrefixes[].Prefix" --output text)
+          echo "$DELIMITED" | grep -q "photos/"
+          echo "$DELIMITED" | grep -q "docs/"
+
+          # List with max-keys and pagination
+          PAGE1=$(aws s3api list-objects-v2 --bucket test-listing --max-keys 2)
+          IS_TRUNCATED=$(echo "$PAGE1" | jq -r '.IsTruncated')
+          [ "$IS_TRUNCATED" = "true" ]
+          NEXT=$(echo "$PAGE1" | jq -r '.NextContinuationToken')
+
+          PAGE2=$(aws s3api list-objects-v2 --bucket test-listing --max-keys 2 --continuation-token "$NEXT")
+          echo "$PAGE2" | grep -q "Contents"
+
+          # List with start-after
+          AFTER=$(aws s3api list-objects-v2 --bucket test-listing --start-after "photos/" --query "Contents[].Key" --output text)
+          echo "$AFTER" | grep -q "root.txt"
+
+      # ── POST Object (browser-based upload) ──────────────────────────
+      - name: "POST Object: browser-based multipart/form-data upload"
+        run: |
+          set -euo pipefail
+          ENDPOINT="${{ steps.ruststack.outputs.endpoint }}"
+
+          aws s3api create-bucket --bucket test-post
+
+          # POST object using curl multipart/form-data
+          HTTP_CODE=$(curl -sf -o /tmp/post-response.xml -w "%{http_code}" \
+            -F "key=uploads/posted.txt" \
+            -F "Content-Type=text/plain" \
+            -F "file=@/tmp/test-object.txt" \
+            "${ENDPOINT}/test-post")
+          [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]
+
+          # Verify the object was created
+          aws s3api get-object --bucket test-post --key uploads/posted.txt /tmp/post-downloaded.txt
+          diff /tmp/test-object.txt /tmp/post-downloaded.txt
+
+      # ── Error Handling ──────────────────────────────────────────────
+      - name: "Error Handling: NoSuchBucket, NoSuchKey, BucketNotEmpty, BucketAlreadyExists"
+        run: |
+          set -euo pipefail
+
+          # NoSuchBucket
+          ERR=$(aws s3api head-bucket --bucket nonexistent-bucket-xyz 2>&1 || true)
+          echo "$ERR" | grep -qi "404\|Not Found\|NoSuchBucket"
+
+          # NoSuchKey
+          ERR=$(aws s3api get-object --bucket test-bucket-ops --key no-such-key.txt /tmp/nope.txt 2>&1 || true)
+          echo "$ERR" | grep -qi "404\|Not Found\|NoSuchKey"
+
+          # BucketNotEmpty
+          ERR=$(aws s3api delete-bucket --bucket test-bucket-ops 2>&1 || true)
+          echo "$ERR" | grep -qi "BucketNotEmpty\|not empty\|409"
+
+          # BucketAlreadyExists (create same bucket again)
+          ERR=$(aws s3api create-bucket --bucket test-bucket-ops 2>&1 || true)
+          echo "$ERR" | grep -qi "BucketAlreadyOwnedByYou\|BucketAlreadyExists\|409\|already\|200"
+
+      # ── Cleanup ─────────────────────────────────────────────────────
+      - name: "Cleanup: delete all test buckets"
+        if: always()
+        run: |
+          set -uo pipefail
+
+          for BUCKET in test-bucket-ops test-versioning test-config test-lock test-listing test-post; do
+            echo "Cleaning up $BUCKET ..."
+
+            # Delete all object versions and delete markers
+            VERSIONS=$(aws s3api list-object-versions --bucket "$BUCKET" 2>/dev/null || echo '{}')
+
+            DELETE_OBJECTS=$(echo "$VERSIONS" | jq -c '{Objects: ([(.Versions // [])[], (.DeleteMarkers // [])[]] | map({Key, VersionId}))}' 2>/dev/null || echo '{"Objects":[]}')
+            if [ "$(echo "$DELETE_OBJECTS" | jq '.Objects | length')" -gt 0 ]; then
+              aws s3api delete-objects --bucket "$BUCKET" --delete "$DELETE_OBJECTS" > /dev/null 2>&1 || true
+            fi
+
+            # Also clean non-versioned objects
+            aws s3 rm "s3://$BUCKET" --recursive > /dev/null 2>&1 || true
+
+            # Abort any in-progress multipart uploads
+            UPLOADS=$(aws s3api list-multipart-uploads --bucket "$BUCKET" 2>/dev/null || echo '{}')
+            echo "$UPLOADS" | jq -r '.Uploads[]? | "\(.Key) \(.UploadId)"' 2>/dev/null | while read -r KEY UID; do
+              aws s3api abort-multipart-upload --bucket "$BUCKET" --key "$KEY" --upload-id "$UID" 2>/dev/null || true
+            done
+
+            aws s3api delete-bucket --bucket "$BUCKET" 2>/dev/null || true
+          done
+
+          echo "Cleanup complete."
