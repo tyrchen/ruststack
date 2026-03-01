@@ -6,12 +6,16 @@
 FROM rust:1.86-slim AS builder
 
 RUN apt-get update && apt-get install -y musl-tools && rm -rf /var/lib/apt/lists/*
-RUN rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 
 WORKDIR /src
 
-# Copy manifests first to cache dependency compilation.
-COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+# Copy the toolchain file first so rustup installs the correct version,
+# then add musl targets to the resolved toolchain.
+COPY rust-toolchain.toml ./
+RUN rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+
+# Copy manifests to cache dependency compilation.
+COPY Cargo.toml Cargo.lock ./
 COPY apps/ruststack-s3-server/Cargo.toml apps/ruststack-s3-server/Cargo.toml
 COPY crates/ruststack-auth/Cargo.toml crates/ruststack-auth/Cargo.toml
 COPY crates/ruststack-core/Cargo.toml crates/ruststack-core/Cargo.toml
