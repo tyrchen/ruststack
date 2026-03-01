@@ -8,7 +8,8 @@ Currently implements **S3** (70 operations from the AWS Smithy model) and **Dyna
 
 - **Full S3 protocol** — 70 operations covering buckets, objects, multipart uploads, versioning, and bucket configuration
 - **DynamoDB support** — 12 core operations: `CreateTable`, `DeleteTable`, `DescribeTable`, `ListTables`, `UpdateTable`, `PutItem`, `GetItem`, `DeleteItem`, `UpdateItem`, `Query`, `Scan`, `BatchWriteItem`
-- **Unified gateway** — Single port (4566) routes S3 and DynamoDB via `X-Amz-Target` header
+- **Unified gateway** — Single port (4566) routes S3 and DynamoDB via `X-Amz-Target` header; extensible `ServiceRouter` trait for adding new services
+- **Selective services** — Enable only the services you need at compile time (Cargo features) or runtime (`SERVICES` env var)
 - **AWS SDK compatible** — Drop-in replacement for LocalStack; works with any AWS SDK or CLI
 - **SigV4 authentication** — Optional AWS Signature Version 4 request verification
 - **Virtual-hosted & path-style** addressing for S3 bucket routing
@@ -62,6 +63,9 @@ aws s3 --endpoint-url http://localhost:4566 ls s3://my-bucket/
 ```bash
 docker build -t ruststack .
 docker run -p 4566:4566 ruststack
+
+# Run with only DynamoDB enabled
+docker run -p 4566:4566 -e SERVICES=dynamodb ruststack
 ```
 
 Multi-arch images (amd64/arm64) are published to `ghcr.io/tyrchen/ruststack` on tagged releases.
@@ -107,6 +111,7 @@ jobs:
 | `default-region` | `us-east-1` | Default AWS region |
 | `log-level` | `info` | Log level (`error`, `warn`, `info`, `debug`, `trace`) |
 | `wait-timeout` | `30` | Seconds to wait for the service to become healthy |
+| `services` | *(empty = all)* | Comma-separated list of services to enable (`s3`, `dynamodb`) |
 
 ### Action Outputs
 
@@ -149,6 +154,7 @@ All settings are controlled via environment variables, matching LocalStack conve
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GATEWAY_LISTEN` | `0.0.0.0:4566` | Bind address and port |
+| `SERVICES` | *(empty = all)* | Comma-separated list of services to enable (`s3`, `dynamodb`) |
 | `S3_SKIP_SIGNATURE_VALIDATION` | `true` | Skip S3 SigV4 request verification |
 | `DYNAMODB_SKIP_SIGNATURE_VALIDATION` | `true` | Skip DynamoDB SigV4 request verification |
 | `S3_VIRTUAL_HOSTING` | `true` | Enable virtual-hosted-style addressing |
@@ -157,6 +163,39 @@ All settings are controlled via environment variables, matching LocalStack conve
 | `DEFAULT_REGION` | `us-east-1` | Default AWS region |
 | `LOG_LEVEL` | `info` | Log level (`error`, `warn`, `info`, `debug`, `trace`) |
 | `RUST_LOG` | | Fine-grained tracing filter (overrides `LOG_LEVEL`) |
+
+### Selective Service Enablement
+
+RustStack supports running a subset of services via two mechanisms:
+
+**Runtime selection** — Set the `SERVICES` environment variable to a comma-separated list:
+
+```bash
+# Only DynamoDB
+SERVICES=dynamodb cargo run -p ruststack-server
+
+# Only S3
+SERVICES=s3 cargo run -p ruststack-server
+
+# Both (default when SERVICES is empty or unset)
+cargo run -p ruststack-server
+```
+
+**Compile-time selection** — Use Cargo feature flags to exclude services from the binary entirely, reducing binary size:
+
+```bash
+# S3-only binary
+cargo build -p ruststack-server --no-default-features --features s3
+
+# DynamoDB-only binary
+cargo build -p ruststack-server --no-default-features --features dynamodb
+```
+
+The health check endpoint dynamically reports only the services that are running:
+
+```json
+{"services":{"dynamodb":"running"}}
+```
 
 ## Supported Operations
 
@@ -246,14 +285,14 @@ ruststack-server            — Unified server binary with gateway routing
 ```
 HTTP Request
   → Gateway health check interception
-  → X-Amz-Target header inspection
-  ├─ DynamoDB_* → DynamoDB HTTP service
+  → ServiceRouter dispatch (first match wins)
+  ├─ DynamoDBServiceRouter (X-Amz-Target: DynamoDB_*)
   │   → Body collection → JSON deserialization
   │   → SigV4 authentication (optional)
   │   → Operation dispatch (DynamoDBHandler trait)
   │   → Business logic (RustStackDynamoDB provider)
   │   → JSON response serialization
-  └─ Otherwise → S3 HTTP service
+  └─ S3ServiceRouter (catch-all)
       → S3Router (path-style / virtual-hosted-style)
       → Body collection
       → SigV4 authentication (optional)
@@ -262,6 +301,8 @@ HTTP Request
       → XML/JSON response serialization
   → HTTP Response
 ```
+
+Adding a new AWS service requires implementing the `ServiceRouter` trait and registering it in `main.rs` — no changes to `gateway.rs`.
 
 ## Development
 

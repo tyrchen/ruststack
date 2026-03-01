@@ -1,59 +1,55 @@
-//! Gateway service that routes requests to S3 or DynamoDB.
+//! Gateway service that routes requests to registered AWS services.
 //!
-//! The gateway inspects the `X-Amz-Target` header to determine whether a
-//! request is destined for DynamoDB (target starts with `DynamoDB_`) or
-//! should fall through to the S3 service (the default).
+//! The gateway holds an ordered list of [`ServiceRouter`] implementations and
+//! dispatches each request to the first router whose [`matches`](ServiceRouter::matches)
+//! method returns `true`. If no router matches, a 404 response is returned.
 //!
 //! Health-check endpoints (`/_localstack/health`, `/_health`, `/health`) are
-//! intercepted at the gateway level and return a combined status for all services.
+//! intercepted at the gateway level and return a combined status for all
+//! registered services.
 
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
-use http_body_util::Either;
 use hyper::body::Incoming;
 use hyper::service::Service;
 
-use ruststack_dynamodb_http::body::DynamoDBResponseBody;
-use ruststack_dynamodb_http::dispatch::DynamoDBHandler;
-use ruststack_dynamodb_http::service::DynamoDBHttpService;
-use ruststack_s3_http::body::S3ResponseBody;
-use ruststack_s3_http::dispatch::S3Handler;
-use ruststack_s3_http::service::S3HttpService;
+use crate::service::{GatewayBody, ServiceRouter, gateway_body_from_string};
 
-/// Unified response body type combining both services.
-pub type GatewayBody = Either<S3ResponseBody, DynamoDBResponseBody>;
-
-/// Gateway that routes incoming HTTP requests to either the S3 or DynamoDB service.
+/// Gateway that routes incoming HTTP requests to registered service routers.
 ///
-/// Routing is based on the `X-Amz-Target` header: if present and starts with
-/// `DynamoDB_`, the request is routed to DynamoDB. All other requests go to S3.
-#[derive(Debug)]
-pub struct GatewayService<S3H: S3Handler, DDBH: DynamoDBHandler> {
-    s3: S3HttpService<S3H>,
-    dynamodb: DynamoDBHttpService<DDBH>,
+/// Services are tried in registration order; the first whose
+/// [`ServiceRouter::matches`] returns `true` handles the request. Register
+/// specific services (DynamoDB, etc.) before catch-all services (S3).
+pub struct GatewayService {
+    services: Arc<Vec<Box<dyn ServiceRouter>>>,
 }
 
-impl<S3H: S3Handler, DDBH: DynamoDBHandler> GatewayService<S3H, DDBH> {
-    /// Create a new gateway wrapping an S3 service and a DynamoDB service.
-    pub fn new(s3: S3HttpService<S3H>, dynamodb: DynamoDBHttpService<DDBH>) -> Self {
-        Self { s3, dynamodb }
+impl GatewayService {
+    /// Create a new gateway from a list of service routers.
+    pub fn new(services: Vec<Box<dyn ServiceRouter>>) -> Self {
+        Self {
+            services: Arc::new(services),
+        }
+    }
+
+    /// Return the names of all registered services.
+    pub fn service_names(&self) -> Vec<&'static str> {
+        self.services.iter().map(|s| s.name()).collect()
     }
 }
 
-impl<S3H: S3Handler, DDBH: DynamoDBHandler> Clone for GatewayService<S3H, DDBH> {
+impl Clone for GatewayService {
     fn clone(&self) -> Self {
         Self {
-            s3: self.s3.clone(),
-            dynamodb: self.dynamodb.clone(),
+            services: Arc::clone(&self.services),
         }
     }
 }
 
-impl<S3H: S3Handler, DDBH: DynamoDBHandler> Service<http::Request<Incoming>>
-    for GatewayService<S3H, DDBH>
-{
+impl Service<http::Request<Incoming>> for GatewayService {
     type Response = http::Response<GatewayBody>;
     type Error = Infallible;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
@@ -61,32 +57,31 @@ impl<S3H: S3Handler, DDBH: DynamoDBHandler> Service<http::Request<Incoming>>
     fn call(&self, req: http::Request<Incoming>) -> Self::Future {
         // Intercept health checks at the gateway level.
         if is_health_check(req.method(), req.uri().path()) {
-            return Box::pin(async { Ok(health_check_response()) });
-        }
-
-        if is_dynamodb_request(&req) {
-            let ddb = self.dynamodb.clone();
+            let services = Arc::clone(&self.services);
             return Box::pin(async move {
-                let resp = ddb.call(req).await;
-                // Both services use Infallible, so the result is always Ok.
-                Ok(resp.unwrap_or_else(|e| match e {}).map(Either::Right))
+                let names: Vec<&str> = services.iter().map(|s| s.name()).collect();
+                Ok(health_check_response(&names))
             });
         }
 
-        let s3 = self.s3.clone();
-        Box::pin(async move {
-            let resp = s3.call(req).await;
-            Ok(resp.unwrap_or_else(|e| match e {}).map(Either::Left))
+        // Route to the first matching service.
+        for svc in self.services.iter() {
+            if svc.matches(&req) {
+                return svc.call(req);
+            }
+        }
+
+        // No service matched — return a 404.
+        Box::pin(async {
+            Ok(http::Response::builder()
+                .status(http::StatusCode::NOT_FOUND)
+                .header("Content-Type", "application/json")
+                .body(gateway_body_from_string(
+                    r#"{"error":"no service matched the request"}"#,
+                ))
+                .expect("static 404 response should be valid"))
         })
     }
-}
-
-/// Check if a request should be routed to DynamoDB based on the X-Amz-Target header.
-fn is_dynamodb_request<B>(req: &http::Request<B>) -> bool {
-    req.headers()
-        .get("x-amz-target")
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|t| t.starts_with("DynamoDB_"))
 }
 
 /// Check if the request is a health check probe.
@@ -100,43 +95,24 @@ fn is_health_check(method: &http::Method, path: &str) -> bool {
             || path == "/minio/health/cluster")
 }
 
-/// Produce a combined health check response for all services.
-fn health_check_response() -> http::Response<GatewayBody> {
-    let body = r#"{"services":{"s3":"running","dynamodb":"running"}}"#;
+/// Produce a health check response listing all registered services.
+fn health_check_response(service_names: &[&str]) -> http::Response<GatewayBody> {
+    let entries: Vec<String> = service_names
+        .iter()
+        .map(|name| format!(r#""{name}":"running""#))
+        .collect();
+    let body = format!(r#"{{"services":{{{}}}}}"#, entries.join(","));
+
     http::Response::builder()
         .status(http::StatusCode::OK)
         .header("Content-Type", "application/json")
-        .body(Either::Left(S3ResponseBody::from_string(body)))
+        .body(gateway_body_from_string(body))
         .expect("static health response should be valid")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_should_detect_dynamodb_request() {
-        let req = http::Request::builder()
-            .header("x-amz-target", "DynamoDB_20120810.CreateTable")
-            .body(())
-            .unwrap();
-        assert!(is_dynamodb_request(&req));
-    }
-
-    #[test]
-    fn test_should_not_detect_s3_request_as_dynamodb() {
-        let req = http::Request::builder().body(()).unwrap();
-        assert!(!is_dynamodb_request(&req));
-    }
-
-    #[test]
-    fn test_should_not_detect_other_target_as_dynamodb() {
-        let req = http::Request::builder()
-            .header("x-amz-target", "SomeOtherService.Action")
-            .body(())
-            .unwrap();
-        assert!(!is_dynamodb_request(&req));
-    }
 
     #[test]
     fn test_should_detect_health_check_paths() {
@@ -149,7 +125,8 @@ mod tests {
 
     #[test]
     fn test_should_produce_health_check_response_with_both_services() {
-        let resp = health_check_response();
+        let names = vec!["s3", "dynamodb"];
+        let resp = health_check_response(&names);
         assert_eq!(resp.status(), http::StatusCode::OK);
         assert_eq!(
             resp.headers()
@@ -157,5 +134,19 @@ mod tests {
                 .and_then(|v| v.to_str().ok()),
             Some("application/json"),
         );
+    }
+
+    #[test]
+    fn test_should_produce_health_check_response_with_single_service() {
+        let names = vec!["dynamodb"];
+        let resp = health_check_response(&names);
+        assert_eq!(resp.status(), http::StatusCode::OK);
+    }
+
+    #[test]
+    fn test_should_produce_health_check_response_with_no_services() {
+        let names: Vec<&str> = vec![];
+        let resp = health_check_response(&names);
+        assert_eq!(resp.status(), http::StatusCode::OK);
     }
 }

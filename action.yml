@@ -47,6 +47,10 @@ inputs:
     description: "Enable durable storage persistence (true/false)"
     required: false
     default: "false"
+  services:
+    description: "Comma-separated list of services to enable (empty = all compiled-in services)"
+    required: false
+    default: ""
 
 outputs:
   endpoint:
@@ -78,6 +82,7 @@ runs:
           -e "ACCESS_KEY=${{ inputs.access-key }}" \
           -e "SECRET_KEY=${{ inputs.secret-key }}" \
           -e "PERSISTENCE=${{ inputs.persistence }}" \
+          -e "SERVICES=${{ inputs.services }}" \
           "ghcr.io/tyrchen/ruststack:${{ inputs.image-tag }}")
 
         echo "container_id=$CONTAINER_ID" >> "$GITHUB_OUTPUT"

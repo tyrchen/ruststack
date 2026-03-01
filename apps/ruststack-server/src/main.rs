@@ -1,8 +1,8 @@
-//! RustStack Server - High-performance AWS-compatible server (S3 + DynamoDB).
+//! RustStack Server - High-performance AWS-compatible server.
 //!
-//! This binary provides a LocalStack-compatible server built on `ruststack-s3-http`
-//! and `ruststack-dynamodb-http`. A gateway layer routes requests to the appropriate
-//! service based on the `X-Amz-Target` header.
+//! This binary provides a LocalStack-compatible server that can host one or
+//! more AWS services. A gateway layer routes requests to the appropriate
+//! service based on request headers.
 //!
 //! # Usage
 //!
@@ -15,6 +15,7 @@
 //! | Variable | Default | Description |
 //! |----------|---------|-------------|
 //! | `GATEWAY_LISTEN` | `0.0.0.0:4566` | Bind address |
+//! | `SERVICES` | *(empty = all)* | Comma-separated list of services to enable |
 //! | `S3_SKIP_SIGNATURE_VALIDATION` | `true` | Skip S3 SigV4 verification |
 //! | `DYNAMODB_SKIP_SIGNATURE_VALIDATION` | `true` | Skip DynamoDB SigV4 verification |
 //! | `S3_DOMAIN` | `s3.localhost.localstack.cloud` | Virtual hosting domain |
@@ -22,7 +23,9 @@
 //! | `RUST_LOG` | *(unset)* | Fine-grained tracing filter (overrides `LOG_LEVEL`) |
 
 mod gateway;
+#[cfg(feature = "s3")]
 mod handler;
+mod service;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -30,20 +33,26 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as HttpConnBuilder;
-use ruststack_auth::StaticCredentialProvider;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
+#[cfg(feature = "dynamodb")]
 use ruststack_dynamodb_core::config::DynamoDBConfig;
+#[cfg(feature = "dynamodb")]
 use ruststack_dynamodb_core::handler::RustStackDynamoDBHandler;
+#[cfg(feature = "dynamodb")]
 use ruststack_dynamodb_core::provider::RustStackDynamoDB;
+#[cfg(feature = "dynamodb")]
 use ruststack_dynamodb_http::service::{DynamoDBHttpConfig, DynamoDBHttpService};
+
+#[cfg(feature = "s3")]
 use ruststack_s3_core::{RustStackS3, S3Config};
+#[cfg(feature = "s3")]
 use ruststack_s3_http::service::{S3HttpConfig, S3HttpService};
 
 use crate::gateway::GatewayService;
-use crate::handler::RustStackHandler;
+use crate::service::ServiceRouter;
 
 /// Server version reported in health check responses.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -68,6 +77,7 @@ fn init_tracing(log_level: &str) -> Result<()> {
 }
 
 /// Build the [`S3HttpConfig`] from the application [`S3Config`].
+#[cfg(feature = "s3")]
 fn build_s3_http_config(config: &S3Config) -> S3HttpConfig {
     let credential_provider = build_credential_provider();
 
@@ -81,6 +91,7 @@ fn build_s3_http_config(config: &S3Config) -> S3HttpConfig {
 }
 
 /// Build the [`DynamoDBHttpConfig`] from the [`DynamoDBConfig`].
+#[cfg(feature = "dynamodb")]
 fn build_dynamodb_http_config(config: &DynamoDBConfig) -> DynamoDBHttpConfig {
     let credential_provider = build_credential_provider();
 
@@ -93,7 +104,10 @@ fn build_dynamodb_http_config(config: &DynamoDBConfig) -> DynamoDBHttpConfig {
 
 /// Build a credential provider from `ACCESS_KEY` / `SECRET_KEY` environment
 /// variables (used by MinIO Mint and other test harnesses).
+#[cfg(any(feature = "s3", feature = "dynamodb"))]
 fn build_credential_provider() -> Option<Arc<dyn ruststack_auth::CredentialProvider>> {
+    use ruststack_auth::StaticCredentialProvider;
+
     let access_key = std::env::var("ACCESS_KEY")
         .or_else(|_| std::env::var("AWS_ACCESS_KEY_ID"))
         .ok()?;
@@ -112,10 +126,7 @@ fn build_credential_provider() -> Option<Arc<dyn ruststack_auth::CredentialProvi
 }
 
 /// Run the accept loop, serving connections until a shutdown signal is received.
-async fn serve(
-    listener: TcpListener,
-    service: GatewayService<RustStackHandler, RustStackDynamoDBHandler>,
-) -> Result<()> {
+async fn serve(listener: TcpListener, service: GatewayService) -> Result<()> {
     let graceful = hyper_util::server::graceful::GracefulShutdown::new();
     let http = HttpConnBuilder::new(TokioExecutor::new());
 
@@ -162,9 +173,47 @@ async fn serve(
     Ok(())
 }
 
+/// Check whether a service name was compiled into this binary.
+fn is_compiled_in(name: &str) -> bool {
+    (name == "s3" && cfg!(feature = "s3")) || (name == "dynamodb" && cfg!(feature = "dynamodb"))
+}
+
+/// Parse the `SERVICES` environment variable into a list of service names.
+///
+/// If `SERVICES` is unset or empty, returns all compiled-in services.
+fn parse_enabled_services() -> Vec<String> {
+    let raw = std::env::var("SERVICES").unwrap_or_default();
+    parse_services_value(&raw)
+}
+
+/// Parse a comma-separated services string into a list of service names.
+///
+/// If the input is empty, returns all compiled-in services.
+fn parse_services_value(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        // All compiled-in services.
+        let mut all = Vec::new();
+        if cfg!(feature = "s3") {
+            all.push("s3".to_string());
+        }
+        if cfg!(feature = "dynamodb") {
+            all.push("dynamodb".to_string());
+        }
+        all
+    } else {
+        trimmed
+            .split(',')
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+}
+
 /// Perform a health check by connecting to the gateway and requesting the health endpoint.
 ///
-/// Exits with code 0 if healthy, 1 otherwise.
+/// Exits with code 0 if the response is 200 OK and contains at least one
+/// running service, 1 otherwise.
 async fn run_health_check(addr: &str) -> Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -183,67 +232,113 @@ async fn run_health_check(addr: &str) -> Result<()> {
     let mut response = String::new();
     reader.read_to_string(&mut response).await?;
 
-    if response.contains("200 OK")
-        && response.contains("\"s3\":\"running\"")
-        && response.contains("\"dynamodb\":\"running\"")
-    {
+    // Accept any 200 response that reports at least one running service.
+    if response.contains("200 OK") && response.contains("\"running\"") {
         Ok(())
     } else {
         anyhow::bail!("unhealthy response from {addr}")
     }
 }
 
+/// Read the gateway listen address from the environment.
+///
+/// Checks `GATEWAY_LISTEN` (the canonical var) and falls back to the
+/// S3Config default when S3 is compiled in.
+fn gateway_listen_addr() -> String {
+    std::env::var("GATEWAY_LISTEN").unwrap_or_else(|_| "0.0.0.0:4566".to_string())
+}
+
+/// Read the log level from the environment.
+fn log_level() -> String {
+    std::env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let listen_addr = gateway_listen_addr();
+
     // Handle --health-check flag for Docker HEALTHCHECK.
     if std::env::args().any(|a| a == "--health-check") {
-        let config = S3Config::from_env();
-        let addr = config.gateway_listen.replace("0.0.0.0", "127.0.0.1");
+        let addr = listen_addr.replace("0.0.0.0", "127.0.0.1");
         let healthy = run_health_check(&addr).await.is_ok();
         std::process::exit(i32::from(!healthy));
     }
 
-    let s3_config = S3Config::from_env();
-    let dynamodb_config = DynamoDBConfig::from_env();
+    let log = log_level();
+    init_tracing(&log)?;
 
-    init_tracing(&s3_config.log_level)?;
+    let enabled = parse_enabled_services();
 
-    info!(
-        gateway_listen = %s3_config.gateway_listen,
-        s3_domain = %s3_config.s3_domain,
-        s3_virtual_hosting = s3_config.s3_virtual_hosting,
-        s3_skip_signature_validation = s3_config.s3_skip_signature_validation,
-        dynamodb_skip_signature_validation = dynamodb_config.skip_signature_validation,
-        version = VERSION,
-        "starting RustStack Server",
-    );
+    // Warn about services that are requested but not compiled in.
+    for name in &enabled {
+        if !is_compiled_in(name) {
+            warn!(service = %name, "requested service is not compiled in, skipping");
+        }
+    }
 
-    // Initialize S3 service.
-    let s3_provider = RustStackS3::new(s3_config.clone());
-    let s3_handler = RustStackHandler(s3_provider);
-    let s3_http_config = build_s3_http_config(&s3_config);
-    let s3_service = S3HttpService::new(s3_handler, s3_http_config);
+    let is_enabled = |name: &str| enabled.iter().any(|s| s == name) && is_compiled_in(name);
 
-    // Initialize DynamoDB service.
-    let dynamodb_provider = RustStackDynamoDB::new(dynamodb_config.clone());
-    let dynamodb_handler = RustStackDynamoDBHandler::new(Arc::new(dynamodb_provider));
-    let dynamodb_http_config = build_dynamodb_http_config(&dynamodb_config);
-    let dynamodb_service =
-        DynamoDBHttpService::new(Arc::new(dynamodb_handler), dynamodb_http_config);
+    let mut services: Vec<Box<dyn ServiceRouter>> = Vec::new();
 
-    // Create the gateway that routes between S3 and DynamoDB.
-    let gateway = GatewayService::new(s3_service, dynamodb_service);
+    // ----- DynamoDB (register before S3: S3 is the catch-all) -----
+    #[cfg(feature = "dynamodb")]
+    if is_enabled("dynamodb") {
+        let dynamodb_config = DynamoDBConfig::from_env();
+        info!(
+            dynamodb_skip_signature_validation = dynamodb_config.skip_signature_validation,
+            "initializing DynamoDB service",
+        );
+        let dynamodb_provider = RustStackDynamoDB::new(dynamodb_config.clone());
+        let dynamodb_handler = RustStackDynamoDBHandler::new(Arc::new(dynamodb_provider));
+        let dynamodb_http_config = build_dynamodb_http_config(&dynamodb_config);
+        let dynamodb_service =
+            DynamoDBHttpService::new(Arc::new(dynamodb_handler), dynamodb_http_config);
+        services.push(Box::new(service::DynamoDBServiceRouter::new(
+            dynamodb_service,
+        )));
+    }
 
-    let addr: SocketAddr = s3_config
-        .gateway_listen
+    // ----- S3 (catch-all, must be last) -----
+    #[cfg(feature = "s3")]
+    if is_enabled("s3") {
+        let s3_config = S3Config::from_env();
+        info!(
+            s3_domain = %s3_config.s3_domain,
+            s3_virtual_hosting = s3_config.s3_virtual_hosting,
+            s3_skip_signature_validation = s3_config.s3_skip_signature_validation,
+            "initializing S3 service",
+        );
+        let s3_provider = RustStackS3::new(s3_config.clone());
+        let s3_handler = handler::RustStackHandler(s3_provider);
+        let s3_http_config = build_s3_http_config(&s3_config);
+        let s3_service = S3HttpService::new(s3_handler, s3_http_config);
+        services.push(Box::new(service::S3ServiceRouter::new(s3_service)));
+    }
+
+    if services.is_empty() {
+        anyhow::bail!(
+            "no services enabled. Check the SERVICES environment variable \
+             and compiled feature flags."
+        );
+    }
+
+    let gateway = GatewayService::new(services);
+    let service_names = gateway.service_names();
+
+    let addr: SocketAddr = listen_addr
         .parse()
-        .with_context(|| format!("invalid bind address: {}", s3_config.gateway_listen))?;
+        .with_context(|| format!("invalid bind address: {listen_addr}"))?;
 
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind to {addr}"))?;
 
-    info!(%addr, "listening for connections");
+    info!(
+        %addr,
+        services = ?service_names,
+        version = VERSION,
+        "starting RustStack Server",
+    );
 
     serve(listener, gateway).await
 }
@@ -252,6 +347,51 @@ async fn main() -> Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_should_parse_services_value_default() {
+        // Empty string = all compiled-in services.
+        let services = parse_services_value("");
+        if cfg!(feature = "s3") {
+            assert!(services.contains(&"s3".to_string()));
+        }
+        if cfg!(feature = "dynamodb") {
+            assert!(services.contains(&"dynamodb".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_should_parse_services_value_explicit() {
+        let services = parse_services_value("dynamodb");
+        assert_eq!(services, vec!["dynamodb"]);
+    }
+
+    #[test]
+    fn test_should_parse_services_value_multiple() {
+        let services = parse_services_value("s3, dynamodb");
+        assert_eq!(services, vec!["s3", "dynamodb"]);
+    }
+
+    #[test]
+    fn test_should_parse_services_value_whitespace() {
+        // Whitespace-only = all compiled-in services.
+        let services = parse_services_value("  ");
+        assert!(!services.is_empty());
+    }
+
+    #[test]
+    fn test_should_parse_services_value_case_insensitive() {
+        let services = parse_services_value("S3,DynamoDB");
+        assert_eq!(services, vec!["s3", "dynamodb"]);
+    }
+
+    #[test]
+    fn test_should_detect_compiled_services() {
+        assert_eq!(is_compiled_in("s3"), cfg!(feature = "s3"));
+        assert_eq!(is_compiled_in("dynamodb"), cfg!(feature = "dynamodb"));
+        assert!(!is_compiled_in("sqs"));
+    }
+
+    #[cfg(feature = "s3")]
     #[test]
     fn test_should_build_s3_http_config_from_s3_config() {
         let config = S3Config::from_env();
@@ -266,6 +406,7 @@ mod tests {
         assert_eq!(http_config.region, config.default_region);
     }
 
+    #[cfg(feature = "dynamodb")]
     #[test]
     fn test_should_build_dynamodb_http_config_from_dynamodb_config() {
         let config = DynamoDBConfig::from_env();

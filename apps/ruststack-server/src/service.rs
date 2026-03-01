@@ -1,0 +1,169 @@
+//! Service router abstraction for the gateway.
+//!
+//! Each AWS service (S3, DynamoDB, etc.) implements [`ServiceRouter`] to
+//! declare how it matches incoming requests and handles them. The gateway
+//! holds a list of routers and dispatches to the first match.
+//!
+//! [`GatewayBody`] is a type-erased HTTP response body shared by all services.
+
+use std::convert::Infallible;
+use std::future::Future;
+use std::io;
+use std::pin::Pin;
+
+use bytes::Bytes;
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, Full};
+use hyper::body::Incoming;
+
+/// Type-erased response body used by the gateway.
+///
+/// All service routers convert their native response body into this type
+/// so the gateway can handle responses uniformly.
+pub type GatewayBody = BoxBody<Bytes, io::Error>;
+
+/// Create a [`GatewayBody`] from a string.
+pub fn gateway_body_from_string(s: impl Into<String>) -> GatewayBody {
+    Full::new(Bytes::from(s.into()))
+        .map_err(|never: Infallible| match never {})
+        .boxed()
+}
+
+/// A routable AWS service registered with the gateway.
+///
+/// Implementors declare which requests they handle (via [`matches`](ServiceRouter::matches))
+/// and how to process them (via [`call`](ServiceRouter::call)).
+pub trait ServiceRouter: Send + Sync {
+    /// Service name for health reporting (e.g., `"s3"`, `"dynamodb"`).
+    fn name(&self) -> &'static str;
+
+    /// Returns `true` if this router should handle the given request.
+    fn matches(&self, req: &http::Request<Incoming>) -> bool;
+
+    /// Handle the request, producing a response with a type-erased body.
+    fn call(
+        &self,
+        req: http::Request<Incoming>,
+    ) -> Pin<Box<dyn Future<Output = Result<http::Response<GatewayBody>, Infallible>> + Send>>;
+}
+
+// ---------------------------------------------------------------------------
+// S3
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "s3")]
+mod s3_router {
+    use std::convert::Infallible;
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use http_body_util::BodyExt;
+    use hyper::body::Incoming;
+    use hyper::service::Service;
+    use ruststack_s3_http::dispatch::S3Handler;
+    use ruststack_s3_http::service::S3HttpService;
+
+    use super::{GatewayBody, ServiceRouter};
+
+    /// Routes requests to the S3 service.
+    ///
+    /// S3 acts as the catch-all: it matches every request that no other
+    /// service has claimed. Register it **last** in the gateway's service list.
+    pub struct S3ServiceRouter<H: S3Handler> {
+        inner: S3HttpService<H>,
+    }
+
+    impl<H: S3Handler> S3ServiceRouter<H> {
+        /// Wrap an [`S3HttpService`] in a router.
+        pub fn new(inner: S3HttpService<H>) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl<H: S3Handler> ServiceRouter for S3ServiceRouter<H> {
+        fn name(&self) -> &'static str {
+            "s3"
+        }
+
+        /// S3 is the default service — it matches every request.
+        fn matches(&self, _req: &http::Request<Incoming>) -> bool {
+            true
+        }
+
+        fn call(
+            &self,
+            req: http::Request<Incoming>,
+        ) -> Pin<Box<dyn Future<Output = Result<http::Response<GatewayBody>, Infallible>> + Send>>
+        {
+            let svc = self.inner.clone();
+            Box::pin(async move {
+                let resp = svc.call(req).await;
+                Ok(resp.unwrap_or_else(|e| match e {}).map(BodyExt::boxed))
+            })
+        }
+    }
+}
+
+#[cfg(feature = "s3")]
+pub use s3_router::S3ServiceRouter;
+
+// ---------------------------------------------------------------------------
+// DynamoDB
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "dynamodb")]
+mod dynamodb_router {
+    use std::convert::Infallible;
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use http_body_util::BodyExt;
+    use hyper::body::Incoming;
+    use hyper::service::Service;
+    use ruststack_dynamodb_http::dispatch::DynamoDBHandler;
+    use ruststack_dynamodb_http::service::DynamoDBHttpService;
+
+    use super::{GatewayBody, ServiceRouter};
+
+    /// Routes requests to the DynamoDB service.
+    ///
+    /// Matches requests whose `X-Amz-Target` header starts with `DynamoDB_`.
+    pub struct DynamoDBServiceRouter<H: DynamoDBHandler> {
+        inner: DynamoDBHttpService<H>,
+    }
+
+    impl<H: DynamoDBHandler> DynamoDBServiceRouter<H> {
+        /// Wrap a [`DynamoDBHttpService`] in a router.
+        pub fn new(inner: DynamoDBHttpService<H>) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl<H: DynamoDBHandler> ServiceRouter for DynamoDBServiceRouter<H> {
+        fn name(&self) -> &'static str {
+            "dynamodb"
+        }
+
+        fn matches(&self, req: &http::Request<Incoming>) -> bool {
+            req.headers()
+                .get("x-amz-target")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|t| t.starts_with("DynamoDB_"))
+        }
+
+        fn call(
+            &self,
+            req: http::Request<Incoming>,
+        ) -> Pin<Box<dyn Future<Output = Result<http::Response<GatewayBody>, Infallible>> + Send>>
+        {
+            let svc = self.inner.clone();
+            Box::pin(async move {
+                let resp = svc.call(req).await;
+                Ok(resp.unwrap_or_else(|e| match e {}).map(BodyExt::boxed))
+            })
+        }
+    }
+}
+
+#[cfg(feature = "dynamodb")]
+pub use dynamodb_router::DynamoDBServiceRouter;
