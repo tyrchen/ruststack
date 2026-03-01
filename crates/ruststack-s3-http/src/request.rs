@@ -169,6 +169,44 @@ fn require_key(key: Option<&str>) -> Result<String, S3Error> {
         .ok_or_else(|| S3Error::with_message(S3ErrorCode::InvalidRequest, "Object key is required"))
 }
 
+/// Known valid S3 storage class values.
+const VALID_STORAGE_CLASSES: &[&str] = &[
+    "DEEP_ARCHIVE",
+    "EXPRESS_ONEZONE",
+    "FSX_ONTAP",
+    "FSX_OPENZFS",
+    "GLACIER",
+    "GLACIER_IR",
+    "INTELLIGENT_TIERING",
+    "ONEZONE_IA",
+    "OUTPOSTS",
+    "REDUCED_REDUNDANCY",
+    "SNOW",
+    "STANDARD",
+    "STANDARD_IA",
+];
+
+/// Validate the `x-amz-storage-class` header if present.
+///
+/// Returns `InvalidStorageClass` error if the value is not a recognized storage class.
+fn validate_storage_class(parts: &http::request::Parts) -> Result<(), S3Error> {
+    if let Some(value) = parts.headers.get("x-amz-storage-class") {
+        let s = value.to_str().map_err(|_| {
+            S3Error::with_message(
+                S3ErrorCode::InvalidStorageClass,
+                "The storage class you specified is not valid",
+            )
+        })?;
+        if !VALID_STORAGE_CLASSES.contains(&s) {
+            return Err(S3Error::with_message(
+                S3ErrorCode::InvalidStorageClass,
+                "The storage class you specified is not valid",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Extract a header value and convert it using `From<&str>` (for enum types).
 fn header_enum<T>(parts: &http::request::Parts, name: &str) -> Option<T>
 where
@@ -532,6 +570,8 @@ impl FromS3Request for PutObjectInput {
         _query_params: &[(String, String)],
         body: Bytes,
     ) -> Result<Self, S3Error> {
+        validate_storage_class(parts)?;
+
         let body_blob = if body.is_empty() {
             None
         } else {
@@ -604,6 +644,8 @@ impl FromS3Request for CopyObjectInput {
         _query_params: &[(String, String)],
         _body: Bytes,
     ) -> Result<Self, S3Error> {
+        validate_storage_class(parts)?;
+
         let copy_source = header_str(parts, "x-amz-copy-source").ok_or_else(|| {
             S3Error::with_message(
                 S3ErrorCode::InvalidRequest,
@@ -819,6 +861,8 @@ impl FromS3Request for CreateMultipartUploadInput {
         _query_params: &[(String, String)],
         _body: Bytes,
     ) -> Result<Self, S3Error> {
+        validate_storage_class(parts)?;
+
         Ok(Self {
             acl: header_enum(parts, "x-amz-acl"),
             bucket: require_bucket(bucket)?,

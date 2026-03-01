@@ -263,8 +263,6 @@ pub fn verify_sigv4(
         payload_hash,
     );
 
-    debug!(canonical_request, "Built canonical request");
-
     // Hash the canonical request.
     let canonical_hash = hex::encode(Sha256::digest(canonical_request.as_bytes()));
 
@@ -274,8 +272,6 @@ pub fn verify_sigv4(
         parsed.date, parsed.region, parsed.service
     );
     let string_to_sign = build_string_to_sign(&timestamp, &credential_scope, &canonical_hash);
-
-    debug!(string_to_sign, "Built string to sign");
 
     // Derive the signing key and compute the expected signature.
     let signing_key =

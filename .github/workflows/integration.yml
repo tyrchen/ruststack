@@ -101,10 +101,12 @@ jobs:
 
           # Assert we don't regress below the current number of passing suites.
           # Mint prints "Executed N out of 15 tests successfully." at the end.
-          # Passing: aws-sdk-java, aws-sdk-java-v2, s3cmd, awscli, healthcheck (5/15).
-          # Remaining blockers: S3 Select (3), presigned POST (1), Object Lock (1),
-          # bucket policy enforcement (1), SSE notifications (1), SigV2/bytes (1), mc CLI (1).
-          MIN_PASS=5
+          # Passing: aws-sdk-java, aws-sdk-java-v2, aws-sdk-ruby, awscli,
+          # healthcheck, minio-go, s3cmd, versioning (8/15).
+          # Remaining blockers: S3 Select (3), bucket policy enforcement (1),
+          # bucket replication (1), listenBucketNotification auth (1),
+          # minio-js cleanup (1).
+          MIN_PASS=8
           PASS_COUNT=$(grep -oP 'Executed \K[0-9]+' /tmp/mint-logs/mint-output.txt || echo "0")
           FAIL_COUNT=$(grep -c '"status": "FAIL"' /tmp/mint-logs/mint-output.txt || true)
           echo "Mint results: $PASS_COUNT passed, $FAIL_COUNT failed (minimum required: $MIN_PASS)"

@@ -40,12 +40,14 @@ use crate::validation::{validate_content_md5, validate_metadata, validate_object
 /// # Errors
 ///
 /// Returns `AccessDenied` if the version has a legal hold enabled or an active
-/// retention period.
+/// retention period that cannot be bypassed.
 ///
 /// AWS S3 rules:
 /// - DELETE *without* a version ID always succeeds (creates a delete marker).
 /// - DELETE *with* a version ID must be rejected if the version has a legal
 ///   hold enabled or a retention period that has not yet expired.
+/// - `BypassGovernanceRetention` allows skipping GOVERNANCE-mode retention
+///   checks, but never COMPLIANCE-mode or legal holds.
 ///
 /// Returns `Ok(())` when the deletion is allowed.
 #[allow(clippy::result_large_err)]
@@ -53,6 +55,7 @@ fn check_object_lock_for_delete(
     store: &ObjectStore,
     key: &str,
     version_id: &str,
+    bypass_governance: bool,
 ) -> Result<(), S3Error> {
     let Some(obj) = store.get_version(key, version_id) else {
         // Version not found — nothing to protect.
@@ -68,10 +71,15 @@ fn check_object_lock_for_delete(
 
     if let Some(retain_until) = obj.metadata.object_lock_retain_until {
         if retain_until > Utc::now() {
-            return Err(S3Error::with_message(
-                S3ErrorCode::AccessDenied,
-                "Object Lock retention period has not expired",
-            ));
+            let is_governance = obj.metadata.object_lock_mode.as_deref() == Some("GOVERNANCE");
+            if is_governance && bypass_governance {
+                // GOVERNANCE mode retention can be bypassed.
+            } else {
+                return Err(S3Error::with_message(
+                    S3ErrorCode::AccessDenied,
+                    "Object Lock retention period has not expired",
+                ));
+            }
         }
     }
 
@@ -458,8 +466,9 @@ impl RustStackS3 {
         let (delete_marker_version_id, version_id_to_remove) =
             if let Some(version_id) = &input.version_id {
                 // Delete a specific version.
+                let bypass = input.bypass_governance_retention.unwrap_or(false);
                 let mut store = bucket.objects.write();
-                check_object_lock_for_delete(&store, &key, version_id)?;
+                check_object_lock_for_delete(&store, &key, version_id, bypass)?;
                 let removed = store.delete_version(&key, version_id);
                 if let Some(ref version) = removed {
                     self.storage
@@ -505,6 +514,7 @@ impl RustStackS3 {
             .get_bucket(&bucket_name)
             .map_err(S3ServiceError::into_s3_error)?;
 
+        let bypass = input.bypass_governance_retention.unwrap_or(false);
         let delete_request = input.delete;
 
         let objects = delete_request.objects;
@@ -520,7 +530,7 @@ impl RustStackS3 {
             if let Some(ref vid) = version_id {
                 // Delete a specific version.
                 let mut store = bucket.objects.write();
-                if let Err(lock_err) = check_object_lock_for_delete(&store, &key, vid) {
+                if let Err(lock_err) = check_object_lock_for_delete(&store, &key, vid, bypass) {
                     errors.push(ruststack_s3_model::types::Error {
                         code: Some(lock_err.code.as_str().to_owned()),
                         key: Some(key),

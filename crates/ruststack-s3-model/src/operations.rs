@@ -143,6 +143,8 @@ pub enum S3Operation {
     ListObjectsV2,
     /// The ListObjectVersions operation.
     ListObjectVersions,
+    /// The PostObject (browser-based upload) operation.
+    PostObject,
 }
 
 impl S3Operation {
@@ -220,6 +222,7 @@ impl S3Operation {
             Self::ListObjects => "ListObjects",
             Self::ListObjectsV2 => "ListObjectsV2",
             Self::ListObjectVersions => "ListObjectVersions",
+            Self::PostObject => "PostObject",
         }
     }
 
@@ -297,6 +300,7 @@ impl S3Operation {
             "ListObjects" => Some(Self::ListObjects),
             "ListObjectsV2" => Some(Self::ListObjectsV2),
             "ListObjectVersions" => Some(Self::ListObjectVersions),
+            "PostObject" => Some(Self::PostObject),
             _ => None,
         }
     }

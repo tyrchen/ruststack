@@ -395,6 +395,14 @@ impl ObjectVersion {
         }
     }
 
+    /// Returns a mutable reference to the inner `S3Object`, if this is an object version.
+    pub fn as_object_mut(&mut self) -> Option<&mut S3Object> {
+        match self {
+            Self::Object(obj) => Some(obj),
+            Self::DeleteMarker(_) => None,
+        }
+    }
+
     /// Returns a reference to the inner `S3DeleteMarker`, if this is a delete marker.
     #[must_use]
     pub fn as_delete_marker(&self) -> Option<&S3DeleteMarker> {

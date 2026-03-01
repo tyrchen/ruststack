@@ -5,6 +5,7 @@
 //! dispatched to the corresponding `handle_*` method on [`RustStackS3`], with request
 //! deserialization via [`FromS3Request`] and response serialization via [`IntoS3Response`].
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -12,11 +13,14 @@ use bytes::Bytes;
 use ruststack_s3_core::RustStackS3;
 use ruststack_s3_http::body::S3ResponseBody;
 use ruststack_s3_http::dispatch::S3Handler;
+use ruststack_s3_http::multipart;
 use ruststack_s3_http::request::FromS3Request;
 use ruststack_s3_http::response::IntoS3Response;
 use ruststack_s3_http::router::RoutingContext;
 use ruststack_s3_model::S3Operation;
-use ruststack_s3_model::error::S3Error;
+use ruststack_s3_model::error::{S3Error, S3ErrorCode};
+use ruststack_s3_model::input::PutObjectInput;
+use ruststack_s3_model::request::StreamingBlob;
 
 /// Wrapper that implements [`S3Handler`] by delegating to [`RustStackS3`] handler methods.
 #[derive(Debug, Clone)]
@@ -352,6 +356,9 @@ impl S3Handler for RustStackHandler {
                     })
                     .await
                 }
+                S3Operation::PostObject => {
+                    dispatch_post_object(&parts, bucket, body, &provider).await
+                }
 
                 // ---------------------------------------------------------------
                 // Object Configuration
@@ -539,4 +546,107 @@ where
         .status(http::StatusCode::NO_CONTENT)
         .body(S3ResponseBody::empty())
         .map_err(|e| S3Error::internal_error(e.to_string()))
+}
+
+/// Dispatch an S3 POST Object (browser-based / presigned POST upload).
+///
+/// This is a special case that doesn't use `FromS3Request` because the key and body
+/// come from multipart form data rather than URL path and raw body.
+async fn dispatch_post_object(
+    parts: &http::request::Parts,
+    bucket: Option<&str>,
+    body: Bytes,
+    provider: &RustStackS3,
+) -> Result<http::Response<S3ResponseBody>, S3Error> {
+    let bucket_name = bucket
+        .ok_or_else(|| S3Error::with_message(S3ErrorCode::InvalidRequest, "Missing bucket name"))?;
+
+    // Extract Content-Type header to get the boundary.
+    let content_type = parts
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| {
+            S3Error::with_message(
+                S3ErrorCode::InvalidRequest,
+                "POST Object requires Content-Type header",
+            )
+        })?;
+
+    let boundary = multipart::extract_boundary(content_type)?;
+    let form = multipart::parse_multipart(&body, &boundary)?;
+
+    // The "key" field is required.
+    let key = form.fields.get("key").ok_or_else(|| {
+        S3Error::with_message(
+            S3ErrorCode::InvalidRequest,
+            "Missing required 'key' field in POST form data",
+        )
+    })?;
+
+    // Determine success_action_status (default 204).
+    let success_status = form
+        .fields
+        .get("success_action_status")
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(204);
+
+    // Extract user metadata from form fields (x-amz-meta-* fields).
+    let metadata: HashMap<String, String> = form
+        .fields
+        .iter()
+        .filter(|(k, _)| k.starts_with("x-amz-meta-"))
+        .map(|(k, v)| {
+            (
+                k.strip_prefix("x-amz-meta-").unwrap_or(k).to_owned(),
+                v.clone(),
+            )
+        })
+        .collect();
+
+    // Build a PutObjectInput and delegate to the existing handler.
+    let input = PutObjectInput {
+        bucket: bucket_name.to_owned(),
+        key: key.clone(),
+        body: Some(StreamingBlob::new(form.file_data)),
+        content_type: form.file_content_type,
+        metadata,
+        ..PutObjectInput::default()
+    };
+
+    let output = provider.handle_put_object(input).await?;
+
+    // Build response based on success_action_status.
+    match success_status {
+        200 | 201 => {
+            // Return XML response with bucket, key, etag, location.
+            let etag = output.e_tag.unwrap_or_default();
+            let location = format!("/{bucket_name}/{key}");
+            let xml = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+                 <PostResponse>\n\
+                   <Location>{location}</Location>\n\
+                   <Bucket>{bucket_name}</Bucket>\n\
+                   <Key>{key}</Key>\n\
+                   <ETag>{etag}</ETag>\n\
+                 </PostResponse>"
+            );
+            http::Response::builder()
+                .status(success_status)
+                .header("Content-Type", "application/xml")
+                .header("ETag", &etag)
+                .body(S3ResponseBody::from_string(xml))
+                .map_err(|e| S3Error::internal_error(e.to_string()))
+        }
+        _ => {
+            // 204 No Content (default).
+            let mut builder = http::Response::builder().status(204);
+            if let Some(etag) = &output.e_tag {
+                builder = builder.header("ETag", etag);
+            }
+            builder
+                .body(S3ResponseBody::empty())
+                .map_err(|e| S3Error::internal_error(e.to_string()))
+        }
+    }
 }

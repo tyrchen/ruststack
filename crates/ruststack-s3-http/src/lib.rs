@@ -57,6 +57,7 @@
 pub mod body;
 pub mod codec;
 pub mod dispatch;
+pub mod multipart;
 pub mod request;
 pub mod response;
 pub mod router;

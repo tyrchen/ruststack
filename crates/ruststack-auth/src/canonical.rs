@@ -29,14 +29,6 @@ const URI_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'.')
     .remove(b'~');
 
-/// The set of characters that must be percent-encoded in query string
-/// keys and values. Same as `URI_ENCODE_SET` but also preserves `/`.
-const QUERY_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'_')
-    .remove(b'.')
-    .remove(b'~');
-
 /// Build the full canonical request string from its components.
 ///
 /// The result is a newline-separated string of:
@@ -115,10 +107,14 @@ pub fn build_canonical_uri(path: &str) -> String {
     encoded_segments.join("/")
 }
 
-/// Build the canonical query string by sorting parameters and URI-encoding keys and values.
+/// Build the canonical query string by sorting parameters.
 ///
 /// Parameters are sorted by key name first, then by value for duplicate keys.
-/// Each key and value is individually percent-encoded.
+/// The raw query string values are preserved as-is (no decode/re-encode) because
+/// different clients use different encoding rules when signing. For example,
+/// AWS SDKs percent-encode `:` and `*` but minio-java (via OkHttp) leaves them
+/// raw. The server must use the exact same encoding the client used for signing,
+/// which is whatever appears in the HTTP request.
 ///
 /// # Examples
 ///
@@ -137,20 +133,13 @@ pub fn build_canonical_query_string(query: &str) -> String {
         return String::new();
     }
 
-    let mut params: Vec<(String, String)> = query
+    let mut params: Vec<(&str, &str)> = query
         .split('&')
         .filter(|s| !s.is_empty())
-        .map(|param| {
-            let (key, value) = param.split_once('=').unwrap_or((param, ""));
-            // Decode first to normalize, then re-encode to produce consistent canonical form.
-            // This prevents double-encoding when the query string is already percent-encoded.
-            let decoded_key = percent_decode_str(key).decode_utf8_lossy();
-            let decoded_value = percent_decode_str(value).decode_utf8_lossy();
-            (query_encode(&decoded_key), query_encode(&decoded_value))
-        })
+        .map(|param| param.split_once('=').unwrap_or((param, "")))
         .collect();
 
-    params.sort();
+    params.sort_unstable();
 
     params
         .iter()
@@ -238,11 +227,6 @@ fn uri_encode(input: &str) -> String {
     utf8_percent_encode(input, URI_ENCODE_SET).to_string()
 }
 
-/// URI-encode a query string key or value using the AWS SigV4 encoding rules.
-fn query_encode(input: &str) -> String {
-    utf8_percent_encode(input, QUERY_ENCODE_SET).to_string()
-}
-
 /// Collapse consecutive whitespace characters in a string to a single space.
 fn collapse_whitespace(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
@@ -292,9 +276,10 @@ mod tests {
     }
 
     #[test]
-    fn test_should_encode_query_parameter_values() {
+    fn test_should_preserve_raw_query_parameter_values() {
+        // Raw values are preserved as-is — no re-encoding is applied.
         assert_eq!(
-            build_canonical_query_string("key=hello world"),
+            build_canonical_query_string("key=hello%20world"),
             "key=hello%20world"
         );
     }
@@ -394,7 +379,7 @@ mod tests {
             &X-Amz-Expires=86400\
             &X-Amz-SignedHeaders=host";
         let result = build_canonical_query_string(query);
-        // Should be sorted and re-encoded (not double-encoded)
+        // Should be sorted, raw values preserved
         assert!(result.contains("X-Amz-Algorithm=AWS4-HMAC-SHA256"));
         assert!(result.contains("X-Amz-Expires=86400"));
         // %2F should be preserved, not double-encoded to %252F
@@ -402,22 +387,31 @@ mod tests {
     }
 
     #[test]
-    fn test_should_not_double_encode_query_parameters() {
-        // Simulate a query string that arrives already percent-encoded from the HTTP layer
+    fn test_should_preserve_percent_encoded_query_parameters() {
+        // Percent-encoded values are preserved as-is.
         let query = "events=s3%3AObjectCreated%3A%2A&prefix=test";
         let result = build_canonical_query_string(query);
-        // Should decode first, then re-encode consistently
         assert_eq!(result, "events=s3%3AObjectCreated%3A%2A&prefix=test");
     }
 
     #[test]
-    fn test_should_normalize_inconsistent_encoding_in_query() {
-        // Raw (unencoded) input should produce the same result as pre-encoded input
+    fn test_should_preserve_raw_special_characters_in_query() {
+        // Raw (unencoded) special characters are preserved as-is.
+        // This matches minio-java behavior which uses OkHttp's encoding
+        // that leaves `:` and `*` unencoded in query strings.
         let raw = "events=s3:ObjectCreated:*&prefix=test";
-        let encoded = "events=s3%3AObjectCreated%3A%2A&prefix=test";
+        let result = build_canonical_query_string(raw);
+        assert_eq!(result, "events=s3:ObjectCreated:*&prefix=test");
+    }
+
+    #[test]
+    fn test_should_sort_duplicate_query_keys() {
+        // Duplicate keys should be sorted by value.
+        let query = "events=s3:ObjectCreated:*&events=s3:ObjectAccessed:*&prefix=p";
+        let result = build_canonical_query_string(query);
         assert_eq!(
-            build_canonical_query_string(raw),
-            build_canonical_query_string(encoded)
+            result,
+            "events=s3:ObjectAccessed:*&events=s3:ObjectCreated:*&prefix=p"
         );
     }
 

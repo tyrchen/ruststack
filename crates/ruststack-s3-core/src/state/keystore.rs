@@ -111,6 +111,30 @@ impl ObjectStore {
         }
     }
 
+    /// Get a mutable reference to the current (latest non-delete-marker) object.
+    /// Used for in-place metadata updates (e.g., retention, legal hold).
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut S3Object> {
+        match self {
+            Self::Unversioned(ks) => ks.get_mut(key),
+            Self::Versioned(vs) => vs.get_mut(key),
+        }
+    }
+
+    /// Get a mutable reference to a specific version by key and version ID.
+    /// Used for in-place metadata updates (e.g., retention, legal hold).
+    pub fn get_version_mut(&mut self, key: &str, version_id: &str) -> Option<&mut S3Object> {
+        match self {
+            Self::Unversioned(ks) => {
+                if version_id == "null" {
+                    ks.get_mut(key)
+                } else {
+                    None
+                }
+            }
+            Self::Versioned(vs) => vs.get_version_mut(key, version_id),
+        }
+    }
+
     /// Check if a specific version ID for a key is a delete marker.
     #[must_use]
     pub fn is_delete_marker(&self, key: &str, version_id: &str) -> bool {
@@ -204,10 +228,17 @@ impl ObjectStore {
         }
     }
 
-    /// Whether the store contains zero non-deleted objects.
+    /// Whether the store contains zero entries (objects, versions, or delete markers).
+    ///
+    /// This checks for truly empty storage (no entries at all), which is the
+    /// correct check for `DeleteBucket`. For listing purposes, use [`Self::len()`]
+    /// which only counts non-deleted objects.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        match self {
+            Self::Unversioned(ks) => ks.is_empty(),
+            Self::Versioned(vs) => vs.objects.is_empty(),
+        }
     }
 
     /// Transition from un-versioned to versioned storage.
@@ -255,6 +286,11 @@ impl KeyStore {
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&S3Object> {
         self.objects.get(key)
+    }
+
+    /// Get a mutable reference to an object by key.
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut S3Object> {
+        self.objects.get_mut(key)
     }
 
     /// Remove an object by key. Returns the removed object if any.
@@ -368,6 +404,24 @@ impl VersionedKeyStore {
         })
     }
 
+    /// Get a mutable reference to the current (latest non-delete-marker) object.
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut S3Object> {
+        self.objects.get_mut(key).and_then(|versions| {
+            let latest = versions.first_mut()?;
+            latest.as_object_mut()
+        })
+    }
+
+    /// Get a mutable reference to a specific version of an object.
+    pub fn get_version_mut(&mut self, key: &str, version_id: &str) -> Option<&mut S3Object> {
+        self.objects.get_mut(key).and_then(|versions| {
+            versions
+                .iter_mut()
+                .find(|v| v.version_id() == version_id)
+                .and_then(|v| v.as_object_mut())
+        })
+    }
+
     /// Check if a specific version ID for a key is a delete marker.
     #[must_use]
     pub fn is_delete_marker(&self, key: &str, version_id: &str) -> bool {
@@ -424,10 +478,14 @@ impl VersionedKeyStore {
             .count()
     }
 
-    /// Whether zero keys have a latest non-delete-marker version.
+    /// Whether the store contains zero entries (no versions or delete markers).
+    ///
+    /// This checks if the underlying BTreeMap is completely empty, which is
+    /// the correct semantics for `DeleteBucket` (AWS requires all versions
+    /// and delete markers to be removed before bucket deletion).
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.objects.is_empty()
     }
 
     /// List the latest non-delete-marker object for each key.
@@ -779,8 +837,13 @@ mod tests {
         let obj = vs.get("key1");
         assert!(obj.is_none());
 
-        // But len() counts keys whose latest is not a DM, so this key is "deleted".
+        // len() counts keys whose latest is not a DM, so this key is "deleted".
         assert_eq!(vs.len(), 0);
+
+        // But is_empty() is false because the BTreeMap still has entries
+        // (the original object version + delete marker). This is correct for
+        // DeleteBucket: a bucket with delete markers is NOT truly empty.
+        assert!(!vs.is_empty());
     }
 
     #[test]
@@ -905,6 +968,8 @@ mod tests {
         assert!(had);
         // After delete marker, len() should be 0 (key is logically deleted).
         assert_eq!(store.len(), 0);
+        // But is_empty() is false (entries still exist: the object + delete marker).
+        assert!(!store.is_empty());
     }
 
     #[test]

@@ -252,7 +252,7 @@ fn identify_bucket_operation(
         Method::PUT => Ok(identify_bucket_put(params, headers)),
         Method::DELETE => Ok(identify_bucket_delete(params)),
         Method::HEAD => Ok(S3Operation::HeadBucket),
-        Method::POST => identify_bucket_post(params),
+        Method::POST => Ok(identify_bucket_post(params)),
         _ => Err(S3Error::method_not_allowed(method.as_str())),
     }
 }
@@ -411,15 +411,14 @@ fn identify_bucket_delete(params: &[(String, String)]) -> S3Operation {
 }
 
 /// Identify a POST operation on a bucket.
-fn identify_bucket_post(params: &[(String, String)]) -> Result<S3Operation, S3Error> {
+fn identify_bucket_post(params: &[(String, String)]) -> S3Operation {
     if query_has_key(params, "delete") {
-        return Ok(S3Operation::DeleteObjects);
+        return S3Operation::DeleteObjects;
     }
 
-    Err(S3Error::with_message(
-        S3ErrorCode::InvalidRequest,
-        "Unsupported POST operation on bucket",
-    ))
+    // POST to a bucket without ?delete is a PostObject (browser-based upload).
+    // The PostObject handler validates that the body is multipart/form-data.
+    S3Operation::PostObject
 }
 
 /// Identify an object-level operation (bucket + key present).
@@ -520,8 +519,8 @@ fn identify_object_post(params: &[(String, String)]) -> Result<S3Operation, S3Er
     }
 
     Err(S3Error::with_message(
-        S3ErrorCode::InvalidRequest,
-        "Unsupported POST operation on object",
+        S3ErrorCode::MethodNotAllowed,
+        "The specified method is not allowed against this resource",
     ))
 }
 

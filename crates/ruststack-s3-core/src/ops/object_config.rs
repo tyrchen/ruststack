@@ -349,8 +349,61 @@ impl RustStackS3 {
         let retention = input.retention;
 
         let mut store = bucket.objects.write();
+
+        // First read existing retention metadata (immutable borrow).
+        {
+            let obj = if let Some(version_id) = &input.version_id {
+                store.get_version(&key, version_id).ok_or_else(|| {
+                    S3ServiceError::NoSuchVersion {
+                        key: key.clone(),
+                        version_id: version_id.clone(),
+                    }
+                    .into_s3_error()
+                })?
+            } else {
+                store
+                    .get(&key)
+                    .ok_or_else(|| S3ServiceError::NoSuchKey { key: key.clone() }.into_s3_error())?
+            };
+
+            // Enforce Object Lock retention rules.
+            let existing_until = obj.metadata.object_lock_retain_until;
+            let existing_mode = obj.metadata.object_lock_mode.as_deref();
+            let bypass = input.bypass_governance_retention.unwrap_or(false);
+
+            if let Some(current_until) = existing_until {
+                let now = chrono::Utc::now();
+                if current_until > now {
+                    let new_mode = retention.as_ref().and_then(|r| r.mode.as_ref());
+                    let new_until = retention.as_ref().and_then(|r| r.retain_until_date);
+
+                    // COMPLIANCE mode: cannot change mode, cannot shorten, cannot remove.
+                    if existing_mode == Some("COMPLIANCE") {
+                        let mode_changed = new_mode.is_none_or(|m| m.as_str() != "COMPLIANCE");
+                        let is_shortening = match new_until {
+                            Some(new) => new < current_until,
+                            None => true,
+                        };
+                        if mode_changed || is_shortening {
+                            return Err(S3ServiceError::AccessDenied.into_s3_error());
+                        }
+                    } else {
+                        // GOVERNANCE mode: can be bypassed with the bypass flag.
+                        let is_shortening = match new_until {
+                            Some(new) => new < current_until,
+                            None => true,
+                        };
+                        if is_shortening && !bypass {
+                            return Err(S3ServiceError::AccessDenied.into_s3_error());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Now mutate the version metadata in-place (mutable borrow).
         let obj = if let Some(version_id) = &input.version_id {
-            store.get_version(&key, version_id).ok_or_else(|| {
+            store.get_version_mut(&key, version_id).ok_or_else(|| {
                 S3ServiceError::NoSuchVersion {
                     key: key.clone(),
                     version_id: version_id.clone(),
@@ -359,48 +412,17 @@ impl RustStackS3 {
             })?
         } else {
             store
-                .get(&key)
+                .get_mut(&key)
                 .ok_or_else(|| S3ServiceError::NoSuchKey { key: key.clone() }.into_s3_error())?
         };
 
-        // Enforce Object Lock retention rules:
-        // - Cannot shorten an active retention period
-        // - Cannot remove retention without governance bypass
-        let existing_until = obj.metadata.object_lock_retain_until;
-        let existing_mode = obj.metadata.object_lock_mode.as_deref();
-        let bypass = input.bypass_governance_retention.unwrap_or(false);
-
-        if let Some(current_until) = existing_until {
-            let now = chrono::Utc::now();
-            if current_until > now {
-                // Retention is still active.
-                let new_until = retention.as_ref().and_then(|r| r.retain_until_date);
-
-                let is_shortening = match new_until {
-                    Some(new) => new < current_until,
-                    None => true, // removing retention entirely
-                };
-
-                if is_shortening {
-                    // GOVERNANCE mode can be bypassed.
-                    if existing_mode == Some("GOVERNANCE") && bypass {
-                        // Allow the change.
-                    } else {
-                        return Err(S3ServiceError::AccessDenied.into_s3_error());
-                    }
-                }
-            }
-        }
-
-        let mut updated = obj.clone();
         if let Some(ret) = retention {
-            updated.metadata.object_lock_mode = ret.mode.as_ref().map(|m| m.as_str().to_owned());
-            updated.metadata.object_lock_retain_until = ret.retain_until_date;
+            obj.metadata.object_lock_mode = ret.mode.as_ref().map(|m| m.as_str().to_owned());
+            obj.metadata.object_lock_retain_until = ret.retain_until_date;
         } else {
-            updated.metadata.object_lock_mode = None;
-            updated.metadata.object_lock_retain_until = None;
+            obj.metadata.object_lock_mode = None;
+            obj.metadata.object_lock_retain_until = None;
         }
-        store.put(updated);
 
         debug!(bucket = %bucket_name, key = %key, "put_object_retention completed");
 
@@ -485,25 +507,35 @@ impl RustStackS3 {
         }
 
         let mut store = bucket.objects.write();
-        let obj = if let Some(version_id) = &input.version_id {
+
+        // Verify the object exists first.
+        if let Some(version_id) = &input.version_id {
             store.get_version(&key, version_id).ok_or_else(|| {
                 S3ServiceError::NoSuchVersion {
                     key: key.clone(),
                     version_id: version_id.clone(),
                 }
                 .into_s3_error()
-            })?
+            })?;
         } else {
             store
                 .get(&key)
-                .ok_or_else(|| S3ServiceError::NoSuchKey { key: key.clone() }.into_s3_error())?
-        };
+                .ok_or_else(|| S3ServiceError::NoSuchKey { key: key.clone() }.into_s3_error())?;
+        }
 
-        let mut updated = obj.clone();
-        updated.metadata.object_lock_legal_hold = legal_hold
+        // Update the legal hold status in-place (no new version created).
+        let new_hold = legal_hold
             .and_then(|lh| lh.status)
             .map(|s| s.as_str() == "ON");
-        store.put(updated);
+
+        let obj = if let Some(version_id) = &input.version_id {
+            store.get_version_mut(&key, version_id)
+        } else {
+            store.get_mut(&key)
+        }
+        .ok_or_else(|| S3ServiceError::NoSuchKey { key: key.clone() }.into_s3_error())?;
+
+        obj.metadata.object_lock_legal_hold = new_hold;
 
         debug!(bucket = %bucket_name, key = %key, "put_object_legal_hold completed");
 
