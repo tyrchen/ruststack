@@ -8,3 +8,4 @@
 - [S3 Integration Test Suites Research](./research/s3-integration-test-suites-research.md) - Survey of available S3 compliance/integration test suites (Ceph s3-tests, MinIO Mint, MSST-S3, s3s-e2e) and recommendations for adoption.
 - [smithy-rs Server Codegen Research](./research/smithy-rs-server-codegen-research.md) - Evaluation of using AWS smithy-rs directly to build an S3-compatible server via Smithy code generation, compared with s3s.
 - [DynamoDB API Research](./research/dynamodb-api-research.md) - Comprehensive analysis of the AWS DynamoDB API surface, protocol, data model, Smithy model, and what a Rust-based local DynamoDB implementation would need.
+- [DynamoDB Integration Test Suites Research](./research/dynamodb-integration-test-suites-research.md) - Survey of available DynamoDB compatibility/conformance test suites and recommendations for adoption, analogous to MinIO Mint for S3.

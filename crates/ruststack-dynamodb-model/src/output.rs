@@ -49,7 +49,7 @@ pub struct DescribeTableOutput {
 #[serde(rename_all = "PascalCase")]
 pub struct ListTablesOutput {
     /// The names of the tables associated with the current account and region.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub table_names: Vec<String>,
 
     /// The name of the last table in the current page of results. Use this
@@ -139,7 +139,7 @@ pub struct DeleteItemOutput {
 #[serde(rename_all = "PascalCase")]
 pub struct QueryOutput {
     /// An array of item attributes that match the query conditions.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub items: Vec<HashMap<String, AttributeValue>>,
 
     /// The number of items in the response.
@@ -163,7 +163,7 @@ pub struct QueryOutput {
 #[serde(rename_all = "PascalCase")]
 pub struct ScanOutput {
     /// An array of item attributes that match the scan conditions.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub items: Vec<HashMap<String, AttributeValue>>,
 
     /// The number of items in the response.
@@ -191,12 +191,12 @@ pub struct ScanOutput {
 #[serde(rename_all = "PascalCase")]
 pub struct BatchGetItemOutput {
     /// A map of table names to the items retrieved from each table.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default)]
     pub responses: HashMap<String, Vec<HashMap<String, AttributeValue>>>,
 
     /// A map of tables and their respective keys that were not processed. Use
     /// these values as `RequestItems` in a subsequent `BatchGetItem` call.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default)]
     pub unprocessed_keys: HashMap<String, KeysAndAttributes>,
 
     /// The capacity units consumed by the operation for each table.
@@ -211,7 +211,7 @@ pub struct BatchWriteItemOutput {
     /// A map of tables and their respective `WriteRequest` objects that were
     /// not processed. Use these values as `RequestItems` in a subsequent
     /// `BatchWriteItem` call.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default)]
     pub unprocessed_items: HashMap<String, Vec<WriteRequest>>,
 
     /// A map of tables to item collection metrics for the tables that were

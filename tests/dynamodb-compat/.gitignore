@@ -1,0 +1,6 @@
+# Downloaded test files from ScyllaDB Alternator
+vendor/
+__pycache__/
+*.pyc
+# Python virtual environment
+.venv/

@@ -83,7 +83,42 @@ mint-stop:
 	@pkill -f "ruststack-server" 2>/dev/null || true
 	@echo "Server stopped"
 
+alternator: alternator-setup alternator-run
+
+alternator-setup:
+	@bash tests/dynamodb-compat/setup.sh
+
+ALTERNATOR_DIR := tests/dynamodb-compat/vendor
+ALTERNATOR_VENV := tests/dynamodb-compat/.venv
+ALTERNATOR_URL := http://localhost:4566
+# P0 test files matching our implemented operations
+# P0 test files matching our implemented operations.
+# test_limits.py excluded: imports from test_gsi (GSI = Phase 1).
+ALTERNATOR_P0_FILES := test_table.py test_item.py test_batch.py test_query.py test_scan.py \
+	test_condition_expression.py test_filter_expression.py test_update_expression.py \
+	test_projection_expression.py test_key_condition_expression.py test_number.py \
+	test_nested.py test_describe_table.py test_returnvalues.py
+
+alternator-run:
+	@echo "Running Alternator DynamoDB compatibility tests..."
+	@cd $(ALTERNATOR_DIR) && $(CURDIR)/$(ALTERNATOR_VENV)/bin/pytest -v --url $(ALTERNATOR_URL) \
+		$(ALTERNATOR_P0_FILES) \
+		-k "not scylla" \
+		2>&1 | tee /tmp/alternator-output.txt || true
+	@echo ""
+	@PASSED=$$(grep -oP '\d+ passed' /tmp/alternator-output.txt || echo "0 passed"); \
+		FAILED=$$(grep -oP '\d+ failed' /tmp/alternator-output.txt || echo "0 failed"); \
+		ERRORS=$$(grep -oP '\d+ error' /tmp/alternator-output.txt || echo "0 errors"); \
+		SKIPPED=$$(grep -oP '\d+ skipped' /tmp/alternator-output.txt || echo "0 skipped"); \
+		echo "Alternator results: $$PASSED, $$FAILED, $$ERRORS, $$SKIPPED"
+
+alternator-stop:
+	@pkill -f "ruststack-server" 2>/dev/null || true
+	@echo "Server stopped"
+
 update-submodule:
 	@git submodule update --init --recursive --remote
 
-.PHONY: build check test fmt clippy audit deny run release update-submodule codegen integration mint mint-build mint-start mint-run mint-stop
+.PHONY: build check test fmt clippy audit deny run release update-submodule codegen integration \
+	mint mint-build mint-start mint-run mint-stop \
+	alternator alternator-setup alternator-run alternator-stop
