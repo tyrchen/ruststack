@@ -239,8 +239,8 @@ impl EvalContext<'_> {
         for (i, element) in path.elements.iter().enumerate() {
             match element {
                 PathElement::Attribute(name) => {
-                    let resolved_name = if let Some(stripped) = name.strip_prefix('#') {
-                        self.names.get(stripped)?
+                    let resolved_name = if name.starts_with('#') {
+                        self.names.get(name.as_str())?
                     } else {
                         name
                     };
@@ -668,9 +668,9 @@ fn resolve_top_level_name(
             message: "path must start with an attribute name".to_owned(),
         });
     };
-    if let Some(stripped) = name.strip_prefix('#') {
+    if name.starts_with('#') {
         names
-            .get(stripped)
+            .get(name.as_str())
             .cloned()
             .ok_or_else(|| ExpressionError::UnresolvedName { name: name.clone() })
     } else {
@@ -686,8 +686,8 @@ fn resolve_top_level_name_opt(
     let PathElement::Attribute(name) = path.elements.first()? else {
         return None;
     };
-    if let Some(stripped) = name.strip_prefix('#') {
-        names.get(stripped).cloned()
+    if name.starts_with('#') {
+        names.get(name.as_str()).cloned()
     } else {
         Some(name.clone())
     }
@@ -707,8 +707,11 @@ fn set_path_value(
 
     let top_name = match &path.elements[0] {
         PathElement::Attribute(name) => {
-            if let Some(stripped) = name.strip_prefix('#') {
-                names.get(stripped).cloned().unwrap_or_else(|| name.clone())
+            if name.starts_with('#') {
+                names
+                    .get(name.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| name.clone())
             } else {
                 name.clone()
             }
@@ -779,8 +782,11 @@ fn apply_remove(
 
     let top_name = match &path.elements[0] {
         PathElement::Attribute(name) => {
-            if let Some(stripped) = name.strip_prefix('#') {
-                names.get(stripped).cloned().unwrap_or_else(|| name.clone())
+            if name.starts_with('#') {
+                names
+                    .get(name.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| name.clone())
             } else {
                 name.clone()
             }
@@ -833,7 +839,7 @@ mod tests {
     #[test]
     fn test_should_evaluate_equality() {
         let item = make_item(&[("name", AttributeValue::S("Alice".to_owned()))]);
-        let names = HashMap::from([("n".to_owned(), "name".to_owned())]);
+        let names = HashMap::from([("#n".to_owned(), "name".to_owned())]);
         let values = make_values(&[(":val", AttributeValue::S("Alice".to_owned()))]);
 
         let expr = parse_condition("#n = :val").unwrap();
@@ -867,8 +873,8 @@ mod tests {
             ("age", AttributeValue::N("30".to_owned())),
         ]);
         let names = HashMap::from([
-            ("n".to_owned(), "name".to_owned()),
-            ("a".to_owned(), "age".to_owned()),
+            ("#n".to_owned(), "name".to_owned()),
+            ("#a".to_owned(), "age".to_owned()),
         ]);
         let values = make_values(&[
             (":name", AttributeValue::S("Alice".to_owned())),
@@ -887,7 +893,7 @@ mod tests {
     #[test]
     fn test_should_evaluate_or_short_circuit() {
         let item = make_item(&[("name", AttributeValue::S("Alice".to_owned()))]);
-        let names = HashMap::from([("n".to_owned(), "name".to_owned())]);
+        let names = HashMap::from([("#n".to_owned(), "name".to_owned())]);
         let values = make_values(&[
             (":v1", AttributeValue::S("Alice".to_owned())),
             (":v2", AttributeValue::S("Bob".to_owned())),
@@ -906,7 +912,7 @@ mod tests {
     #[test]
     fn test_should_evaluate_attribute_exists() {
         let item = make_item(&[("name", AttributeValue::S("Alice".to_owned()))]);
-        let names = HashMap::from([("n".to_owned(), "name".to_owned())]);
+        let names = HashMap::from([("#n".to_owned(), "name".to_owned())]);
         let values = HashMap::new();
 
         let expr = parse_condition("attribute_exists(#n)").unwrap();
@@ -924,7 +930,7 @@ mod tests {
     #[test]
     fn test_should_evaluate_attribute_not_exists_for_missing() {
         let item = make_item(&[("name", AttributeValue::S("Alice".to_owned()))]);
-        let names = HashMap::from([("x".to_owned(), "missing".to_owned())]);
+        let names = HashMap::from([("#x".to_owned(), "missing".to_owned())]);
         let values = HashMap::new();
 
         let expr = parse_condition("attribute_not_exists(#x)").unwrap();
@@ -939,7 +945,7 @@ mod tests {
     #[test]
     fn test_should_evaluate_begins_with() {
         let item = make_item(&[("name", AttributeValue::S("Alice".to_owned()))]);
-        let names = HashMap::from([("n".to_owned(), "name".to_owned())]);
+        let names = HashMap::from([("#n".to_owned(), "name".to_owned())]);
         let values = make_values(&[(":prefix", AttributeValue::S("Ali".to_owned()))]);
 
         let expr = parse_condition("begins_with(#n, :prefix)").unwrap();
@@ -1053,7 +1059,7 @@ mod tests {
     #[test]
     fn test_should_apply_set_update() {
         let item = make_item(&[("name", AttributeValue::S("Alice".to_owned()))]);
-        let names = HashMap::from([("n".to_owned(), "name".to_owned())]);
+        let names = HashMap::from([("#n".to_owned(), "name".to_owned())]);
         let values = make_values(&[(":val", AttributeValue::S("Bob".to_owned()))]);
 
         let update = parse_update("SET #n = :val").unwrap();
@@ -1072,7 +1078,7 @@ mod tests {
     #[test]
     fn test_should_apply_set_arithmetic() {
         let item = make_item(&[("count", AttributeValue::N("10".to_owned()))]);
-        let names = HashMap::from([("c".to_owned(), "count".to_owned())]);
+        let names = HashMap::from([("#c".to_owned(), "count".to_owned())]);
         let values = make_values(&[(":inc", AttributeValue::N("5".to_owned()))]);
 
         let update = parse_update("SET #c = #c + :inc").unwrap();
@@ -1091,7 +1097,7 @@ mod tests {
     #[test]
     fn test_should_apply_set_if_not_exists() {
         let item = HashMap::new();
-        let names = HashMap::from([("n".to_owned(), "name".to_owned())]);
+        let names = HashMap::from([("#n".to_owned(), "name".to_owned())]);
         let values = make_values(&[(":default", AttributeValue::S("Unknown".to_owned()))]);
 
         let update = parse_update("SET #n = if_not_exists(#n, :default)").unwrap();
@@ -1138,7 +1144,7 @@ mod tests {
             ("name", AttributeValue::S("Alice".to_owned())),
             ("age", AttributeValue::N("30".to_owned())),
         ]);
-        let names = HashMap::from([("a".to_owned(), "age".to_owned())]);
+        let names = HashMap::from([("#a".to_owned(), "age".to_owned())]);
         let values = HashMap::new();
 
         let update = parse_update("REMOVE #a").unwrap();
@@ -1329,5 +1335,41 @@ mod tests {
             values: &values,
         };
         assert!(!ctx.evaluate(&expr).unwrap());
+    }
+
+    #[test]
+    fn test_should_resolve_names_with_hash_prefix_keys() {
+        // AWS SDK sends expression attribute names map with keys like "#n",
+        // and the parser stores path elements as "#n". Verify that the
+        // evaluator correctly looks up "#n" in the names map.
+        let item = make_item(&[("myAttr", AttributeValue::S("hello".to_owned()))]);
+        let names = HashMap::from([("#n".to_owned(), "myAttr".to_owned())]);
+        let values = make_values(&[(":v", AttributeValue::S("hello".to_owned()))]);
+
+        let expr = parse_condition("#n = :v").unwrap();
+        let ctx = EvalContext {
+            item: &item,
+            names: &names,
+            values: &values,
+        };
+        assert!(ctx.evaluate(&expr).unwrap());
+    }
+
+    #[test]
+    fn test_should_resolve_operand_value_with_colon_prefix() {
+        // The parser stores Operand::Value("val") without the ":" prefix.
+        // The evaluator's resolve_operand prepends ":" before looking up in
+        // the values map, so values map keys must include ":".
+        let item = make_item(&[("age", AttributeValue::N("25".to_owned()))]);
+        let names = empty_names();
+        let values = make_values(&[(":threshold", AttributeValue::N("20".to_owned()))]);
+
+        let expr = parse_condition("age > :threshold").unwrap();
+        let ctx = EvalContext {
+            item: &item,
+            names: &names,
+            values: &values,
+        };
+        assert!(ctx.evaluate(&expr).unwrap());
     }
 }

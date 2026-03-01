@@ -1,16 +1,15 @@
-//! Integration tests for RustStack S3 server.
+//! Integration tests for RustStack server (S3 + DynamoDB).
 //!
-//! These tests require a running RustStack S3 server at `localhost:4566`.
+//! These tests require a running RustStack server at `localhost:4566`.
 //! They are marked `#[ignore]` so they don't run during normal `cargo test`.
 //!
 //! Run them with:
 //! ```text
-//! cargo test -p ruststack-s3-integration -- --ignored
+//! cargo test -p ruststack-integration -- --ignored
 //! ```
 
 use std::sync::Once;
 
-use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{BehaviorVersion, Credentials, Region};
 
 static INIT: Once = Once::new();
@@ -28,14 +27,14 @@ fn init_tracing() {
     });
 }
 
-/// Endpoint URL for the S3 server.
+/// Endpoint URL for the server.
 fn endpoint_url() -> String {
     std::env::var("S3_ENDPOINT_URL").unwrap_or_else(|_| "http://localhost:4566".to_owned())
 }
 
 /// Create a configured S3 client pointing at the local server.
 #[must_use]
-pub fn s3_client() -> Client {
+pub fn s3_client() -> aws_sdk_s3::Client {
     init_tracing();
 
     let creds = Credentials::new("test", "test", None, None, "integration-test");
@@ -48,7 +47,24 @@ pub fn s3_client() -> Client {
         .force_path_style(true)
         .build();
 
-    Client::from_conf(config)
+    aws_sdk_s3::Client::from_conf(config)
+}
+
+/// Create a configured DynamoDB client pointing at the local server.
+#[must_use]
+pub fn dynamodb_client() -> aws_sdk_dynamodb::Client {
+    init_tracing();
+
+    let creds = Credentials::new("test", "test", None, None, "integration-test");
+
+    let config = aws_sdk_dynamodb::config::Builder::new()
+        .behavior_version(BehaviorVersion::latest())
+        .region(Region::new("us-east-1"))
+        .credentials_provider(creds)
+        .endpoint_url(endpoint_url())
+        .build();
+
+    aws_sdk_dynamodb::Client::from_conf(config)
 }
 
 /// Generate a unique bucket name for a test.
@@ -58,8 +74,15 @@ pub fn test_bucket_name(prefix: &str) -> String {
     format!("test-{prefix}-{id}")
 }
 
+/// Generate a unique table name for a DynamoDB test.
+#[must_use]
+pub fn test_table_name(prefix: &str) -> String {
+    let id = uuid::Uuid::new_v4().to_string()[..8].to_owned();
+    format!("test-{prefix}-{id}")
+}
+
 /// Create a bucket and return its name. Caller is responsible for cleanup.
-pub async fn create_test_bucket(client: &Client, prefix: &str) -> String {
+pub async fn create_test_bucket(client: &aws_sdk_s3::Client, prefix: &str) -> String {
     let name = test_bucket_name(prefix);
     client
         .create_bucket()
@@ -71,7 +94,7 @@ pub async fn create_test_bucket(client: &Client, prefix: &str) -> String {
 }
 
 /// Delete all objects in a bucket, then delete the bucket.
-pub async fn cleanup_bucket(client: &Client, bucket: &str) {
+pub async fn cleanup_bucket(client: &aws_sdk_s3::Client, bucket: &str) {
     // List and delete all objects.
     let mut continuation_token = None;
     loop {
@@ -116,6 +139,7 @@ pub async fn cleanup_bucket(client: &Client, bucket: &str) {
 
 mod test_bucket;
 mod test_cors;
+mod test_dynamodb;
 mod test_error;
 mod test_list;
 mod test_multipart;

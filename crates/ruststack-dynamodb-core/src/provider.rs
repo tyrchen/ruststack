@@ -325,6 +325,11 @@ impl RustStackDynamoDB {
             }
         }
 
+        // Require update expression.
+        if input.update_expression.is_none() {
+            return Err(DynamoDBError::validation("UpdateExpression is required"));
+        }
+
         // Apply update expression.
         if let Some(ref update_expr) = input.update_expression {
             let parsed = parse_update(update_expr).map_err(expression_error_to_dynamodb)?;
@@ -422,14 +427,23 @@ impl RustStackDynamoDB {
         // Apply filter expression if present.
         if let Some(ref filter) = input.filter_expression {
             let filter_expr = parse_condition(filter).map_err(expression_error_to_dynamodb)?;
-            items.retain(|item| {
-                let ctx = EvalContext {
-                    item,
-                    names: &input.expression_attribute_names,
-                    values: &input.expression_attribute_values,
-                };
-                ctx.evaluate(&filter_expr).unwrap_or(false)
-            });
+            items = items
+                .into_iter()
+                .map(|item| {
+                    let ctx = EvalContext {
+                        item: &item,
+                        names: &input.expression_attribute_names,
+                        values: &input.expression_attribute_values,
+                    };
+                    let matched = ctx
+                        .evaluate(&filter_expr)
+                        .map_err(expression_error_to_dynamodb)?;
+                    Ok((item, matched))
+                })
+                .collect::<Result<Vec<_>, DynamoDBError>>()?
+                .into_iter()
+                .filter_map(|(item, matched)| matched.then_some(item))
+                .collect();
         }
 
         // Apply projection expression if present.
@@ -492,14 +506,23 @@ impl RustStackDynamoDB {
         // Apply filter expression if present.
         if let Some(ref filter) = input.filter_expression {
             let filter_expr = parse_condition(filter).map_err(expression_error_to_dynamodb)?;
-            items.retain(|item| {
-                let ctx = EvalContext {
-                    item,
-                    names: &input.expression_attribute_names,
-                    values: &input.expression_attribute_values,
-                };
-                ctx.evaluate(&filter_expr).unwrap_or(false)
-            });
+            items = items
+                .into_iter()
+                .map(|item| {
+                    let ctx = EvalContext {
+                        item: &item,
+                        names: &input.expression_attribute_names,
+                        values: &input.expression_attribute_values,
+                    };
+                    let matched = ctx
+                        .evaluate(&filter_expr)
+                        .map_err(expression_error_to_dynamodb)?;
+                    Ok((item, matched))
+                })
+                .collect::<Result<Vec<_>, DynamoDBError>>()?
+                .into_iter()
+                .filter_map(|(item, matched)| matched.then_some(item))
+                .collect();
         }
 
         // Apply projection expression if present.
@@ -549,6 +572,14 @@ impl RustStackDynamoDB {
         &self,
         input: BatchGetItemInput,
     ) -> Result<BatchGetItemOutput, DynamoDBError> {
+        // Enforce 100-item limit across all tables.
+        let total_keys: usize = input.request_items.values().map(|ka| ka.keys.len()).sum();
+        if total_keys > 100 {
+            return Err(DynamoDBError::validation(
+                "Too many items requested for the BatchGetItem call",
+            ));
+        }
+
         let mut responses: HashMap<String, Vec<HashMap<String, AttributeValue>>> = HashMap::new();
 
         for (table_name, keys_and_attrs) in &input.request_items {
@@ -597,6 +628,14 @@ impl RustStackDynamoDB {
         &self,
         input: BatchWriteItemInput,
     ) -> Result<BatchWriteItemOutput, DynamoDBError> {
+        // Enforce 25-item limit across all tables.
+        let total_writes: usize = input.request_items.values().map(Vec::len).sum();
+        if total_writes > 25 {
+            return Err(DynamoDBError::validation(
+                "Too many items requested for the BatchWriteItem call",
+            ));
+        }
+
         for (table_name, write_requests) in &input.request_items {
             let table = self.state.require_table(table_name)?;
 
@@ -801,11 +840,14 @@ fn resolve_operand_value(
 ) -> Result<AttributeValue, DynamoDBError> {
     use crate::expression::ast::Operand;
     match operand {
-        Operand::Value(name) => values.get(name).cloned().ok_or_else(|| {
-            DynamoDBError::validation(format!(
-                "Value {name} not found in ExpressionAttributeValues"
-            ))
-        }),
+        Operand::Value(name) => {
+            let key = format!(":{name}");
+            values.get(&key).cloned().ok_or_else(|| {
+                DynamoDBError::validation(format!(
+                    "Value {key} not found in ExpressionAttributeValues"
+                ))
+            })
+        }
         _ => Err(DynamoDBError::validation(
             "Expected a value reference (:value) in key condition",
         )),
@@ -883,4 +925,131 @@ fn build_last_evaluated_key(
         key.insert(sk.name.clone(), sv.clone());
     }
     key
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ruststack_dynamodb_model::error::DynamoDBErrorCode;
+    use ruststack_dynamodb_model::input::{BatchWriteItemInput, CreateTableInput, UpdateItemInput};
+    use ruststack_dynamodb_model::types::{
+        AttributeDefinition, KeySchemaElement, KeyType, PutRequest, ScalarAttributeType,
+        WriteRequest,
+    };
+
+    /// Create a provider with a pre-configured test table named "TestTable".
+    fn setup_provider_with_table() -> RustStackDynamoDB {
+        let provider = RustStackDynamoDB::new(DynamoDBConfig::default());
+        let input = CreateTableInput {
+            table_name: "TestTable".to_owned(),
+            key_schema: vec![KeySchemaElement {
+                attribute_name: "pk".to_owned(),
+                key_type: KeyType::Hash,
+            }],
+            attribute_definitions: vec![AttributeDefinition {
+                attribute_name: "pk".to_owned(),
+                attribute_type: ScalarAttributeType::S,
+            }],
+            ..Default::default()
+        };
+        provider.handle_create_table(input).unwrap();
+        provider
+    }
+
+    #[test]
+    fn test_should_error_on_update_item_without_update_expression() {
+        let provider = setup_provider_with_table();
+        let input = UpdateItemInput {
+            table_name: "TestTable".to_owned(),
+            key: HashMap::from([("pk".to_owned(), AttributeValue::S("k1".to_owned()))]),
+            update_expression: None,
+            ..Default::default()
+        };
+        let result = provider.handle_update_item(input);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, DynamoDBErrorCode::ValidationException);
+        assert!(err.message.contains("UpdateExpression is required"));
+    }
+
+    #[test]
+    fn test_should_error_on_batch_write_item_exceeding_25_items() {
+        let provider = setup_provider_with_table();
+
+        let mut writes = Vec::new();
+        for i in 0..26 {
+            writes.push(WriteRequest {
+                put_request: Some(PutRequest {
+                    item: HashMap::from([("pk".to_owned(), AttributeValue::S(format!("key{i}")))]),
+                }),
+                delete_request: None,
+            });
+        }
+
+        let input = BatchWriteItemInput {
+            request_items: HashMap::from([("TestTable".to_owned(), writes)]),
+            return_consumed_capacity: None,
+            return_item_collection_metrics: None,
+        };
+        let result = provider.handle_batch_write_item(input);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, DynamoDBErrorCode::ValidationException);
+        assert!(err.message.contains("Too many items requested"));
+    }
+
+    #[test]
+    fn test_should_allow_batch_write_item_at_exactly_25_items() {
+        let provider = setup_provider_with_table();
+
+        let writes: Vec<WriteRequest> = (0..25)
+            .map(|i| WriteRequest {
+                put_request: Some(PutRequest {
+                    item: HashMap::from([("pk".to_owned(), AttributeValue::S(format!("key{i}")))]),
+                }),
+                delete_request: None,
+            })
+            .collect();
+
+        let input = BatchWriteItemInput {
+            request_items: HashMap::from([("TestTable".to_owned(), writes)]),
+            return_consumed_capacity: None,
+            return_item_collection_metrics: None,
+        };
+        let result = provider.handle_batch_write_item(input);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_should_resolve_operand_value_with_colon_prefix() {
+        // Verify that resolve_operand_value correctly prepends ":" when
+        // looking up values in the expression attribute values map.
+        use crate::expression::ast::Operand;
+
+        let values = HashMap::from([(":myval".to_owned(), AttributeValue::S("hello".to_owned()))]);
+        let names = HashMap::new();
+
+        // The parser stores Operand::Value("myval") without the ":" prefix.
+        let operand = Operand::Value("myval".to_owned());
+        let result = resolve_operand_value(&operand, &names, &values);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), AttributeValue::S("hello".to_owned()));
+    }
+
+    #[test]
+    fn test_should_error_resolve_operand_value_missing_prefix() {
+        // Verify that looking up a value not in the map produces an error.
+        use crate::expression::ast::Operand;
+
+        let values = HashMap::new();
+        let names = HashMap::new();
+
+        let operand = Operand::Value("missing".to_owned());
+        let result = resolve_operand_value(&operand, &names, &values);
+        assert!(result.is_err());
+    }
 }

@@ -2033,6 +2033,7 @@ dependencies = [
  "anyhow",
  "aws-config",
  "aws-credential-types",
+ "aws-sdk-dynamodb",
  "aws-sdk-s3",
  "aws-smithy-runtime-api",
  "bytes",

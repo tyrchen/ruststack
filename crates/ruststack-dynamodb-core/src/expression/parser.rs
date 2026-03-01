@@ -864,7 +864,20 @@ pub fn parse_condition(input: &str) -> Result<Expr, ExpressionError> {
 pub fn parse_update(input: &str) -> Result<UpdateExpr, ExpressionError> {
     let tokens = Lexer::new(input).tokenize()?;
     let mut parser = Parser::new(tokens);
-    parser.parse_update_expr()
+    let update = parser.parse_update_expr()?;
+
+    if update.set_actions.is_empty()
+        && update.remove_paths.is_empty()
+        && update.add_actions.is_empty()
+        && update.delete_actions.is_empty()
+    {
+        return Err(ExpressionError::UnexpectedToken {
+            expected: "SET, REMOVE, ADD, or DELETE".to_owned(),
+            found: "empty update expression".to_owned(),
+        });
+    }
+
+    Ok(update)
 }
 
 /// Parse a projection expression (comma-separated attribute paths).
@@ -1169,5 +1182,17 @@ mod tests {
                 other => panic!("expected Compare for '{input}', got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn test_should_error_on_empty_update_expression() {
+        let result = parse_update("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_should_error_on_whitespace_only_update_expression() {
+        let result = parse_update("   ");
+        assert!(result.is_err());
     }
 }
