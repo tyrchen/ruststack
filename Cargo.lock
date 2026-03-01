@@ -1948,6 +1948,59 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruststack-dynamodb-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "parking_lot",
+ "ruststack-auth",
+ "ruststack-core",
+ "ruststack-dynamodb-model",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ruststack-dynamodb-http"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "futures",
+ "http 1.4.0",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "pin-project-lite",
+ "ruststack-auth",
+ "ruststack-dynamodb-model",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ruststack-dynamodb-model"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ruststack-s3-core"
 version = "0.1.0"
 dependencies = [

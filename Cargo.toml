@@ -30,6 +30,9 @@ ruststack-s3-core = { path = "crates/ruststack-s3-core" }
 ruststack-s3-http = { path = "crates/ruststack-s3-http" }
 ruststack-s3-model = { path = "crates/ruststack-s3-model" }
 ruststack-s3-xml = { path = "crates/ruststack-s3-xml" }
+ruststack-dynamodb-model = { path = "crates/ruststack-dynamodb-model" }
+ruststack-dynamodb-http = { path = "crates/ruststack-dynamodb-http" }
+ruststack-dynamodb-core = { path = "crates/ruststack-dynamodb-core" }
 
 # Async runtime
 tokio = { version = "1.49", features = [
@@ -104,5 +107,6 @@ typed-builder = "0.23"
 tokio-test = "0.4"
 aws-config = "1.8"
 aws-sdk-s3 = "1.124"
+aws-sdk-dynamodb = "1.72"
 aws-credential-types = "1.2"
 aws-smithy-runtime-api = "1.11"
