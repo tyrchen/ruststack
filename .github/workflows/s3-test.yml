@@ -113,8 +113,8 @@ jobs:
           echo "$HEAD" | grep -q "attachment"
           echo "$HEAD" | grep -q "ruststack"
 
-      # ── Larger Object via aws s3 cp ──────────────────────────────────
-      - name: "Larger Object: 1MB upload via aws s3 cp with integrity check"
+      # ── Larger Object Upload ─────────────────────────────────────────
+      - name: "Larger Object: 1MB upload with integrity check"
         run: |
           set -euo pipefail
 
@@ -122,11 +122,11 @@ jobs:
           dd if=/dev/urandom of=/tmp/large-file.bin bs=1M count=1 2>/dev/null
           ORIG_MD5=$(md5sum /tmp/large-file.bin | cut -d' ' -f1)
 
-          # Upload using high-level aws s3 cp
-          aws s3 cp /tmp/large-file.bin s3://test-bucket-ops/large/file.bin
+          # Upload using put-object (sends Content-Length, avoids chunked encoding)
+          aws s3api put-object --bucket test-bucket-ops --key large/file.bin --body /tmp/large-file.bin
 
           # Download and verify integrity
-          aws s3 cp s3://test-bucket-ops/large/file.bin /tmp/large-downloaded.bin
+          aws s3api get-object --bucket test-bucket-ops --key large/file.bin /tmp/large-downloaded.bin
           DL_MD5=$(md5sum /tmp/large-downloaded.bin | cut -d' ' -f1)
           [ "$ORIG_MD5" = "$DL_MD5" ]
 
