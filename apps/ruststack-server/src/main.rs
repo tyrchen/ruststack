@@ -46,6 +46,15 @@ use ruststack_dynamodb_core::provider::RustStackDynamoDB;
 #[cfg(feature = "dynamodb")]
 use ruststack_dynamodb_http::service::{DynamoDBHttpConfig, DynamoDBHttpService};
 
+#[cfg(feature = "sqs")]
+use ruststack_sqs_core::config::SqsConfig;
+#[cfg(feature = "sqs")]
+use ruststack_sqs_core::handler::RustStackSqsHandler;
+#[cfg(feature = "sqs")]
+use ruststack_sqs_core::provider::RustStackSqs;
+#[cfg(feature = "sqs")]
+use ruststack_sqs_http::service::{SqsHttpConfig, SqsHttpService};
+
 #[cfg(feature = "s3")]
 use ruststack_s3_core::{RustStackS3, S3Config};
 #[cfg(feature = "s3")]
@@ -102,9 +111,21 @@ fn build_dynamodb_http_config(config: &DynamoDBConfig) -> DynamoDBHttpConfig {
     }
 }
 
+/// Build the [`SqsHttpConfig`] from the [`SqsConfig`].
+#[cfg(feature = "sqs")]
+fn build_sqs_http_config(config: &SqsConfig) -> SqsHttpConfig {
+    let credential_provider = build_credential_provider();
+
+    SqsHttpConfig {
+        skip_signature_validation: config.skip_signature_validation,
+        region: config.default_region.clone(),
+        credential_provider,
+    }
+}
+
 /// Build a credential provider from `ACCESS_KEY` / `SECRET_KEY` environment
 /// variables (used by MinIO Mint and other test harnesses).
-#[cfg(any(feature = "s3", feature = "dynamodb"))]
+#[cfg(any(feature = "s3", feature = "dynamodb", feature = "sqs"))]
 fn build_credential_provider() -> Option<Arc<dyn ruststack_auth::CredentialProvider>> {
     use ruststack_auth::StaticCredentialProvider;
 
@@ -175,7 +196,9 @@ async fn serve(listener: TcpListener, service: GatewayService) -> Result<()> {
 
 /// Check whether a service name was compiled into this binary.
 fn is_compiled_in(name: &str) -> bool {
-    (name == "s3" && cfg!(feature = "s3")) || (name == "dynamodb" && cfg!(feature = "dynamodb"))
+    (name == "s3" && cfg!(feature = "s3"))
+        || (name == "dynamodb" && cfg!(feature = "dynamodb"))
+        || (name == "sqs" && cfg!(feature = "sqs"))
 }
 
 /// Parse the `SERVICES` environment variable into a list of service names.
@@ -199,6 +222,9 @@ fn parse_services_value(raw: &str) -> Vec<String> {
         }
         if cfg!(feature = "dynamodb") {
             all.push("dynamodb".to_string());
+        }
+        if cfg!(feature = "sqs") {
+            all.push("sqs".to_string());
         }
         all
     } else {
@@ -298,6 +324,21 @@ async fn main() -> Result<()> {
         )));
     }
 
+    // ----- SQS (register before S3: S3 is the catch-all) -----
+    #[cfg(feature = "sqs")]
+    if is_enabled("sqs") {
+        let sqs_config = SqsConfig::from_env();
+        info!(
+            sqs_skip_signature_validation = sqs_config.skip_signature_validation,
+            "initializing SQS service",
+        );
+        let sqs_provider = RustStackSqs::new(sqs_config.clone());
+        let sqs_handler = RustStackSqsHandler::new(Arc::new(sqs_provider));
+        let sqs_http_config = build_sqs_http_config(&sqs_config);
+        let sqs_service = SqsHttpService::new(Arc::new(sqs_handler), sqs_http_config);
+        services.push(Box::new(service::SqsServiceRouter::new(sqs_service)));
+    }
+
     // ----- S3 (catch-all, must be last) -----
     #[cfg(feature = "s3")]
     if is_enabled("s3") {
@@ -388,7 +429,7 @@ mod tests {
     fn test_should_detect_compiled_services() {
         assert_eq!(is_compiled_in("s3"), cfg!(feature = "s3"));
         assert_eq!(is_compiled_in("dynamodb"), cfg!(feature = "dynamodb"));
-        assert!(!is_compiled_in("sqs"));
+        assert_eq!(is_compiled_in("sqs"), cfg!(feature = "sqs"));
     }
 
     #[cfg(feature = "s3")]

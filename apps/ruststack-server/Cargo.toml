@@ -15,9 +15,10 @@ name = "ruststack-server"
 path = "src/main.rs"
 
 [features]
-default = ["s3", "dynamodb"]
+default = ["s3", "dynamodb", "sqs"]
 s3 = ["dep:ruststack-s3-core", "dep:ruststack-s3-http", "dep:ruststack-s3-model"]
 dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
+sqs = ["dep:ruststack-sqs-core", "dep:ruststack-sqs-http"]
 
 [dependencies]
 # Internal crates - shared
@@ -32,6 +33,10 @@ ruststack-s3-model = { workspace = true, optional = true }
 # Internal crates - DynamoDB (optional, gated by "dynamodb" feature)
 ruststack-dynamodb-core = { workspace = true, optional = true }
 ruststack-dynamodb-http = { workspace = true, optional = true }
+
+# Internal crates - SQS (optional, gated by "sqs" feature)
+ruststack-sqs-core = { workspace = true, optional = true }
+ruststack-sqs-http = { workspace = true, optional = true }
 
 # Async
 tokio = { workspace = true }
@@ -61,5 +66,6 @@ tokio-test = { workspace = true }
 aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-sdk-dynamodb = { workspace = true }
+aws-sdk-sqs = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-smithy-runtime-api = { workspace = true }

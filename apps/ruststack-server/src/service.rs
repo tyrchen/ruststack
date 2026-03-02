@@ -167,3 +167,64 @@ mod dynamodb_router {
 
 #[cfg(feature = "dynamodb")]
 pub use dynamodb_router::DynamoDBServiceRouter;
+
+// ---------------------------------------------------------------------------
+// SQS
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "sqs")]
+mod sqs_router {
+    use std::convert::Infallible;
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use http_body_util::BodyExt;
+    use hyper::body::Incoming;
+    use hyper::service::Service;
+    use ruststack_sqs_http::dispatch::SqsHandler;
+    use ruststack_sqs_http::service::SqsHttpService;
+
+    use super::{GatewayBody, ServiceRouter};
+
+    /// Routes requests to the SQS service.
+    ///
+    /// Matches requests whose `X-Amz-Target` header starts with `AmazonSQS`.
+    pub struct SqsServiceRouter<H: SqsHandler> {
+        inner: SqsHttpService<H>,
+    }
+
+    impl<H: SqsHandler> SqsServiceRouter<H> {
+        /// Wrap an [`SqsHttpService`] in a router.
+        pub fn new(inner: SqsHttpService<H>) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl<H: SqsHandler> ServiceRouter for SqsServiceRouter<H> {
+        fn name(&self) -> &'static str {
+            "sqs"
+        }
+
+        fn matches(&self, req: &http::Request<Incoming>) -> bool {
+            req.headers()
+                .get("x-amz-target")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|t| t.starts_with("AmazonSQS"))
+        }
+
+        fn call(
+            &self,
+            req: http::Request<Incoming>,
+        ) -> Pin<Box<dyn Future<Output = Result<http::Response<GatewayBody>, Infallible>> + Send>>
+        {
+            let svc = self.inner.clone();
+            Box::pin(async move {
+                let resp = svc.call(req).await;
+                Ok(resp.unwrap_or_else(|e| match e {}).map(BodyExt::boxed))
+            })
+        }
+    }
+}
+
+#[cfg(feature = "sqs")]
+pub use sqs_router::SqsServiceRouter;
