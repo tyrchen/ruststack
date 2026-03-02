@@ -2195,6 +2195,7 @@ dependencies = [
  "bytes",
  "chrono",
  "dashmap",
+ "hex",
  "http 1.4.0",
  "md-5",
  "parking_lot",

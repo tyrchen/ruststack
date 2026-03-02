@@ -1,6 +1,7 @@
-//! Standard queue message storage.
+//! Queue message storage for both standard and FIFO queues.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::time::Instant;
 
@@ -23,28 +24,15 @@ impl StandardQueueStorage {
         let now = Instant::now();
         let mut promoted = false;
 
-        self.delayed.retain(|msg| {
-            if msg.available_at <= now {
-                promoted = true;
-                false // Remove from delayed
-            } else {
-                true // Keep in delayed
-            }
-        });
-
-        // Re-scan and move promoted messages. We need a second pass
-        // to actually move them, since retain doesn't give ownership.
-        let mut still_delayed = Vec::new();
         let old_delayed = std::mem::take(&mut self.delayed);
         for msg in old_delayed {
             if msg.available_at <= now {
                 self.available.push_back(msg);
                 promoted = true;
             } else {
-                still_delayed.push(msg);
+                self.delayed.push(msg);
             }
         }
-        self.delayed = still_delayed;
 
         promoted
     }
@@ -70,7 +58,7 @@ impl StandardQueueStorage {
 
     /// Get approximate message counts: (available, in_flight, delayed).
     #[must_use]
-    #[allow(clippy::cast_possible_truncation)] // SQS queues are bounded well below u32::MAX.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn counts(&self) -> (u32, u32, u32) {
         (
             self.available.len() as u32,
@@ -83,6 +71,216 @@ impl StandardQueueStorage {
     pub fn purge(&mut self) {
         self.available.clear();
         self.delayed.clear();
+        self.in_flight.clear();
+    }
+}
+
+/// FIFO queue storage with strict ordering, message group blocking, and deduplication.
+#[derive(Debug)]
+pub struct FifoQueueStorage {
+    /// Per-group message queues (strict FIFO per group).
+    groups: BTreeMap<String, VecDeque<QueueMessage>>,
+    /// Groups with in-flight messages (blocked from delivery).
+    blocked_groups: HashSet<String>,
+    /// Messages currently being processed by consumers.
+    in_flight: HashMap<String, FifoInFlightMessage>,
+    /// Deduplication cache (dedup_id -> expiry timestamp).
+    dedup_cache: HashMap<String, Instant>,
+    /// Monotonically increasing sequence number.
+    next_sequence: AtomicU64,
+}
+
+/// In-flight message for FIFO queues, tracking the message group.
+#[derive(Debug)]
+pub struct FifoInFlightMessage {
+    /// The underlying message.
+    pub message: QueueMessage,
+    /// When visibility timeout expires.
+    pub visible_at: Instant,
+    /// The message group this message belongs to.
+    pub group_id: String,
+}
+
+/// Deduplication window (5 minutes).
+const DEDUP_WINDOW: std::time::Duration = std::time::Duration::from_mins(5);
+
+impl Default for FifoQueueStorage {
+    fn default() -> Self {
+        Self {
+            groups: BTreeMap::new(),
+            blocked_groups: HashSet::new(),
+            in_flight: HashMap::new(),
+            dedup_cache: HashMap::new(),
+            next_sequence: AtomicU64::new(1),
+        }
+    }
+}
+
+impl FifoQueueStorage {
+    /// Attempt to enqueue a message with deduplication.
+    ///
+    /// Returns `Some(sequence_number)` if enqueued, `None` if deduplicated (silently accepted).
+    pub fn enqueue(&mut self, mut msg: QueueMessage, dedup_id: &str) -> Option<String> {
+        // Check dedup cache.
+        if let Some(expiry) = self.dedup_cache.get(dedup_id) {
+            if Instant::now() < *expiry {
+                return None; // Duplicate within window.
+            }
+        }
+
+        // Assign sequence number.
+        let seq = self.next_sequence.fetch_add(1, Ordering::Relaxed);
+        let seq_str = format!("{seq:020}");
+        msg.sequence_number = Some(seq_str.clone());
+
+        // Add to dedup cache.
+        self.dedup_cache
+            .insert(dedup_id.to_owned(), Instant::now() + DEDUP_WINDOW);
+
+        // Enqueue to the appropriate group.
+        let group_id = msg.message_group_id.clone().unwrap_or_default();
+        self.groups.entry(group_id).or_default().push_back(msg);
+
+        Some(seq_str)
+    }
+
+    /// Try to receive up to `max` messages from unblocked groups.
+    pub fn receive(&mut self, max: usize) -> Vec<(QueueMessage, String)> {
+        let mut result = Vec::new();
+
+        // Iterate through groups in order, skipping blocked ones.
+        let group_keys: Vec<String> = self.groups.keys().cloned().collect();
+        for group_id in group_keys {
+            if result.len() >= max {
+                break;
+            }
+            if self.blocked_groups.contains(&group_id) {
+                continue;
+            }
+
+            if let Some(queue) = self.groups.get_mut(&group_id) {
+                if let Some(msg) = queue.pop_front() {
+                    // Block this group until the message is deleted or visibility expires.
+                    self.blocked_groups.insert(group_id.clone());
+                    result.push((msg, group_id));
+                }
+            }
+        }
+
+        // Clean up empty groups.
+        self.groups.retain(|_, q| !q.is_empty());
+
+        result
+    }
+
+    /// Record a message as in-flight.
+    pub fn mark_in_flight(
+        &mut self,
+        receipt_handle: String,
+        message: QueueMessage,
+        group_id: String,
+        visible_at: Instant,
+    ) {
+        self.in_flight.insert(
+            receipt_handle,
+            FifoInFlightMessage {
+                message,
+                visible_at,
+                group_id,
+            },
+        );
+    }
+
+    /// Delete an in-flight message (unblocks the group).
+    pub fn delete_message(&mut self, receipt_handle: &str) -> bool {
+        if let Some(ifm) = self.in_flight.remove(receipt_handle) {
+            // Unblock the group only if no other in-flight messages for this group exist.
+            let group_still_has_inflight =
+                self.in_flight.values().any(|m| m.group_id == ifm.group_id);
+            if !group_still_has_inflight {
+                self.blocked_groups.remove(&ifm.group_id);
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Change visibility timeout for an in-flight message.
+    pub fn change_visibility(&mut self, receipt_handle: &str, visible_at: Instant) -> bool {
+        if visible_at <= Instant::now() {
+            // Make immediately available again.
+            if let Some(ifm) = self.in_flight.remove(receipt_handle) {
+                let group_id = ifm.group_id.clone();
+                self.groups
+                    .entry(group_id.clone())
+                    .or_default()
+                    .push_front(ifm.message);
+                // Unblock group if no other in-flight messages.
+                let group_still_has_inflight =
+                    self.in_flight.values().any(|m| m.group_id == group_id);
+                if !group_still_has_inflight {
+                    self.blocked_groups.remove(&group_id);
+                }
+                return true;
+            }
+            false
+        } else if let Some(ifm) = self.in_flight.get_mut(receipt_handle) {
+            ifm.visible_at = visible_at;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Return expired in-flight messages to their groups (unblocks groups).
+    pub fn return_expired_inflight(&mut self) -> bool {
+        let now = Instant::now();
+        let expired: Vec<String> = self
+            .in_flight
+            .iter()
+            .filter(|(_, ifm)| ifm.visible_at <= now)
+            .map(|(handle, _)| handle.clone())
+            .collect();
+
+        let had_expired = !expired.is_empty();
+        for handle in expired {
+            if let Some(ifm) = self.in_flight.remove(&handle) {
+                let group_id = ifm.group_id.clone();
+                // Return to front of group queue (maintains FIFO).
+                self.groups
+                    .entry(group_id.clone())
+                    .or_default()
+                    .push_front(ifm.message);
+                // Unblock group if no other in-flight messages.
+                let group_still_has_inflight =
+                    self.in_flight.values().any(|m| m.group_id == group_id);
+                if !group_still_has_inflight {
+                    self.blocked_groups.remove(&group_id);
+                }
+            }
+        }
+        had_expired
+    }
+
+    /// Clean expired dedup cache entries.
+    pub fn clean_dedup_cache(&mut self) {
+        let now = Instant::now();
+        self.dedup_cache.retain(|_, expiry| *expiry > now);
+    }
+
+    /// Get approximate message counts: (available, in_flight, delayed=0).
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn counts(&self) -> (u32, u32, u32) {
+        let available: usize = self.groups.values().map(VecDeque::len).sum();
+        (available as u32, self.in_flight.len() as u32, 0)
+    }
+
+    /// Purge all messages.
+    pub fn purge(&mut self) {
+        self.groups.clear();
+        self.blocked_groups.clear();
         self.in_flight.clear();
     }
 }

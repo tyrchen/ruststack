@@ -1,7 +1,8 @@
 //! Queue actor: per-queue message lifecycle management.
 //!
 //! Each queue runs as an independent actor that owns all its state and
-//! communicates via a `tokio::sync::mpsc` channel.
+//! communicates via a `tokio::sync::mpsc` channel. The actor supports both
+//! standard and FIFO queue types.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,7 +23,7 @@ use crate::message::{
 };
 
 use super::attributes::QueueAttributes;
-use super::storage::StandardQueueStorage;
+use super::storage::{FifoQueueStorage, StandardQueueStorage};
 
 /// Commands sent to a queue actor via its channel.
 pub enum QueueCommand {
@@ -116,6 +117,23 @@ impl std::fmt::Debug for QueueCommand {
     }
 }
 
+/// Dispatch-enum over Standard and FIFO storage.
+enum QueueStorage {
+    /// Standard queue storage.
+    Standard(StandardQueueStorage),
+    /// FIFO queue storage.
+    Fifo(FifoQueueStorage),
+}
+
+impl std::fmt::Debug for QueueStorage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Standard(_) => write!(f, "Standard"),
+            Self::Fifo(_) => write!(f, "Fifo"),
+        }
+    }
+}
+
 /// Per-queue actor that owns all message state.
 pub struct QueueActor {
     /// Queue name.
@@ -126,8 +144,8 @@ pub struct QueueActor {
     is_fifo: bool,
     /// Queue attributes.
     attributes: QueueAttributes,
-    /// Standard queue storage.
-    storage: StandardQueueStorage,
+    /// Queue storage (Standard or FIFO).
+    storage: QueueStorage,
     /// Command channel receiver.
     commands: mpsc::Receiver<QueueCommand>,
     /// Notification for long-polling consumers.
@@ -183,12 +201,18 @@ impl QueueActor {
         account_id: String,
         created_at: u64,
     ) -> Self {
+        let storage = if is_fifo {
+            QueueStorage::Fifo(FifoQueueStorage::default())
+        } else {
+            QueueStorage::Standard(StandardQueueStorage::default())
+        };
+
         Self {
             name,
             arn,
             is_fifo,
             attributes,
-            storage: StandardQueueStorage::default(),
+            storage,
             commands,
             message_notify,
             tags,
@@ -223,6 +247,7 @@ impl QueueActor {
     }
 
     /// Handle a single command.
+    #[allow(clippy::too_many_lines)]
     fn handle_command(&mut self, cmd: QueueCommand) {
         match cmd {
             QueueCommand::SendMessage { input, reply } => {
@@ -251,7 +276,10 @@ impl QueueActor {
                 attribute_names,
                 reply,
             } => {
-                let counts = self.storage.counts();
+                let counts = match &self.storage {
+                    QueueStorage::Standard(s) => s.counts(),
+                    QueueStorage::Fifo(s) => s.counts(),
+                };
                 let attrs = self.attributes.to_map(
                     &attribute_names,
                     self.is_fifo,
@@ -293,7 +321,7 @@ impl QueueActor {
     }
 
     /// Handle `SendMessage`.
-    #[allow(clippy::cast_sign_loss)] // AWS API uses i32 for sizes/delays; values validated non-negative.
+    #[allow(clippy::cast_sign_loss)]
     fn handle_send_message(
         &mut self,
         input: SendMessageInput,
@@ -319,11 +347,27 @@ impl QueueActor {
             ));
         }
 
+        if self.is_fifo {
+            self.handle_send_message_fifo(input)
+        } else {
+            self.handle_send_message_standard(input)
+        }
+    }
+
+    /// Send a message to a standard queue.
+    #[allow(clippy::cast_sign_loss)]
+    fn handle_send_message_standard(
+        &mut self,
+        input: SendMessageInput,
+    ) -> Result<SendMessageOutput, SqsError> {
+        let QueueStorage::Standard(ref mut storage) = self.storage else {
+            return Err(SqsError::internal_error("Storage type mismatch"));
+        };
+
         let message_id = uuid::Uuid::new_v4().to_string();
         let body_md5 = md5_of_body(&input.message_body);
         let attr_md5 = md5_of_message_attributes(&input.message_attributes);
 
-        // Calculate delay.
         let delay_seconds = input.delay_seconds.unwrap_or(self.attributes.delay_seconds);
         let available_at = if delay_seconds > 0 {
             Instant::now() + Duration::from_secs(delay_seconds as u64)
@@ -349,9 +393,9 @@ impl QueueActor {
         };
 
         if delay_seconds > 0 {
-            self.storage.delayed.push(msg);
+            storage.delayed.push(msg);
         } else {
-            self.storage.available.push_back(msg);
+            storage.available.push_back(msg);
             self.message_notify.notify_waiters();
         }
 
@@ -364,8 +408,79 @@ impl QueueActor {
         })
     }
 
+    /// Send a message to a FIFO queue with deduplication and sequencing.
+    fn handle_send_message_fifo(
+        &mut self,
+        input: SendMessageInput,
+    ) -> Result<SendMessageOutput, SqsError> {
+        let QueueStorage::Fifo(ref mut storage) = self.storage else {
+            return Err(SqsError::internal_error("Storage type mismatch"));
+        };
+
+        // FIFO queues do not support per-message delay.
+        if input.delay_seconds.is_some_and(|d| d > 0) {
+            return Err(SqsError::invalid_parameter_value(
+                "Value 0 for parameter DelaySeconds is invalid. Reason: \
+                 The request includes a parameter that is not valid for this queue type.",
+            ));
+        }
+
+        // FIFO queues require MessageGroupId.
+        let group_id = input.message_group_id.clone().ok_or_else(|| {
+            SqsError::missing_parameter("The request must contain the parameter MessageGroupId.")
+        })?;
+
+        // Resolve deduplication ID.
+        let dedup_id = if let Some(ref id) = input.message_deduplication_id {
+            id.clone()
+        } else if self.attributes.content_based_deduplication {
+            // SHA-256 of the body.
+            use sha2::{Digest, Sha256};
+            let hash = Sha256::digest(input.message_body.as_bytes());
+            hex::encode(hash)
+        } else {
+            return Err(SqsError::invalid_parameter_value(
+                "The queue should either have ContentBasedDeduplication enabled \
+                 or MessageDeduplicationId provided explicitly.",
+            ));
+        };
+
+        let message_id = uuid::Uuid::new_v4().to_string();
+        let body_md5 = md5_of_body(&input.message_body);
+        let attr_md5 = md5_of_message_attributes(&input.message_attributes);
+
+        let msg = QueueMessage {
+            message_id: message_id.clone(),
+            body: input.message_body,
+            md5_of_body: body_md5.clone(),
+            message_attributes: input.message_attributes,
+            md5_of_message_attributes: attr_md5.clone(),
+            sender_id: self.account_id.clone(),
+            sent_timestamp: now_epoch_millis(),
+            approximate_receive_count: 0,
+            approximate_first_receive_timestamp: None,
+            sequence_number: None,
+            message_group_id: Some(group_id),
+            message_deduplication_id: input.message_deduplication_id,
+            available_at: Instant::now(),
+            delay_seconds: 0,
+        };
+
+        let sequence_number = storage.enqueue(msg, &dedup_id);
+        // Even if deduplicated, SQS returns success with the original message's ID.
+        self.message_notify.notify_waiters();
+
+        Ok(SendMessageOutput {
+            message_id: Some(message_id),
+            md5_of_message_body: Some(body_md5),
+            md5_of_message_attributes: attr_md5,
+            md5_of_message_system_attributes: None,
+            sequence_number,
+        })
+    }
+
     /// Handle `ReceiveMessage`.
-    #[allow(clippy::cast_sign_loss)] // AWS API uses i32 for timeouts; values validated non-negative.
+    #[allow(clippy::cast_sign_loss)]
     fn handle_receive_message(
         &mut self,
         input: ReceiveMessageInput,
@@ -407,7 +522,6 @@ impl QueueActor {
 
     /// Try to receive messages immediately from the queue.
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    // AWS API uses i32 for counts/timeouts; values are validated non-negative and bounded.
     fn try_receive(
         &mut self,
         max_messages: i32,
@@ -416,111 +530,124 @@ impl QueueActor {
         system_attribute_names: &[String],
         message_attribute_names: &[String],
     ) -> Vec<Message> {
-        let mut result = Vec::new();
-        let vis_timeout = Duration::from_secs(visibility_timeout as u64);
         let merged_sys_attrs = merge_attribute_names(attribute_names, system_attribute_names);
+        let vis_timeout = Duration::from_secs(visibility_timeout as u64);
 
-        while result.len() < max_messages as usize {
-            match self.storage.available.pop_front() {
-                Some(mut msg) => {
-                    msg.approximate_receive_count += 1;
-                    if msg.approximate_first_receive_timestamp.is_none() {
-                        msg.approximate_first_receive_timestamp = Some(now_epoch_millis());
-                    }
-
-                    // Check DLQ redrive threshold.
-                    if let Some(ref policy) = self.attributes.redrive_policy {
-                        if msg.approximate_receive_count > policy.max_receive_count as u32 {
-                            // Would move to DLQ - for now, just skip and discard.
-                            // Full DLQ support is Phase 1.
-                            continue;
-                        }
-                    }
-
-                    let receipt_handle = generate_receipt_handle(&msg.message_id);
-                    let message = build_message(
-                        &msg,
-                        &receipt_handle,
-                        &merged_sys_attrs,
-                        message_attribute_names,
-                    );
-
-                    self.storage.in_flight.insert(
-                        receipt_handle,
-                        InFlightMessage {
-                            message: msg,
-                            receipt_handle: message.receipt_handle.clone().unwrap_or_default(),
-                            visible_at: Instant::now() + vis_timeout,
-                        },
-                    );
-
-                    result.push(message);
-                }
-                None => break,
-            }
+        match &mut self.storage {
+            QueueStorage::Standard(storage) => try_receive_standard(
+                storage,
+                max_messages as usize,
+                vis_timeout,
+                &merged_sys_attrs,
+                message_attribute_names,
+                &self.attributes,
+            ),
+            QueueStorage::Fifo(storage) => try_receive_fifo(
+                storage,
+                max_messages as usize,
+                vis_timeout,
+                &merged_sys_attrs,
+                message_attribute_names,
+            ),
         }
-        result
     }
 
     /// Handle `DeleteMessage`.
-    #[allow(clippy::unnecessary_wraps)] // Returns Result for consistency with other handlers.
+    #[allow(clippy::unnecessary_wraps)]
     fn handle_delete_message(&mut self, receipt_handle: &str) -> Result<(), SqsError> {
-        if self.storage.in_flight.remove(receipt_handle).is_some() {
-            Ok(())
-        } else {
-            // AWS SQS is lenient: delete of non-existent receipt handle succeeds.
-            Ok(())
+        match &mut self.storage {
+            QueueStorage::Standard(storage) => {
+                storage.in_flight.remove(receipt_handle);
+            }
+            QueueStorage::Fifo(storage) => {
+                storage.delete_message(receipt_handle);
+            }
         }
+        // AWS SQS is lenient: delete of non-existent receipt handle succeeds.
+        Ok(())
     }
 
     /// Handle `ChangeMessageVisibility`.
-    #[allow(clippy::cast_sign_loss)] // visibility_timeout is validated non-negative by AWS API.
+    #[allow(clippy::cast_sign_loss)]
     fn handle_change_visibility(
         &mut self,
         receipt_handle: &str,
         visibility_timeout: i32,
     ) -> Result<(), SqsError> {
-        if let Some(ifm) = self.storage.in_flight.get_mut(receipt_handle) {
-            if visibility_timeout == 0 {
-                // Immediately make the message visible again.
-                let ifm = self.storage.in_flight.remove(receipt_handle).unwrap();
-                self.storage.available.push_back(ifm.message);
-                self.message_notify.notify_waiters();
-            } else {
-                ifm.visible_at = Instant::now() + Duration::from_secs(visibility_timeout as u64);
+        match &mut self.storage {
+            QueueStorage::Standard(storage) => {
+                if let Some(ifm) = storage.in_flight.get_mut(receipt_handle) {
+                    if visibility_timeout == 0 {
+                        let ifm = storage.in_flight.remove(receipt_handle).unwrap();
+                        storage.available.push_back(ifm.message);
+                        self.message_notify.notify_waiters();
+                    } else {
+                        ifm.visible_at =
+                            Instant::now() + Duration::from_secs(visibility_timeout as u64);
+                    }
+                    Ok(())
+                } else {
+                    Err(SqsError::new(
+                        ruststack_sqs_model::error::SqsErrorCode::MessageNotInflight,
+                        "Message does not exist or is not available for visibility timeout change.",
+                    ))
+                }
             }
-            Ok(())
-        } else {
-            Err(SqsError::new(
-                ruststack_sqs_model::error::SqsErrorCode::MessageNotInflight,
-                "Message does not exist or is not available for visibility timeout change.",
-            ))
+            QueueStorage::Fifo(storage) => {
+                let visible_at = if visibility_timeout == 0 {
+                    Instant::now() // Immediately visible
+                } else {
+                    Instant::now() + Duration::from_secs(visibility_timeout as u64)
+                };
+                if storage.change_visibility(receipt_handle, visible_at) {
+                    if visibility_timeout == 0 {
+                        self.message_notify.notify_waiters();
+                    }
+                    Ok(())
+                } else {
+                    Err(SqsError::new(
+                        ruststack_sqs_model::error::SqsErrorCode::MessageNotInflight,
+                        "Message does not exist or is not available for visibility timeout change.",
+                    ))
+                }
+            }
         }
     }
 
     /// Handle `PurgeQueue`.
     fn handle_purge(&mut self) -> Result<(), SqsError> {
-        // Enforce 60-second cooldown.
         if let Some(last_purge) = self.last_purge_at {
             if last_purge.elapsed() < Duration::from_mins(1) {
                 return Err(SqsError::purge_queue_in_progress());
             }
         }
-        self.storage.purge();
+        match &mut self.storage {
+            QueueStorage::Standard(s) => s.purge(),
+            QueueStorage::Fifo(s) => s.purge(),
+        }
         self.last_purge_at = Some(Instant::now());
         Ok(())
     }
 
-    /// Periodic cleanup: expired visibility, delayed message promotion.
+    /// Periodic cleanup: expired visibility, delayed message promotion, dedup cache.
     fn periodic_cleanup(&mut self) {
-        let returned = self.storage.return_expired_inflight();
-        let promoted = self.storage.promote_delayed();
+        let changed = match &mut self.storage {
+            QueueStorage::Standard(storage) => {
+                let returned = storage.return_expired_inflight();
+                let promoted = storage.promote_delayed();
+                returned || promoted
+            }
+            QueueStorage::Fifo(storage) => {
+                let returned = storage.return_expired_inflight();
+                storage.clean_dedup_cache();
+                returned
+            }
+        };
 
-        if returned || promoted {
+        if changed {
             self.message_notify.notify_waiters();
         }
 
-        // Check expired long polls.
         self.expire_long_polls();
     }
 
@@ -531,7 +658,7 @@ impl QueueActor {
 
         for poll in polls {
             if poll.reply.is_closed() {
-                continue; // Client disconnected.
+                continue;
             }
 
             let messages = self.try_receive(
@@ -575,6 +702,93 @@ impl QueueActor {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Standard queue receive helper
+// ---------------------------------------------------------------------------
+
+/// Receive messages from a standard queue.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn try_receive_standard(
+    storage: &mut StandardQueueStorage,
+    max: usize,
+    vis_timeout: Duration,
+    sys_attrs: &[String],
+    msg_attrs: &[String],
+    queue_attrs: &QueueAttributes,
+) -> Vec<Message> {
+    let mut result = Vec::new();
+
+    while result.len() < max {
+        match storage.available.pop_front() {
+            Some(mut msg) => {
+                msg.approximate_receive_count += 1;
+                if msg.approximate_first_receive_timestamp.is_none() {
+                    msg.approximate_first_receive_timestamp = Some(now_epoch_millis());
+                }
+
+                // Check DLQ redrive threshold.
+                if let Some(ref policy) = queue_attrs.redrive_policy {
+                    if msg.approximate_receive_count > policy.max_receive_count as u32 {
+                        continue;
+                    }
+                }
+
+                let receipt_handle = generate_receipt_handle(&msg.message_id);
+                let message = build_message(&msg, &receipt_handle, sys_attrs, msg_attrs);
+
+                storage.in_flight.insert(
+                    receipt_handle,
+                    InFlightMessage {
+                        message: msg,
+                        receipt_handle: message.receipt_handle.clone().unwrap_or_default(),
+                        visible_at: Instant::now() + vis_timeout,
+                    },
+                );
+
+                result.push(message);
+            }
+            None => break,
+        }
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// FIFO queue receive helper
+// ---------------------------------------------------------------------------
+
+/// Receive messages from a FIFO queue.
+fn try_receive_fifo(
+    storage: &mut FifoQueueStorage,
+    max: usize,
+    vis_timeout: Duration,
+    sys_attrs: &[String],
+    msg_attrs: &[String],
+) -> Vec<Message> {
+    let received = storage.receive(max);
+    let mut result = Vec::new();
+
+    for (mut msg, group_id) in received {
+        msg.approximate_receive_count += 1;
+        if msg.approximate_first_receive_timestamp.is_none() {
+            msg.approximate_first_receive_timestamp = Some(now_epoch_millis());
+        }
+
+        let receipt_handle = generate_receipt_handle(&msg.message_id);
+        let message = build_message(&msg, &receipt_handle, sys_attrs, msg_attrs);
+
+        storage.mark_in_flight(receipt_handle, msg, group_id, Instant::now() + vis_timeout);
+
+        result.push(message);
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// QueueHandle
+// ---------------------------------------------------------------------------
+
 /// Handle to a running queue actor.
 pub struct QueueHandle {
     /// Channel to send commands to the queue actor.
@@ -598,54 +812,45 @@ impl std::fmt::Debug for QueueHandle {
 }
 
 impl QueueHandle {
-    /// Send a command to the queue actor and await its reply.
+    /// Send a message.
     pub async fn send_message(
         &self,
         input: SendMessageInput,
     ) -> Result<SendMessageOutput, SqsError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.sender
-            .send(QueueCommand::SendMessage {
-                input,
-                reply: reply_tx,
-            })
+            .send(QueueCommand::SendMessage { input, reply: tx })
             .await
             .map_err(|_| SqsError::internal_error("Queue actor is not running"))?;
-        reply_rx
-            .await
+        rx.await
             .map_err(|_| SqsError::internal_error("Queue actor dropped reply channel"))?
     }
 
-    /// Receive messages from the queue actor.
+    /// Receive messages.
     pub async fn receive_message(
         &self,
         input: ReceiveMessageInput,
     ) -> Result<ReceiveMessageOutput, SqsError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.sender
-            .send(QueueCommand::ReceiveMessage {
-                input,
-                reply: reply_tx,
-            })
+            .send(QueueCommand::ReceiveMessage { input, reply: tx })
             .await
             .map_err(|_| SqsError::internal_error("Queue actor is not running"))?;
-        reply_rx
-            .await
+        rx.await
             .map_err(|_| SqsError::internal_error("Queue actor dropped reply channel"))?
     }
 
     /// Delete a message.
     pub async fn delete_message(&self, receipt_handle: String) -> Result<(), SqsError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.sender
             .send(QueueCommand::DeleteMessage {
                 receipt_handle,
-                reply: reply_tx,
+                reply: tx,
             })
             .await
             .map_err(|_| SqsError::internal_error("Queue actor is not running"))?;
-        reply_rx
-            .await
+        rx.await
             .map_err(|_| SqsError::internal_error("Queue actor dropped reply channel"))?
     }
 
@@ -655,17 +860,16 @@ impl QueueHandle {
         receipt_handle: String,
         visibility_timeout: i32,
     ) -> Result<(), SqsError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.sender
             .send(QueueCommand::ChangeVisibility {
                 receipt_handle,
                 visibility_timeout,
-                reply: reply_tx,
+                reply: tx,
             })
             .await
             .map_err(|_| SqsError::internal_error("Queue actor is not running"))?;
-        reply_rx
-            .await
+        rx.await
             .map_err(|_| SqsError::internal_error("Queue actor dropped reply channel"))?
     }
 
@@ -674,16 +878,15 @@ impl QueueHandle {
         &self,
         attribute_names: Vec<String>,
     ) -> Result<HashMap<String, String>, SqsError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.sender
             .send(QueueCommand::GetAttributes {
                 attribute_names,
-                reply: reply_tx,
+                reply: tx,
             })
             .await
             .map_err(|_| SqsError::internal_error("Queue actor is not running"))?;
-        reply_rx
-            .await
+        rx.await
             .map_err(|_| SqsError::internal_error("Queue actor dropped reply channel"))
     }
 
@@ -692,68 +895,59 @@ impl QueueHandle {
         &self,
         attributes: HashMap<String, String>,
     ) -> Result<(), SqsError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.sender
             .send(QueueCommand::SetAttributes {
                 attributes,
-                reply: reply_tx,
+                reply: tx,
             })
             .await
             .map_err(|_| SqsError::internal_error("Queue actor is not running"))?;
-        reply_rx
-            .await
+        rx.await
             .map_err(|_| SqsError::internal_error("Queue actor dropped reply channel"))?
     }
 
     /// Purge the queue.
     pub async fn purge(&self) -> Result<(), SqsError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.sender
-            .send(QueueCommand::Purge { reply: reply_tx })
+            .send(QueueCommand::Purge { reply: tx })
             .await
             .map_err(|_| SqsError::internal_error("Queue actor is not running"))?;
-        reply_rx
-            .await
+        rx.await
             .map_err(|_| SqsError::internal_error("Queue actor dropped reply channel"))?
     }
 
     /// Get tags.
     pub async fn get_tags(&self) -> Result<HashMap<String, String>, SqsError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.sender
-            .send(QueueCommand::GetTags { reply: reply_tx })
+            .send(QueueCommand::GetTags { reply: tx })
             .await
             .map_err(|_| SqsError::internal_error("Queue actor is not running"))?;
-        reply_rx
-            .await
+        rx.await
             .map_err(|_| SqsError::internal_error("Queue actor dropped reply channel"))
     }
 
     /// Set tags.
     pub async fn set_tags(&self, tags: HashMap<String, String>) -> Result<(), SqsError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.sender
-            .send(QueueCommand::SetTags {
-                tags,
-                reply: reply_tx,
-            })
+            .send(QueueCommand::SetTags { tags, reply: tx })
             .await
             .map_err(|_| SqsError::internal_error("Queue actor is not running"))?;
-        let _ = reply_rx.await;
+        let _ = rx.await;
         Ok(())
     }
 
     /// Remove tags.
     pub async fn remove_tags(&self, keys: Vec<String>) -> Result<(), SqsError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.sender
-            .send(QueueCommand::RemoveTags {
-                keys,
-                reply: reply_tx,
-            })
+            .send(QueueCommand::RemoveTags { keys, reply: tx })
             .await
             .map_err(|_| SqsError::internal_error("Queue actor is not running"))?;
-        let _ = reply_rx.await;
+        let _ = rx.await;
         Ok(())
     }
 
@@ -778,6 +972,10 @@ pub struct QueueMetadata {
     /// Creation timestamp (epoch seconds).
     pub created_at: u64,
 }
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
 
 /// Build a `Message` response from internal queue message and receipt handle.
 fn build_message(
