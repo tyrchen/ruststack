@@ -1,4 +1,4 @@
-//! SSM input types for Phase 0 operations.
+//! SSM input types for Phase 0 and Phase 1 operations.
 //!
 //! All input structs use `PascalCase` JSON field naming to match the SSM
 //! wire protocol (`awsJson1_1`). Optional fields are omitted when `None`.
@@ -146,4 +146,102 @@ pub struct DeleteParametersInput {
     /// The names of the parameters to delete (max 10).
     #[serde(default)]
     pub names: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: DescribeParameters
+// ---------------------------------------------------------------------------
+
+/// Input for the `DescribeParameters` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DescribeParametersInput {
+    /// Filters for the results.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameter_filters: Vec<ParameterStringFilter>,
+
+    /// The maximum number of results per page (1-50, default 50).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_results: Option<i32>,
+
+    /// The token for the next set of results.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_token: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: GetParameterHistory
+// ---------------------------------------------------------------------------
+
+/// Input for the `GetParameterHistory` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct GetParameterHistoryInput {
+    /// The name of the parameter.
+    pub name: String,
+
+    /// Whether to decrypt `SecureString` values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub with_decryption: Option<bool>,
+
+    /// The maximum number of results per page (1-50, default 50).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_results: Option<i32>,
+
+    /// The token for the next set of results.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_token: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: AddTagsToResource
+// ---------------------------------------------------------------------------
+
+/// Input for the `AddTagsToResource` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AddTagsToResourceInput {
+    /// The type of resource (must be `"Parameter"`).
+    pub resource_type: String,
+
+    /// The resource ID (parameter name).
+    pub resource_id: String,
+
+    /// The tags to add.
+    #[serde(default)]
+    pub tags: Vec<Tag>,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: RemoveTagsFromResource
+// ---------------------------------------------------------------------------
+
+/// Input for the `RemoveTagsFromResource` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct RemoveTagsFromResourceInput {
+    /// The type of resource (must be `"Parameter"`).
+    pub resource_type: String,
+
+    /// The resource ID (parameter name).
+    pub resource_id: String,
+
+    /// The tag keys to remove.
+    #[serde(default)]
+    pub tag_keys: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: ListTagsForResource
+// ---------------------------------------------------------------------------
+
+/// Input for the `ListTagsForResource` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ListTagsForResourceInput {
+    /// The type of resource (must be `"Parameter"`).
+    pub resource_type: String,
+
+    /// The resource ID (parameter name).
+    pub resource_id: String,
 }

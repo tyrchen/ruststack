@@ -116,11 +116,11 @@ pub struct Parameter {
     pub data_type: Option<String>,
 }
 
-/// A filter for `GetParametersByPath`.
+/// A filter for `GetParametersByPath` and `DescribeParameters`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct ParameterStringFilter {
-    /// The filter key (e.g., `"Type"`, `"KeyId"`, `"Path"`).
+    /// The filter key (e.g., `"Type"`, `"KeyId"`, `"Path"`, `"Name"`).
     pub key: String,
 
     /// The filter comparison option (e.g., `"Equals"`, `"BeginsWith"`).
@@ -130,4 +130,129 @@ pub struct ParameterStringFilter {
     /// The filter values.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
+}
+
+/// Metadata about a parameter (returned by `DescribeParameters`).
+///
+/// This is similar to `Parameter` but does NOT include the value.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ParameterMetadata {
+    /// The parameter name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// The parameter type.
+    #[serde(rename = "Type", skip_serializing_if = "Option::is_none")]
+    pub parameter_type: Option<String>,
+
+    /// The KMS key ID for SecureString parameters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
+
+    /// The date the parameter was last changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_modified_date: Option<f64>,
+
+    /// The ARN of the user who last modified the parameter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_modified_user: Option<String>,
+
+    /// A description of the parameter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// The allowed pattern for the parameter value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_pattern: Option<String>,
+
+    /// The parameter version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<i64>,
+
+    /// The parameter tier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
+
+    /// Policies associated with the parameter.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<ParameterInlinePolicy>,
+
+    /// The data type of the parameter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_type: Option<String>,
+}
+
+/// A version history entry for a parameter (returned by `GetParameterHistory`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ParameterHistory {
+    /// The parameter name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// The parameter type.
+    #[serde(rename = "Type", skip_serializing_if = "Option::is_none")]
+    pub parameter_type: Option<String>,
+
+    /// The KMS key ID for SecureString parameters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
+
+    /// The date this version was last modified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_modified_date: Option<f64>,
+
+    /// The ARN of the user who last modified this version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_modified_user: Option<String>,
+
+    /// A description of the parameter at this version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// The parameter value at this version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+
+    /// The allowed pattern for the parameter value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_pattern: Option<String>,
+
+    /// The version number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<i64>,
+
+    /// Labels attached to this version.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+
+    /// The parameter tier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
+
+    /// Policies associated with the parameter.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<ParameterInlinePolicy>,
+
+    /// The data type of the parameter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_type: Option<String>,
+}
+
+/// An inline policy attached to a parameter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ParameterInlinePolicy {
+    /// The JSON policy text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_text: Option<String>,
+
+    /// The policy type.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_type: Option<String>,
+
+    /// The policy status.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_status: Option<String>,
 }

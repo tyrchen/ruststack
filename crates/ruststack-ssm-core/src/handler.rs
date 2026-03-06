@@ -49,11 +49,12 @@ fn dispatch(
     // Generate a request ID for responses.
     let request_id = uuid::Uuid::new_v4().to_string();
 
-    if !op.is_phase0() {
+    if !op.is_implemented() {
         return Err(SsmError::not_implemented(op.as_str()));
     }
 
     match op {
+        // Phase 0
         SsmOperation::PutParameter => {
             let input = deserialize(body)?;
             let output = provider.handle_put_parameter(input)?;
@@ -84,7 +85,33 @@ fn dispatch(
             let output = provider.handle_delete_parameters(&input)?;
             serialize(&output, &request_id)
         }
-        // Phase 1 and Phase 2 operations are not yet implemented.
+        // Phase 1
+        SsmOperation::DescribeParameters => {
+            let input = deserialize(body)?;
+            let output = provider.handle_describe_parameters(&input)?;
+            serialize(&output, &request_id)
+        }
+        SsmOperation::GetParameterHistory => {
+            let input = deserialize(body)?;
+            let output = provider.handle_get_parameter_history(&input)?;
+            serialize(&output, &request_id)
+        }
+        SsmOperation::AddTagsToResource => {
+            let input = deserialize(body)?;
+            let output = provider.handle_add_tags_to_resource(&input)?;
+            serialize(&output, &request_id)
+        }
+        SsmOperation::RemoveTagsFromResource => {
+            let input = deserialize(body)?;
+            let output = provider.handle_remove_tags_from_resource(&input)?;
+            serialize(&output, &request_id)
+        }
+        SsmOperation::ListTagsForResource => {
+            let input = deserialize(body)?;
+            let output = provider.handle_list_tags_for_resource(&input)?;
+            serialize(&output, &request_id)
+        }
+        // Phase 2 operations are not yet implemented.
         _ => Err(SsmError::not_implemented(op.as_str())),
     }
 }

@@ -97,6 +97,25 @@ impl SsmOperation {
                 | Self::DeleteParameters
         )
     }
+
+    /// Returns `true` if this operation is implemented in Phase 1.
+    #[must_use]
+    pub fn is_phase1(&self) -> bool {
+        matches!(
+            self,
+            Self::DescribeParameters
+                | Self::GetParameterHistory
+                | Self::AddTagsToResource
+                | Self::RemoveTagsFromResource
+                | Self::ListTagsForResource
+        )
+    }
+
+    /// Returns `true` if this operation is implemented (Phase 0 or Phase 1).
+    #[must_use]
+    pub fn is_implemented(&self) -> bool {
+        self.is_phase0() || self.is_phase1()
+    }
 }
 
 impl fmt::Display for SsmOperation {

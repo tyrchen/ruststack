@@ -1,17 +1,21 @@
-//! SSM provider implementing all Phase 0 operations.
+//! SSM provider implementing Phase 0 and Phase 1 operations.
 
-use ruststack_ssm_model::error::SsmError;
+use ruststack_ssm_model::error::{SsmError, SsmErrorCode};
 use ruststack_ssm_model::input::{
-    DeleteParameterInput, DeleteParametersInput, GetParameterInput, GetParametersByPathInput,
-    GetParametersInput, PutParameterInput,
+    AddTagsToResourceInput, DeleteParameterInput, DeleteParametersInput, DescribeParametersInput,
+    GetParameterHistoryInput, GetParameterInput, GetParametersByPathInput, GetParametersInput,
+    ListTagsForResourceInput, PutParameterInput, RemoveTagsFromResourceInput,
 };
 use ruststack_ssm_model::output::{
-    DeleteParameterOutput, DeleteParametersOutput, GetParameterOutput, GetParametersByPathOutput,
-    GetParametersOutput, PutParameterOutput,
+    AddTagsToResourceOutput, DeleteParameterOutput, DeleteParametersOutput,
+    DescribeParametersOutput, GetParameterHistoryOutput, GetParameterOutput,
+    GetParametersByPathOutput, GetParametersOutput, ListTagsForResourceOutput, PutParameterOutput,
+    RemoveTagsFromResourceOutput,
 };
 use ruststack_ssm_model::types::ParameterTier;
 
 use crate::config::SsmConfig;
+use crate::filter::validate_filters;
 use crate::selector::parse_name_with_selector;
 use crate::storage::ParameterStore;
 use crate::validation::{
@@ -24,6 +28,15 @@ const DEFAULT_PATH_MAX_RESULTS: i32 = 10;
 
 /// Maximum max results for `GetParametersByPath`.
 const MAX_PATH_MAX_RESULTS: i32 = 10;
+
+/// Default max results for `DescribeParameters` and `GetParameterHistory`.
+const DEFAULT_DESCRIBE_MAX_RESULTS: i32 = 50;
+
+/// Maximum max results for `DescribeParameters` and `GetParameterHistory`.
+const MAX_DESCRIBE_MAX_RESULTS: i32 = 50;
+
+/// The only valid resource type for tag operations.
+const RESOURCE_TYPE_PARAMETER: &str = "Parameter";
 
 /// The SSM Parameter Store provider.
 #[derive(Debug)]
@@ -211,4 +224,100 @@ impl RustStackSsm {
             invalid_parameters,
         })
     }
+
+    // ----- Phase 1 operations -----
+
+    /// Handle `DescribeParameters`.
+    pub fn handle_describe_parameters(
+        &self,
+        input: &DescribeParametersInput,
+    ) -> Result<DescribeParametersOutput, SsmError> {
+        // Validate filters.
+        validate_filters(&input.parameter_filters)?;
+
+        #[allow(clippy::cast_sign_loss)]
+        let max_results = input
+            .max_results
+            .unwrap_or(DEFAULT_DESCRIBE_MAX_RESULTS)
+            .clamp(1, MAX_DESCRIBE_MAX_RESULTS) as usize;
+
+        let (parameters, next_token) = self.store.describe_parameters(
+            &input.parameter_filters,
+            max_results,
+            input.next_token.as_deref(),
+        );
+
+        Ok(DescribeParametersOutput {
+            parameters,
+            next_token,
+        })
+    }
+
+    /// Handle `GetParameterHistory`.
+    pub fn handle_get_parameter_history(
+        &self,
+        input: &GetParameterHistoryInput,
+    ) -> Result<GetParameterHistoryOutput, SsmError> {
+        #[allow(clippy::cast_sign_loss)]
+        let max_results = input
+            .max_results
+            .unwrap_or(DEFAULT_DESCRIBE_MAX_RESULTS)
+            .clamp(1, MAX_DESCRIBE_MAX_RESULTS) as usize;
+
+        let (parameters, next_token) = self.store.get_parameter_history(
+            &input.name,
+            max_results,
+            input.next_token.as_deref(),
+        )?;
+
+        Ok(GetParameterHistoryOutput {
+            parameters,
+            next_token,
+        })
+    }
+
+    /// Handle `AddTagsToResource`.
+    pub fn handle_add_tags_to_resource(
+        &self,
+        input: &AddTagsToResourceInput,
+    ) -> Result<AddTagsToResourceOutput, SsmError> {
+        validate_resource_type(&input.resource_type)?;
+        self.store.add_tags(&input.resource_id, &input.tags)?;
+        Ok(AddTagsToResourceOutput {})
+    }
+
+    /// Handle `RemoveTagsFromResource`.
+    pub fn handle_remove_tags_from_resource(
+        &self,
+        input: &RemoveTagsFromResourceInput,
+    ) -> Result<RemoveTagsFromResourceOutput, SsmError> {
+        validate_resource_type(&input.resource_type)?;
+        self.store
+            .remove_tags(&input.resource_id, &input.tag_keys)?;
+        Ok(RemoveTagsFromResourceOutput {})
+    }
+
+    /// Handle `ListTagsForResource`.
+    pub fn handle_list_tags_for_resource(
+        &self,
+        input: &ListTagsForResourceInput,
+    ) -> Result<ListTagsForResourceOutput, SsmError> {
+        validate_resource_type(&input.resource_type)?;
+        let tag_list = self.store.list_tags(&input.resource_id)?;
+        Ok(ListTagsForResourceOutput { tag_list })
+    }
+}
+
+/// Validate that the resource type is `"Parameter"`.
+fn validate_resource_type(resource_type: &str) -> Result<(), SsmError> {
+    if resource_type != RESOURCE_TYPE_PARAMETER {
+        return Err(SsmError::with_message(
+            SsmErrorCode::InvalidResourceType,
+            format!(
+                "The resource type '{resource_type}' is not valid. \
+                 Valid resource types: Parameter."
+            ),
+        ));
+    }
+    Ok(())
 }

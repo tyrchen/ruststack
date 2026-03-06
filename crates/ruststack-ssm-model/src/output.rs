@@ -1,11 +1,11 @@
-//! SSM output types for Phase 0 operations.
+//! SSM output types for Phase 0 and Phase 1 operations.
 //!
 //! All output structs use `PascalCase` JSON field naming to match the SSM
 //! wire protocol (`awsJson1_1`). Optional fields are omitted when `None`.
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::Parameter;
+use crate::types::{Parameter, ParameterHistory, ParameterMetadata, Tag};
 
 // ---------------------------------------------------------------------------
 // PutParameter
@@ -93,4 +93,69 @@ pub struct DeleteParametersOutput {
     /// The names of parameters that could not be found.
     #[serde(default)]
     pub invalid_parameters: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: DescribeParameters
+// ---------------------------------------------------------------------------
+
+/// Output for the `DescribeParameters` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DescribeParametersOutput {
+    /// The parameter metadata entries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<ParameterMetadata>,
+
+    /// The token for the next page of results, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_token: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: GetParameterHistory
+// ---------------------------------------------------------------------------
+
+/// Output for the `GetParameterHistory` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct GetParameterHistoryOutput {
+    /// The version history entries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<ParameterHistory>,
+
+    /// The token for the next page of results, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_token: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: AddTagsToResource
+// ---------------------------------------------------------------------------
+
+/// Output for the `AddTagsToResource` operation (empty).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AddTagsToResourceOutput {}
+
+// ---------------------------------------------------------------------------
+// Phase 1: RemoveTagsFromResource
+// ---------------------------------------------------------------------------
+
+/// Output for the `RemoveTagsFromResource` operation (empty).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct RemoveTagsFromResourceOutput {}
+
+// ---------------------------------------------------------------------------
+// Phase 1: ListTagsForResource
+// ---------------------------------------------------------------------------
+
+/// Output for the `ListTagsForResource` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ListTagsForResourceOutput {
+    /// The tags associated with the resource.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tag_list: Vec<Tag>,
 }
