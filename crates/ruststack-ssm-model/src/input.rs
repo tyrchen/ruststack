@@ -1,4 +1,4 @@
-//! SSM input types for Phase 0 and Phase 1 operations.
+//! SSM input types for Phase 0, Phase 1, and Phase 2 operations.
 //!
 //! All input structs use `PascalCase` JSON field naming to match the SSM
 //! wire protocol (`awsJson1_1`). Optional fields are omitted when `None`.
@@ -244,4 +244,43 @@ pub struct ListTagsForResourceInput {
 
     /// The resource ID (parameter name).
     pub resource_id: String,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: LabelParameterVersion
+// ---------------------------------------------------------------------------
+
+/// Input for the `LabelParameterVersion` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LabelParameterVersionInput {
+    /// The parameter name.
+    pub name: String,
+
+    /// The specific version to label. If omitted, the latest version is used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameter_version: Option<i64>,
+
+    /// The labels to attach.
+    #[serde(default)]
+    pub labels: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: UnlabelParameterVersion
+// ---------------------------------------------------------------------------
+
+/// Input for the `UnlabelParameterVersion` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UnlabelParameterVersionInput {
+    /// The parameter name.
+    pub name: String,
+
+    /// The specific version to unlabel.
+    pub parameter_version: i64,
+
+    /// The labels to remove.
+    #[serde(default)]
+    pub labels: Vec<String>,
 }

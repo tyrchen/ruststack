@@ -1,4 +1,4 @@
-//! SSM output types for Phase 0 and Phase 1 operations.
+//! SSM output types for Phase 0, Phase 1, and Phase 2 operations.
 //!
 //! All output structs use `PascalCase` JSON field naming to match the SSM
 //! wire protocol (`awsJson1_1`). Optional fields are omitted when `None`.
@@ -158,4 +158,37 @@ pub struct ListTagsForResourceOutput {
     /// The tags associated with the resource.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tag_list: Vec<Tag>,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: LabelParameterVersion
+// ---------------------------------------------------------------------------
+
+/// Output for the `LabelParameterVersion` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LabelParameterVersionOutput {
+    /// Labels that failed validation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub invalid_labels: Vec<String>,
+
+    /// The version number that was labeled.
+    pub parameter_version: i64,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: UnlabelParameterVersion
+// ---------------------------------------------------------------------------
+
+/// Output for the `UnlabelParameterVersion` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UnlabelParameterVersionOutput {
+    /// Labels that were not found on the specified version.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub invalid_labels: Vec<String>,
+
+    /// Labels that were successfully removed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_labels: Vec<String>,
 }

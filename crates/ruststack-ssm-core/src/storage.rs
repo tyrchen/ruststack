@@ -17,7 +17,7 @@ use ruststack_ssm_model::types::{
 use crate::filter::matches_filters;
 
 use crate::selector::ParameterSelector;
-use crate::validation::MAX_VERSIONS;
+use crate::validation::{MAX_LABELS_PER_VERSION, MAX_VERSIONS, is_valid_label};
 
 /// A snapshot of a single parameter version.
 #[derive(Debug, Clone)]
@@ -503,6 +503,132 @@ impl ParameterStore {
         tags.sort_by(|a, b| a.key.cmp(&b.key));
 
         Ok(tags)
+    }
+
+    /// Attach labels to a specific parameter version.
+    ///
+    /// If `version` is `None`, the latest version is used.
+    /// Invalid-format labels are returned in the first element of the tuple.
+    /// Labels are unique per parameter across versions -- attaching a label to
+    /// one version removes it from any other version that had it.
+    ///
+    /// Returns `(invalid_labels, labeled_version)`.
+    pub fn label_parameter_version(
+        &self,
+        name: &str,
+        version: Option<u64>,
+        labels: &[String],
+    ) -> Result<(Vec<String>, u64), SsmError> {
+        let mut record = self
+            .parameters
+            .get_mut(name)
+            .ok_or_else(|| SsmError::parameter_not_found(name))?;
+
+        // Resolve the target version number.
+        let target_version = version.unwrap_or(record.current_version);
+
+        // Verify the target version exists.
+        if !record.versions.contains_key(&target_version) {
+            return Err(SsmError::with_message(
+                SsmErrorCode::ParameterVersionNotFound,
+                format!(
+                    "Systems Manager could not find version {target_version} of {name}. \
+                     Verify the version and try again."
+                ),
+            ));
+        }
+
+        // Partition labels into valid and invalid.
+        let mut valid_labels = Vec::new();
+        let mut invalid_labels = Vec::new();
+        for label in labels {
+            if is_valid_label(label) {
+                valid_labels.push(label.clone());
+            } else {
+                invalid_labels.push(label.clone());
+            }
+        }
+
+        // Remove valid labels from any other version they might be on.
+        for ver in record.versions.values_mut() {
+            if ver.version != target_version {
+                for label in &valid_labels {
+                    ver.labels.remove(label);
+                }
+            }
+        }
+
+        // Check label limit on the target version.
+        let target = record
+            .versions
+            .get(&target_version)
+            .ok_or_else(|| SsmError::parameter_not_found(name))?;
+        let new_label_count = valid_labels
+            .iter()
+            .filter(|l| !target.labels.contains(l.as_str()))
+            .count();
+        if target.labels.len() + new_label_count > MAX_LABELS_PER_VERSION {
+            return Err(SsmError::with_message(
+                SsmErrorCode::ParameterVersionLabelLimitExceeded,
+                format!(
+                    "A parameter version can have a maximum of {MAX_LABELS_PER_VERSION} labels. \
+                     Move one or more labels to a different version and try again."
+                ),
+            ));
+        }
+
+        // Attach labels to the target version.
+        let target = record
+            .versions
+            .get_mut(&target_version)
+            .ok_or_else(|| SsmError::parameter_not_found(name))?;
+        for label in valid_labels {
+            target.labels.insert(label);
+        }
+
+        Ok((invalid_labels, target_version))
+    }
+
+    /// Remove labels from a specific parameter version.
+    ///
+    /// Labels that exist on the version are removed and returned in `removed_labels`.
+    /// Labels that do not exist on the version are returned in `invalid_labels`.
+    ///
+    /// Returns `(invalid_labels, removed_labels)`.
+    pub fn unlabel_parameter_version(
+        &self,
+        name: &str,
+        version: u64,
+        labels: &[String],
+    ) -> Result<(Vec<String>, Vec<String>), SsmError> {
+        let mut record = self
+            .parameters
+            .get_mut(name)
+            .ok_or_else(|| SsmError::parameter_not_found(name))?;
+
+        // Verify the version exists.
+        let target = record.versions.get_mut(&version).ok_or_else(|| {
+            SsmError::with_message(
+                SsmErrorCode::ParameterVersionNotFound,
+                format!(
+                    "Systems Manager could not find version {version} of {name}. \
+                     Verify the version and try again."
+                ),
+            )
+        })?;
+
+        let mut invalid_labels = Vec::new();
+        let mut removed_labels = Vec::new();
+
+        for label in labels {
+            if target.labels.remove(label) {
+                removed_labels.push(label.clone());
+            } else {
+                invalid_labels.push(label.clone());
+            }
+        }
+
+        Ok((invalid_labels, removed_labels))
     }
 }
 
@@ -1231,6 +1357,214 @@ mod tests {
         assert_eq!(
             err.code,
             ruststack_ssm_model::error::SsmErrorCode::TooManyTagsError,
+        );
+    }
+
+    // ----- Phase 2 tests -----
+
+    fn put_versioned(store: &ParameterStore, name: &str, count: usize) {
+        for i in 0..count {
+            store
+                .put_parameter(
+                    name,
+                    format!("v{}", i + 1),
+                    ParameterType::String,
+                    None,
+                    None,
+                    i > 0, // overwrite after first
+                    None,
+                    &[],
+                    &ParameterTier::Standard,
+                    "text".to_owned(),
+                    vec![],
+                    "123456789012",
+                )
+                .expect("should put");
+        }
+    }
+
+    #[test]
+    fn test_should_label_latest_version() {
+        let store = test_store();
+        put_versioned(&store, "/label/param", 2);
+
+        let labels = vec!["release".to_owned()];
+        let (invalid, version) = store
+            .label_parameter_version("/label/param", None, &labels)
+            .expect("should label");
+        assert!(invalid.is_empty());
+        assert_eq!(version, 2);
+
+        // Verify label is on version 2.
+        let record = store.parameters.get("/label/param").expect("exists");
+        let v2 = record.versions.get(&2).expect("v2");
+        assert!(v2.labels.contains("release"));
+    }
+
+    #[test]
+    fn test_should_label_specific_version() {
+        let store = test_store();
+        put_versioned(&store, "/label/param", 3);
+
+        let labels = vec!["staging".to_owned()];
+        let (invalid, version) = store
+            .label_parameter_version("/label/param", Some(1), &labels)
+            .expect("should label");
+        assert!(invalid.is_empty());
+        assert_eq!(version, 1);
+
+        let record = store.parameters.get("/label/param").expect("exists");
+        let v1 = record.versions.get(&1).expect("v1");
+        assert!(v1.labels.contains("staging"));
+    }
+
+    #[test]
+    fn test_should_move_label_between_versions() {
+        let store = test_store();
+        put_versioned(&store, "/label/param", 2);
+
+        // Label version 1.
+        store
+            .label_parameter_version("/label/param", Some(1), &["prod".to_owned()])
+            .expect("label v1");
+
+        // Move label to version 2.
+        store
+            .label_parameter_version("/label/param", Some(2), &["prod".to_owned()])
+            .expect("label v2");
+
+        let record = store.parameters.get("/label/param").expect("exists");
+        let v1 = record.versions.get(&1).expect("v1");
+        let v2 = record.versions.get(&2).expect("v2");
+        assert!(!v1.labels.contains("prod"));
+        assert!(v2.labels.contains("prod"));
+    }
+
+    #[test]
+    fn test_should_reject_invalid_labels() {
+        let store = test_store();
+        put_simple(&store, "/label/param", "val");
+
+        let labels = vec![
+            "valid-label".to_owned(),
+            "123invalid".to_owned(),   // starts with digit
+            "aws-reserved".to_owned(), // starts with aws
+            "ssm-reserved".to_owned(), // starts with ssm
+            String::new(),             // empty
+        ];
+        let (invalid, version) = store
+            .label_parameter_version("/label/param", None, &labels)
+            .expect("should label");
+        assert_eq!(version, 1);
+        assert_eq!(invalid.len(), 4);
+        assert!(invalid.contains(&"123invalid".to_owned()));
+        assert!(invalid.contains(&"aws-reserved".to_owned()));
+        assert!(invalid.contains(&"ssm-reserved".to_owned()));
+        assert!(invalid.contains(&String::new()));
+
+        // Valid label should be attached.
+        let record = store.parameters.get("/label/param").expect("exists");
+        let v1 = record.versions.get(&1).expect("v1");
+        assert!(v1.labels.contains("valid-label"));
+    }
+
+    #[test]
+    fn test_should_enforce_label_limit() {
+        let store = test_store();
+        put_simple(&store, "/label/param", "val");
+
+        // Attach 10 labels (the max).
+        let labels: Vec<String> = (0..10).map(|i| format!("label-{i}")).collect();
+        store
+            .label_parameter_version("/label/param", None, &labels)
+            .expect("should label 10");
+
+        // Adding one more should fail.
+        let err = store
+            .label_parameter_version("/label/param", None, &["overflow".to_owned()])
+            .unwrap_err();
+        assert_eq!(
+            err.code,
+            ruststack_ssm_model::error::SsmErrorCode::ParameterVersionLabelLimitExceeded,
+        );
+    }
+
+    #[test]
+    fn test_should_label_not_found_parameter() {
+        let store = test_store();
+        let err = store
+            .label_parameter_version("/nonexistent", None, &["label".to_owned()])
+            .unwrap_err();
+        assert_eq!(
+            err.code,
+            ruststack_ssm_model::error::SsmErrorCode::ParameterNotFound,
+        );
+    }
+
+    #[test]
+    fn test_should_label_not_found_version() {
+        let store = test_store();
+        put_simple(&store, "/label/param", "val");
+
+        let err = store
+            .label_parameter_version("/label/param", Some(99), &["label".to_owned()])
+            .unwrap_err();
+        assert_eq!(
+            err.code,
+            ruststack_ssm_model::error::SsmErrorCode::ParameterVersionNotFound,
+        );
+    }
+
+    #[test]
+    fn test_should_unlabel_existing_labels() {
+        let store = test_store();
+        put_simple(&store, "/label/param", "val");
+
+        store
+            .label_parameter_version(
+                "/label/param",
+                Some(1),
+                &["alpha".to_owned(), "beta".to_owned()],
+            )
+            .expect("label");
+
+        let (invalid, removed) = store
+            .unlabel_parameter_version("/label/param", 1, &["alpha".to_owned(), "gamma".to_owned()])
+            .expect("unlabel");
+
+        assert_eq!(removed, vec!["alpha".to_owned()]);
+        assert_eq!(invalid, vec!["gamma".to_owned()]);
+
+        // Verify beta is still there.
+        let record = store.parameters.get("/label/param").expect("exists");
+        let v1 = record.versions.get(&1).expect("v1");
+        assert!(v1.labels.contains("beta"));
+        assert!(!v1.labels.contains("alpha"));
+    }
+
+    #[test]
+    fn test_should_unlabel_not_found_parameter() {
+        let store = test_store();
+        let err = store
+            .unlabel_parameter_version("/nonexistent", 1, &["label".to_owned()])
+            .unwrap_err();
+        assert_eq!(
+            err.code,
+            ruststack_ssm_model::error::SsmErrorCode::ParameterNotFound,
+        );
+    }
+
+    #[test]
+    fn test_should_unlabel_not_found_version() {
+        let store = test_store();
+        put_simple(&store, "/label/param", "val");
+
+        let err = store
+            .unlabel_parameter_version("/label/param", 99, &["label".to_owned()])
+            .unwrap_err();
+        assert_eq!(
+            err.code,
+            ruststack_ssm_model::error::SsmErrorCode::ParameterVersionNotFound,
         );
     }
 }

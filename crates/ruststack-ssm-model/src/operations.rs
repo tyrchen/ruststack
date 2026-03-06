@@ -111,10 +111,19 @@ impl SsmOperation {
         )
     }
 
-    /// Returns `true` if this operation is implemented (Phase 0 or Phase 1).
+    /// Returns `true` if this operation is implemented in Phase 2.
+    #[must_use]
+    pub fn is_phase2(&self) -> bool {
+        matches!(
+            self,
+            Self::LabelParameterVersion | Self::UnlabelParameterVersion
+        )
+    }
+
+    /// Returns `true` if this operation is implemented.
     #[must_use]
     pub fn is_implemented(&self) -> bool {
-        self.is_phase0() || self.is_phase1()
+        self.is_phase0() || self.is_phase1() || self.is_phase2()
     }
 }
 

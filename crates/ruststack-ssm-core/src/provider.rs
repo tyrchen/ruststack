@@ -1,16 +1,18 @@
-//! SSM provider implementing Phase 0 and Phase 1 operations.
+//! SSM provider implementing Phase 0, Phase 1, and Phase 2 operations.
 
 use ruststack_ssm_model::error::{SsmError, SsmErrorCode};
 use ruststack_ssm_model::input::{
     AddTagsToResourceInput, DeleteParameterInput, DeleteParametersInput, DescribeParametersInput,
     GetParameterHistoryInput, GetParameterInput, GetParametersByPathInput, GetParametersInput,
-    ListTagsForResourceInput, PutParameterInput, RemoveTagsFromResourceInput,
+    LabelParameterVersionInput, ListTagsForResourceInput, PutParameterInput,
+    RemoveTagsFromResourceInput, UnlabelParameterVersionInput,
 };
 use ruststack_ssm_model::output::{
     AddTagsToResourceOutput, DeleteParameterOutput, DeleteParametersOutput,
     DescribeParametersOutput, GetParameterHistoryOutput, GetParameterOutput,
-    GetParametersByPathOutput, GetParametersOutput, ListTagsForResourceOutput, PutParameterOutput,
-    RemoveTagsFromResourceOutput,
+    GetParametersByPathOutput, GetParametersOutput, LabelParameterVersionOutput,
+    ListTagsForResourceOutput, PutParameterOutput, RemoveTagsFromResourceOutput,
+    UnlabelParameterVersionOutput,
 };
 use ruststack_ssm_model::types::ParameterTier;
 
@@ -305,6 +307,44 @@ impl RustStackSsm {
         validate_resource_type(&input.resource_type)?;
         let tag_list = self.store.list_tags(&input.resource_id)?;
         Ok(ListTagsForResourceOutput { tag_list })
+    }
+
+    // ----- Phase 2 operations -----
+
+    /// Handle `LabelParameterVersion`.
+    pub fn handle_label_parameter_version(
+        &self,
+        input: &LabelParameterVersionInput,
+    ) -> Result<LabelParameterVersionOutput, SsmError> {
+        #[allow(clippy::cast_sign_loss)]
+        let version = input.parameter_version.map(|v| v as u64);
+
+        let (invalid_labels, parameter_version) =
+            self.store
+                .label_parameter_version(&input.name, version, &input.labels)?;
+
+        Ok(LabelParameterVersionOutput {
+            invalid_labels,
+            parameter_version: parameter_version.cast_signed(),
+        })
+    }
+
+    /// Handle `UnlabelParameterVersion`.
+    pub fn handle_unlabel_parameter_version(
+        &self,
+        input: &UnlabelParameterVersionInput,
+    ) -> Result<UnlabelParameterVersionOutput, SsmError> {
+        #[allow(clippy::cast_sign_loss)]
+        let version = input.parameter_version as u64;
+
+        let (invalid_labels, removed_labels) =
+            self.store
+                .unlabel_parameter_version(&input.name, version, &input.labels)?;
+
+        Ok(UnlabelParameterVersionOutput {
+            invalid_labels,
+            removed_labels,
+        })
     }
 }
 

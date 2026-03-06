@@ -30,6 +30,12 @@ pub const MAX_VERSIONS: usize = 100;
 /// Maximum number of parameters in a batch get/delete.
 pub const MAX_BATCH_SIZE: usize = 10;
 
+/// Maximum number of labels per parameter version.
+pub const MAX_LABELS_PER_VERSION: usize = 10;
+
+/// Maximum label length.
+const MAX_LABEL_LENGTH: usize = 100;
+
 /// Validate a parameter name.
 pub fn validate_name(name: &str) -> Result<(), SsmError> {
     if name.is_empty() || name.len() > MAX_NAME_LENGTH {
@@ -149,6 +155,40 @@ pub fn validate_allowed_pattern(pattern: &str, value: &str) -> Result<(), SsmErr
     }
 
     Ok(())
+}
+
+/// Validate a parameter version label.
+///
+/// Labels must be 1-100 characters, contain only `[a-zA-Z0-9_.-]`,
+/// and cannot start with `aws`, `ssm` (case-insensitive), or a digit.
+///
+/// Returns `true` if the label is valid, `false` otherwise.
+#[must_use]
+pub fn is_valid_label(label: &str) -> bool {
+    if label.is_empty() || label.len() > MAX_LABEL_LENGTH {
+        return false;
+    }
+
+    // Must contain only [a-zA-Z0-9_.-]
+    if !label
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-')
+    {
+        return false;
+    }
+
+    // Cannot start with a digit.
+    if label.starts_with(|c: char| c.is_ascii_digit()) {
+        return false;
+    }
+
+    // Cannot start with `aws` or `ssm` (case-insensitive).
+    let lower = label.to_lowercase();
+    if lower.starts_with("aws") || lower.starts_with("ssm") {
+        return false;
+    }
+
+    true
 }
 
 /// Parse a tier string into a `ParameterTier`.
@@ -274,5 +314,41 @@ mod tests {
             ParameterType::SecureString
         );
         assert!(parse_parameter_type("Invalid").is_err());
+    }
+
+    #[test]
+    fn test_should_validate_valid_labels() {
+        assert!(is_valid_label("release"));
+        assert!(is_valid_label("my-label"));
+        assert!(is_valid_label("my_label"));
+        assert!(is_valid_label("my.label"));
+        assert!(is_valid_label("Release-v1.0"));
+        assert!(is_valid_label("a")); // minimum length
+    }
+
+    #[test]
+    fn test_should_reject_invalid_labels() {
+        // Empty.
+        assert!(!is_valid_label(""));
+        // Too long (101 chars).
+        assert!(!is_valid_label(&"a".repeat(101)));
+        // Starts with digit.
+        assert!(!is_valid_label("1label"));
+        // Starts with aws (case-insensitive).
+        assert!(!is_valid_label("aws-reserved"));
+        assert!(!is_valid_label("AWS-reserved"));
+        // Starts with ssm (case-insensitive).
+        assert!(!is_valid_label("ssm-reserved"));
+        assert!(!is_valid_label("SSM-reserved"));
+        // Invalid characters.
+        assert!(!is_valid_label("label with spaces"));
+        assert!(!is_valid_label("label@special"));
+    }
+
+    #[test]
+    fn test_should_accept_max_length_label() {
+        // Exactly 100 chars should be valid.
+        let label = "a".repeat(100);
+        assert!(is_valid_label(&label));
     }
 }

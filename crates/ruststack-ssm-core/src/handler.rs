@@ -111,8 +111,17 @@ fn dispatch(
             let output = provider.handle_list_tags_for_resource(&input)?;
             serialize(&output, &request_id)
         }
-        // Phase 2 operations are not yet implemented.
-        _ => Err(SsmError::not_implemented(op.as_str())),
+        // Phase 2
+        SsmOperation::LabelParameterVersion => {
+            let input = deserialize(body)?;
+            let output = provider.handle_label_parameter_version(&input)?;
+            serialize(&output, &request_id)
+        }
+        SsmOperation::UnlabelParameterVersion => {
+            let input = deserialize(body)?;
+            let output = provider.handle_unlabel_parameter_version(&input)?;
+            serialize(&output, &request_id)
+        }
     }
 }
 
