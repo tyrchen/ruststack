@@ -238,12 +238,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3-pip python3-venv
           cd tests/sqs-compat && python3 -m venv .venv
-          tests/sqs-compat/.venv/bin/pip install -q -r tests/sqs-compat/requirements.txt
+          .venv/bin/pip install -q -r requirements.txt
 
       - name: Run SQS compat tests
         run: |
           cd tests/sqs-compat
-          ../../tests/sqs-compat/.venv/bin/pytest -v \
+          .venv/bin/pytest -v \
             --url http://localhost:4566 \
             2>&1 | tee /tmp/sqs-compat-output.txt || true
 

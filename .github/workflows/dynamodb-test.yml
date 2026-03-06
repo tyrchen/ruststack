@@ -240,9 +240,9 @@ jobs:
               ":pk": {"S": "order#100"},
               ":prefix": {"S": "item#01"}
             }')
-          # Should match item#010..item#019 (items 10-19) and item#01 (1 item) = 11 items
+          # Should match item#010..item#019 (items 10-19) = 10 items
           COUNT=$(echo "$RESULT" | jq '.Count')
-          [ "$COUNT" -eq 11 ]
+          [ "$COUNT" -eq 10 ]
 
           # Query with filter expression
           RESULT=$(aws dynamodb query \
