@@ -29,6 +29,9 @@ COPY crates/ruststack-dynamodb-core/Cargo.toml crates/ruststack-dynamodb-core/Ca
 COPY crates/ruststack-sqs-model/Cargo.toml crates/ruststack-sqs-model/Cargo.toml
 COPY crates/ruststack-sqs-http/Cargo.toml crates/ruststack-sqs-http/Cargo.toml
 COPY crates/ruststack-sqs-core/Cargo.toml crates/ruststack-sqs-core/Cargo.toml
+COPY crates/ruststack-ssm-model/Cargo.toml crates/ruststack-ssm-model/Cargo.toml
+COPY crates/ruststack-ssm-http/Cargo.toml crates/ruststack-ssm-http/Cargo.toml
+COPY crates/ruststack-ssm-core/Cargo.toml crates/ruststack-ssm-core/Cargo.toml
 COPY tests/integration/Cargo.toml tests/integration/Cargo.toml
 
 # Create stub sources so cargo can resolve the workspace.
@@ -45,6 +48,9 @@ RUN mkdir -p apps/ruststack-server/src && echo 'fn main() {}' > apps/ruststack-s
     && mkdir -p crates/ruststack-sqs-model/src && echo '//! stub' > crates/ruststack-sqs-model/src/lib.rs \
     && mkdir -p crates/ruststack-sqs-http/src && echo '//! stub' > crates/ruststack-sqs-http/src/lib.rs \
     && mkdir -p crates/ruststack-sqs-core/src && echo '//! stub' > crates/ruststack-sqs-core/src/lib.rs \
+    && mkdir -p crates/ruststack-ssm-model/src && echo '//! stub' > crates/ruststack-ssm-model/src/lib.rs \
+    && mkdir -p crates/ruststack-ssm-http/src && echo '//! stub' > crates/ruststack-ssm-http/src/lib.rs \
+    && mkdir -p crates/ruststack-ssm-core/src && echo '//! stub' > crates/ruststack-ssm-core/src/lib.rs \
     && mkdir -p tests/integration/src && echo '//! stub' > tests/integration/src/lib.rs
 
 # Pre-build dependencies (cached layer).
@@ -90,6 +96,7 @@ ENV LOG_LEVEL=info
 ENV S3_SKIP_SIGNATURE_VALIDATION=true
 ENV DYNAMODB_SKIP_SIGNATURE_VALIDATION=true
 ENV SQS_SKIP_SIGNATURE_VALIDATION=true
+ENV SSM_SKIP_SIGNATURE_VALIDATION=true
 ENV SERVICES=
 
 EXPOSE 4566

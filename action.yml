@@ -1,5 +1,5 @@
 name: "RustStack"
-description: "Start a high-performance AWS-compatible server (S3 + DynamoDB + SQS) on localhost:4566 (drop-in replacement for LocalStack)"
+description: "Start a high-performance AWS-compatible server (S3 + DynamoDB + SQS + SSM) on localhost:4566 (drop-in replacement for LocalStack)"
 author: "Tyr Chen"
 
 branding:
@@ -47,6 +47,10 @@ inputs:
     description: "Skip SQS signature validation (true/false)"
     required: false
     default: "true"
+  ssm-skip-auth:
+    description: "Skip SSM signature validation (true/false)"
+    required: false
+    default: "true"
   persistence:
     description: "Enable durable storage persistence (true/false)"
     required: false
@@ -84,6 +88,7 @@ runs:
           -e "S3_SKIP_SIGNATURE_VALIDATION=${{ inputs.s3-skip-auth }}" \
           -e "DYNAMODB_SKIP_SIGNATURE_VALIDATION=${{ inputs.dynamodb-skip-auth }}" \
           -e "SQS_SKIP_SIGNATURE_VALIDATION=${{ inputs.sqs-skip-auth }}" \
+          -e "SSM_SKIP_SIGNATURE_VALIDATION=${{ inputs.ssm-skip-auth }}" \
           -e "ACCESS_KEY=${{ inputs.access-key }}" \
           -e "SECRET_KEY=${{ inputs.secret-key }}" \
           -e "PERSISTENCE=${{ inputs.persistence }}" \
@@ -112,7 +117,7 @@ runs:
           ELAPSED=$((ELAPSED + 1))
         done
 
-        echo "RustStack is ready at $ENDPOINT (S3 + DynamoDB + SQS)"
+        echo "RustStack is ready at $ENDPOINT (S3 + DynamoDB + SQS + SSM)"
 
     - name: Export environment
       shell: bash

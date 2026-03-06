@@ -1,0 +1,254 @@
+name: ssm-test
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  ssm-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup toolchain install stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and start RustStack
+        id: ruststack
+        run: |
+          cargo build --release -p ruststack-server
+
+          S3_SKIP_SIGNATURE_VALIDATION=true \
+          DYNAMODB_SKIP_SIGNATURE_VALIDATION=true \
+          SQS_SKIP_SIGNATURE_VALIDATION=true \
+          SSM_SKIP_SIGNATURE_VALIDATION=true \
+          GATEWAY_LISTEN=0.0.0.0:4566 \
+          LOG_LEVEL=warn \
+          cargo run --release -p ruststack-server &
+
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then
+              echo "Server is ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Server did not start within 30s"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "endpoint=http://localhost:4566" >> "$GITHUB_OUTPUT"
+
+          echo "AWS_ENDPOINT_URL=http://localhost:4566" >> "$GITHUB_ENV"
+          echo "AWS_DEFAULT_REGION=us-east-1" >> "$GITHUB_ENV"
+          echo "AWS_ACCESS_KEY_ID=test" >> "$GITHUB_ENV"
+          echo "AWS_SECRET_ACCESS_KEY=test" >> "$GITHUB_ENV"
+
+      # ── PutParameter + GetParameter ─────────────────────────────────
+      - name: "PutParameter + GetParameter: basic CRUD"
+        run: |
+          set -euo pipefail
+
+          # Put a String parameter
+          VERSION=$(aws ssm put-parameter \
+            --name "/test/ci/host" \
+            --value "localhost" \
+            --type String \
+            --query "Version" --output text)
+          [ "$VERSION" = "1" ]
+
+          # Get it back
+          VALUE=$(aws ssm get-parameter \
+            --name "/test/ci/host" \
+            --query "Parameter.Value" --output text)
+          [ "$VALUE" = "localhost" ]
+
+          # Overwrite
+          VERSION2=$(aws ssm put-parameter \
+            --name "/test/ci/host" \
+            --value "127.0.0.1" \
+            --type String \
+            --overwrite \
+            --query "Version" --output text)
+          [ "$VERSION2" = "2" ]
+
+          # Put without overwrite should fail
+          ! aws ssm put-parameter \
+            --name "/test/ci/host" \
+            --value "fail" \
+            --type String 2>/dev/null
+
+      # ── SecureString + StringList ───────────────────────────────────
+      - name: "Parameter Types: SecureString and StringList"
+        run: |
+          set -euo pipefail
+
+          aws ssm put-parameter \
+            --name "/test/ci/secret" \
+            --value "my-secret-value" \
+            --type SecureString
+
+          aws ssm put-parameter \
+            --name "/test/ci/list" \
+            --value "a,b,c" \
+            --type StringList
+
+          TYPE=$(aws ssm get-parameter \
+            --name "/test/ci/secret" \
+            --query "Parameter.Type" --output text)
+          [ "$TYPE" = "SecureString" ]
+
+          VALUE=$(aws ssm get-parameter \
+            --name "/test/ci/list" \
+            --query "Parameter.Value" --output text)
+          [ "$VALUE" = "a,b,c" ]
+
+      # ── GetParameters (batch) ───────────────────────────────────────
+      - name: "GetParameters: batch get with valid and invalid names"
+        run: |
+          set -euo pipefail
+
+          RESULT=$(aws ssm get-parameters \
+            --names "/test/ci/host" "/test/ci/secret" "/test/ci/nonexistent")
+
+          VALID=$(echo "$RESULT" | jq '.Parameters | length')
+          INVALID=$(echo "$RESULT" | jq '.InvalidParameters | length')
+          [ "$VALID" = "2" ]
+          [ "$INVALID" = "1" ]
+
+      # ── GetParametersByPath ─────────────────────────────────────────
+      - name: "GetParametersByPath: non-recursive and recursive"
+        run: |
+          set -euo pipefail
+
+          aws ssm put-parameter --name "/test/ci/db/host" --value "db.local" --type String
+          aws ssm put-parameter --name "/test/ci/db/port" --value "5432" --type String
+          aws ssm put-parameter --name "/test/ci/db/creds/user" --value "admin" --type String
+
+          # Non-recursive: only direct children of /test/ci/db
+          COUNT=$(aws ssm get-parameters-by-path \
+            --path "/test/ci/db" \
+            --query "Parameters | length(@)" --output text)
+          [ "$COUNT" = "2" ]
+
+          # Recursive: all descendants
+          COUNT=$(aws ssm get-parameters-by-path \
+            --path "/test/ci/db" \
+            --recursive \
+            --query "Parameters | length(@)" --output text)
+          [ "$COUNT" = "3" ]
+
+      # ── DeleteParameter + DeleteParameters ──────────────────────────
+      - name: "Delete: single and batch delete"
+        run: |
+          set -euo pipefail
+
+          aws ssm put-parameter --name "/test/ci/del1" --value "v1" --type String
+          aws ssm put-parameter --name "/test/ci/del2" --value "v2" --type String
+
+          aws ssm delete-parameter --name "/test/ci/del1"
+          ! aws ssm get-parameter --name "/test/ci/del1" 2>/dev/null
+
+          RESULT=$(aws ssm delete-parameters --names "/test/ci/del2" "/test/ci/nonexistent")
+          DELETED=$(echo "$RESULT" | jq '.DeletedParameters | length')
+          INVALID=$(echo "$RESULT" | jq '.InvalidParameters | length')
+          [ "$DELETED" = "1" ]
+          [ "$INVALID" = "1" ]
+
+      # ── DescribeParameters ──────────────────────────────────────────
+      - name: "DescribeParameters: list and filter"
+        run: |
+          set -euo pipefail
+
+          RESULT=$(aws ssm describe-parameters \
+            --parameter-filters "Key=Name,Option=BeginsWith,Values=/test/ci/db")
+          COUNT=$(echo "$RESULT" | jq '.Parameters | length')
+          [ "$COUNT" -ge 2 ]
+
+      # ── GetParameterHistory ─────────────────────────────────────────
+      - name: "GetParameterHistory: version history"
+        run: |
+          set -euo pipefail
+
+          # /test/ci/host has 2 versions from earlier steps
+          RESULT=$(aws ssm get-parameter-history --name "/test/ci/host")
+          COUNT=$(echo "$RESULT" | jq '.Parameters | length')
+          [ "$COUNT" = "2" ]
+
+      # ── Tags ────────────────────────────────────────────────────────
+      - name: "Tags: add, list, remove"
+        run: |
+          set -euo pipefail
+
+          aws ssm add-tags-to-resource \
+            --resource-type "Parameter" \
+            --resource-id "/test/ci/host" \
+            --tags "Key=env,Value=ci" "Key=team,Value=infra"
+
+          TAG_COUNT=$(aws ssm list-tags-for-resource \
+            --resource-type "Parameter" \
+            --resource-id "/test/ci/host" \
+            --query "TagList | length(@)" --output text)
+          [ "$TAG_COUNT" = "2" ]
+
+          aws ssm remove-tags-from-resource \
+            --resource-type "Parameter" \
+            --resource-id "/test/ci/host" \
+            --tag-keys "team"
+
+          TAG_COUNT=$(aws ssm list-tags-for-resource \
+            --resource-type "Parameter" \
+            --resource-id "/test/ci/host" \
+            --query "TagList | length(@)" --output text)
+          [ "$TAG_COUNT" = "1" ]
+
+      # ── Labels ──────────────────────────────────────────────────────
+      - name: "Labels: label, get by label selector, unlabel"
+        run: |
+          set -euo pipefail
+
+          # Label version 1 of /test/ci/host
+          aws ssm label-parameter-version \
+            --name "/test/ci/host" \
+            --parameter-version 1 \
+            --labels "release"
+
+          # Get by label selector
+          VALUE=$(aws ssm get-parameter \
+            --name "/test/ci/host:release" \
+            --query "Parameter.Value" --output text)
+          [ "$VALUE" = "localhost" ]
+
+          # Get by version selector
+          VALUE=$(aws ssm get-parameter \
+            --name "/test/ci/host:1" \
+            --query "Parameter.Value" --output text)
+          [ "$VALUE" = "localhost" ]
+
+          # Unlabel
+          aws ssm unlabel-parameter-version \
+            --name "/test/ci/host" \
+            --parameter-version 1 \
+            --labels "release"
+
+          # Label should no longer resolve
+          ! aws ssm get-parameter --name "/test/ci/host:release" 2>/dev/null
+
+      # ── Cleanup ─────────────────────────────────────────────────────
+      - name: "Cleanup"
+        if: always()
+        run: |
+          set -uo pipefail
+          for PARAM in /test/ci/host /test/ci/secret /test/ci/list \
+                       /test/ci/db/host /test/ci/db/port /test/ci/db/creds/user; do
+            aws ssm delete-parameter --name "$PARAM" 2>/dev/null || true
+          done
+          echo "Cleanup complete."
