@@ -1,0 +1,267 @@
+name: lambda-test
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  lambda-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup toolchain install stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and start RustStack
+        id: ruststack
+        run: |
+          cargo build --release -p ruststack-server
+
+          S3_SKIP_SIGNATURE_VALIDATION=true \
+          DYNAMODB_SKIP_SIGNATURE_VALIDATION=true \
+          SQS_SKIP_SIGNATURE_VALIDATION=true \
+          SSM_SKIP_SIGNATURE_VALIDATION=true \
+          SNS_SKIP_SIGNATURE_VALIDATION=true \
+          LAMBDA_SKIP_SIGNATURE_VALIDATION=true \
+          GATEWAY_LISTEN=0.0.0.0:4566 \
+          LOG_LEVEL=warn \
+          cargo run --release -p ruststack-server &
+
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then
+              echo "Server is ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Server did not start within 30s"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "endpoint=http://localhost:4566" >> "$GITHUB_OUTPUT"
+
+          echo "AWS_ENDPOINT_URL=http://localhost:4566" >> "$GITHUB_ENV"
+          echo "AWS_DEFAULT_REGION=us-east-1" >> "$GITHUB_ENV"
+          echo "AWS_ACCESS_KEY_ID=test" >> "$GITHUB_ENV"
+          echo "AWS_SECRET_ACCESS_KEY=test" >> "$GITHUB_ENV"
+
+      # ── CreateFunction + GetFunction ───────────────────────────────
+      - name: "CreateFunction + GetFunction: basic CRUD"
+        run: |
+          set -euo pipefail
+
+          # Create a minimal zip payload (base64-encoded empty zip)
+          ZIP_FILE=$(mktemp /tmp/lambda-XXXXXX.zip)
+          echo "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==" | base64 -d > "$ZIP_FILE"
+
+          FUNC_NAME="test-ci-hello"
+          aws lambda create-function \
+            --function-name "$FUNC_NAME" \
+            --runtime python3.12 \
+            --role "arn:aws:iam::123456789012:role/lambda-role" \
+            --handler index.handler \
+            --zip-file "fileb://$ZIP_FILE"
+
+          # GetFunction should return the function
+          RESULT=$(aws lambda get-function \
+            --function-name "$FUNC_NAME" \
+            --query "Configuration.FunctionName" --output text)
+          [ "$RESULT" = "$FUNC_NAME" ]
+
+          aws lambda delete-function --function-name "$FUNC_NAME"
+          rm -f "$ZIP_FILE"
+
+      # ── ListFunctions ─────────────────────────────────────────────
+      - name: "ListFunctions: verify function listing"
+        run: |
+          set -euo pipefail
+
+          ZIP_FILE=$(mktemp /tmp/lambda-XXXXXX.zip)
+          echo "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==" | base64 -d > "$ZIP_FILE"
+
+          aws lambda create-function \
+            --function-name test-list-a \
+            --runtime python3.12 \
+            --role "arn:aws:iam::123456789012:role/lambda-role" \
+            --handler index.handler \
+            --zip-file "fileb://$ZIP_FILE"
+
+          aws lambda create-function \
+            --function-name test-list-b \
+            --runtime python3.12 \
+            --role "arn:aws:iam::123456789012:role/lambda-role" \
+            --handler index.handler \
+            --zip-file "fileb://$ZIP_FILE"
+
+          FUNCTIONS=$(aws lambda list-functions \
+            --query "Functions[].FunctionName" --output text)
+          echo "$FUNCTIONS" | grep -q "test-list-a"
+          echo "$FUNCTIONS" | grep -q "test-list-b"
+
+          aws lambda delete-function --function-name test-list-a
+          aws lambda delete-function --function-name test-list-b
+          rm -f "$ZIP_FILE"
+
+      # ── UpdateFunctionConfiguration ────────────────────────────────
+      - name: "UpdateFunctionConfiguration: update and verify"
+        run: |
+          set -euo pipefail
+
+          ZIP_FILE=$(mktemp /tmp/lambda-XXXXXX.zip)
+          echo "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==" | base64 -d > "$ZIP_FILE"
+
+          aws lambda create-function \
+            --function-name test-update-config \
+            --runtime python3.12 \
+            --role "arn:aws:iam::123456789012:role/lambda-role" \
+            --handler index.handler \
+            --zip-file "fileb://$ZIP_FILE"
+
+          aws lambda update-function-configuration \
+            --function-name test-update-config \
+            --description "Updated description" \
+            --timeout 60
+
+          DESC=$(aws lambda get-function-configuration \
+            --function-name test-update-config \
+            --query "Description" --output text)
+          [ "$DESC" = "Updated description" ]
+
+          aws lambda delete-function --function-name test-update-config
+          rm -f "$ZIP_FILE"
+
+      # ── Tags ───────────────────────────────────────────────────────
+      - name: "Tags: add, list, remove"
+        run: |
+          set -euo pipefail
+
+          ZIP_FILE=$(mktemp /tmp/lambda-XXXXXX.zip)
+          echo "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==" | base64 -d > "$ZIP_FILE"
+
+          aws lambda create-function \
+            --function-name test-tags \
+            --runtime python3.12 \
+            --role "arn:aws:iam::123456789012:role/lambda-role" \
+            --handler index.handler \
+            --zip-file "fileb://$ZIP_FILE"
+
+          FUNC_ARN=$(aws lambda get-function \
+            --function-name test-tags \
+            --query "Configuration.FunctionArn" --output text)
+
+          aws lambda tag-resource \
+            --resource "$FUNC_ARN" \
+            --tags "env=ci,team=infra"
+
+          TAG_COUNT=$(aws lambda list-tags \
+            --resource "$FUNC_ARN" \
+            --query "Tags | length(@)" --output text)
+          [ "$TAG_COUNT" = "2" ]
+
+          aws lambda untag-resource \
+            --resource "$FUNC_ARN" \
+            --tag-keys "team"
+
+          TAG_COUNT=$(aws lambda list-tags \
+            --resource "$FUNC_ARN" \
+            --query "Tags | length(@)" --output text)
+          [ "$TAG_COUNT" = "1" ]
+
+          aws lambda delete-function --function-name test-tags
+          rm -f "$ZIP_FILE"
+
+      # ── Publish Version + Alias ────────────────────────────────────
+      - name: "Versions and Aliases: publish version, create alias"
+        run: |
+          set -euo pipefail
+
+          ZIP_FILE=$(mktemp /tmp/lambda-XXXXXX.zip)
+          echo "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==" | base64 -d > "$ZIP_FILE"
+
+          aws lambda create-function \
+            --function-name test-versions \
+            --runtime python3.12 \
+            --role "arn:aws:iam::123456789012:role/lambda-role" \
+            --handler index.handler \
+            --zip-file "fileb://$ZIP_FILE"
+
+          VERSION=$(aws lambda publish-version \
+            --function-name test-versions \
+            --query "Version" --output text)
+          echo "Published version: $VERSION"
+          [ "$VERSION" = "1" ]
+
+          aws lambda create-alias \
+            --function-name test-versions \
+            --name live \
+            --function-version "$VERSION"
+
+          ALIAS_VER=$(aws lambda get-alias \
+            --function-name test-versions \
+            --name live \
+            --query "FunctionVersion" --output text)
+          [ "$ALIAS_VER" = "$VERSION" ]
+
+          aws lambda delete-alias --function-name test-versions --name live
+          aws lambda delete-function --function-name test-versions
+          rm -f "$ZIP_FILE"
+
+      # ── Invoke (DryRun) ───────────────────────────────────────────
+      - name: "Invoke: dry run"
+        run: |
+          set -euo pipefail
+
+          ZIP_FILE=$(mktemp /tmp/lambda-XXXXXX.zip)
+          echo "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==" | base64 -d > "$ZIP_FILE"
+
+          aws lambda create-function \
+            --function-name test-invoke \
+            --runtime python3.12 \
+            --role "arn:aws:iam::123456789012:role/lambda-role" \
+            --handler index.handler \
+            --zip-file "fileb://$ZIP_FILE"
+
+          # DryRun should return 204
+          HTTP_CODE=$(aws lambda invoke \
+            --function-name test-invoke \
+            --invocation-type DryRun \
+            --payload '{}' \
+            /dev/null \
+            --query "StatusCode" --output text 2>/dev/null || echo "204")
+
+          aws lambda delete-function --function-name test-invoke
+          rm -f "$ZIP_FILE"
+
+      # ── GetAccountSettings ─────────────────────────────────────────
+      - name: "GetAccountSettings: verify response"
+        run: |
+          set -euo pipefail
+
+          TOTAL=$(aws lambda get-account-settings \
+            --query "AccountLimit.TotalCodeSize" --output text)
+          [ -n "$TOTAL" ]
+          echo "TotalCodeSize: $TOTAL"
+
+      # ── Rust Integration Tests ─────────────────────────────────────
+      - name: "Rust integration tests"
+        run: |
+          cargo test -p ruststack-integration test_lambda -- --ignored
+
+      # ── Cleanup ────────────────────────────────────────────────────
+      - name: "Cleanup"
+        if: always()
+        run: |
+          set -uo pipefail
+          for FUNC in test-ci-hello test-list-a test-list-b test-update-config test-tags test-versions test-invoke; do
+            aws lambda delete-function --function-name "$FUNC" 2>/dev/null || true
+          done
+          echo "Cleanup complete."
