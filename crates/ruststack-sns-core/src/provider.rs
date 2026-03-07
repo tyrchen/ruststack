@@ -1,4 +1,4 @@
-//! Main SNS provider implementing Phase 0 and Phase 1 operations.
+//! Main SNS provider implementing Phase 0, Phase 1, and Phase 2 operations.
 //!
 //! Acts as the topic manager that owns all topic state and
 //! coordinates message fan-out to subscribers.
@@ -6,23 +6,27 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
+use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
 
 use ruststack_sns_model::error::{SnsError, SnsErrorCode};
 use ruststack_sns_model::input::{
-    ConfirmSubscriptionInput, CreateTopicInput, DeleteTopicInput, GetSubscriptionAttributesInput,
-    GetTopicAttributesInput, ListSubscriptionsByTopicInput, ListSubscriptionsInput,
-    ListTagsForResourceInput, ListTopicsInput, PublishBatchInput, PublishInput,
-    SetSubscriptionAttributesInput, SetTopicAttributesInput, SubscribeInput, TagResourceInput,
-    UnsubscribeInput, UntagResourceInput,
+    AddPermissionInput, ConfirmSubscriptionInput, CreateTopicInput, DeleteTopicInput,
+    GetDataProtectionPolicyInput, GetSubscriptionAttributesInput, GetTopicAttributesInput,
+    ListSubscriptionsByTopicInput, ListSubscriptionsInput, ListTagsForResourceInput,
+    ListTopicsInput, PublishBatchInput, PublishInput, PutDataProtectionPolicyInput,
+    RemovePermissionInput, SetSubscriptionAttributesInput, SetTopicAttributesInput, SubscribeInput,
+    TagResourceInput, UnsubscribeInput, UntagResourceInput,
 };
 use ruststack_sns_model::output::{
-    ConfirmSubscriptionOutput, CreateTopicOutput, DeleteTopicOutput,
-    GetSubscriptionAttributesOutput, GetTopicAttributesOutput, ListSubscriptionsByTopicOutput,
-    ListSubscriptionsOutput, ListTagsForResourceOutput, ListTopicsOutput, PublishBatchOutput,
-    PublishOutput, SetSubscriptionAttributesOutput, SetTopicAttributesOutput, SubscribeOutput,
-    TagResourceOutput, UnsubscribeOutput, UntagResourceOutput,
+    AddPermissionOutput, ConfirmSubscriptionOutput, CreateTopicOutput, DeleteTopicOutput,
+    GetDataProtectionPolicyOutput, GetSubscriptionAttributesOutput, GetTopicAttributesOutput,
+    ListSubscriptionsByTopicOutput, ListSubscriptionsOutput, ListTagsForResourceOutput,
+    ListTopicsOutput, PublishBatchOutput, PublishOutput, PutDataProtectionPolicyOutput,
+    RemovePermissionOutput, SetSubscriptionAttributesOutput, SetTopicAttributesOutput,
+    SubscribeOutput, TagResourceOutput, UnsubscribeOutput, UntagResourceOutput,
 };
 use ruststack_sns_model::types::{
     BatchResultErrorEntry, PublishBatchResultEntry, Subscription, Tag, Topic,
@@ -139,6 +143,8 @@ impl RustStackSns {
             data_protection_policy: input.data_protection_policy,
             created_at: now,
             subscription_counter: 0,
+            fifo_sequence_counter: AtomicU64::new(0),
+            fifo_dedup_cache: HashMap::new(),
         };
 
         self.topics.insert_topic(topic);
@@ -610,17 +616,53 @@ impl RustStackSns {
 
     /// Handle `Publish`.
     pub async fn publish(&self, input: PublishInput) -> Result<PublishOutput, SnsError> {
-        let topic_arn = resolve_publish_target(&input)?;
+        let topic_arn = resolve_publish_target(&input)?.to_owned();
         validate_publish_message(&input)?;
 
-        let topic = self
+        // Use a mutable reference so we can do FIFO dedup bookkeeping.
+        let mut topic = self
             .topics
-            .get_topic(topic_arn)
+            .get_topic_mut(&topic_arn)
             .ok_or_else(|| SnsError::not_found("Topic does not exist"))?;
 
         validate_fifo_publish(&input, &topic)?;
 
+        let is_fifo = topic.is_fifo;
+
+        // FIFO deduplication: compute dedup ID if content-based, then check cache.
+        let effective_dedup_id = if is_fifo {
+            let dedup_id = input.message_deduplication_id.clone().or_else(|| {
+                if topic.attributes.content_based_deduplication {
+                    Some(compute_sha256(&input.message))
+                } else {
+                    None
+                }
+            });
+
+            if let Some(ref id) = dedup_id {
+                if topic.check_and_record_dedup(id) {
+                    // Duplicate within the 5-minute window -- return success without fan-out.
+                    let sequence_number = topic.next_sequence_number();
+                    drop(topic);
+                    return Ok(PublishOutput {
+                        message_id: Some(uuid::Uuid::new_v4().to_string()),
+                        sequence_number: Some(sequence_number),
+                    });
+                }
+            }
+
+            dedup_id
+        } else {
+            None
+        };
+
         let message_id = uuid::Uuid::new_v4().to_string();
+
+        let sequence_number = if is_fifo {
+            Some(topic.next_sequence_number())
+        } else {
+            None
+        };
 
         // Collect confirmed subscriptions for fan-out, applying filter policies.
         let confirmed_subs: Vec<SubscriptionRecord> = topic
@@ -636,13 +678,23 @@ impl RustStackSns {
         let region = self.config.default_region.clone();
         let host = self.config.host.clone();
         let port = self.config.port;
-        let is_fifo = topic.is_fifo;
         drop(topic);
+
+        // For FIFO fan-out, pass the effective dedup ID to SQS.
+        let fan_out_input =
+            if effective_dedup_id.is_some() && input.message_deduplication_id.is_none() {
+                // Content-based dedup: create a modified input with the computed dedup ID.
+                let mut modified = input;
+                modified.message_deduplication_id = effective_dedup_id;
+                modified
+            } else {
+                input
+            };
 
         self.fan_out(
             &confirmed_subs,
-            &input,
-            topic_arn,
+            &fan_out_input,
+            &topic_arn,
             &message_id,
             &region,
             &host,
@@ -650,17 +702,6 @@ impl RustStackSns {
             is_fifo,
         )
         .await;
-
-        let sequence_number = if is_fifo {
-            Some(
-                chrono::Utc::now()
-                    .timestamp_nanos_opt()
-                    .unwrap_or(0)
-                    .to_string(),
-            )
-        } else {
-            None
-        };
 
         Ok(PublishOutput {
             message_id: Some(message_id),
@@ -714,7 +755,6 @@ impl RustStackSns {
             .get_topic(&input.topic_arn)
             .ok_or_else(|| SnsError::not_found("Topic does not exist"))?;
 
-        let is_fifo = topic.is_fifo;
         drop(topic);
 
         let mut successful = Vec::with_capacity(input.publish_batch_request_entries.len());
@@ -752,27 +792,126 @@ impl RustStackSns {
             }
         }
 
-        let sequence_number = if is_fifo {
-            Some(
-                chrono::Utc::now()
-                    .timestamp_nanos_opt()
-                    .unwrap_or(0)
-                    .to_string(),
-            )
-        } else {
-            None
-        };
+        Ok(PublishBatchOutput { successful, failed })
+    }
 
-        // Override sequence numbers for FIFO topics.
-        if sequence_number.is_some() {
-            for entry in &mut successful {
-                if entry.sequence_number.is_none() {
-                    entry.sequence_number.clone_from(&sequence_number);
+    // ---- Permissions ----
+
+    /// Handle `AddPermission`.
+    ///
+    /// Builds an IAM-like policy statement and merges it into the topic's
+    /// `Policy` attribute. No enforcement is performed.
+    pub fn add_permission(
+        &self,
+        input: &AddPermissionInput,
+    ) -> Result<AddPermissionOutput, SnsError> {
+        let mut topic = self
+            .topics
+            .get_topic_mut(&input.topic_arn)
+            .ok_or_else(|| SnsError::not_found("Topic does not exist"))?;
+
+        let mut policy: serde_json::Value = topic
+            .attributes
+            .policy
+            .as_deref()
+            .and_then(|p| serde_json::from_str(p).ok())
+            .unwrap_or_else(|| default_policy(&input.topic_arn, &topic.attributes.owner));
+
+        let statement = build_permission_statement(
+            &input.label,
+            &input.topic_arn,
+            &input.aws_account_id,
+            &input.action_name,
+        );
+
+        if let Some(statements) = policy.get_mut("Statement").and_then(|s| s.as_array_mut()) {
+            statements.push(statement);
+        }
+
+        topic.attributes.policy = Some(policy.to_string());
+
+        debug!(
+            topic_arn = %input.topic_arn,
+            label = %input.label,
+            "added permission"
+        );
+
+        Ok(AddPermissionOutput {})
+    }
+
+    /// Handle `RemovePermission`.
+    ///
+    /// Removes the policy statement with the given label (Sid) from the
+    /// topic's `Policy` attribute.
+    pub fn remove_permission(
+        &self,
+        input: &RemovePermissionInput,
+    ) -> Result<RemovePermissionOutput, SnsError> {
+        let mut topic = self
+            .topics
+            .get_topic_mut(&input.topic_arn)
+            .ok_or_else(|| SnsError::not_found("Topic does not exist"))?;
+
+        if let Some(ref policy_str) = topic.attributes.policy {
+            if let Ok(mut policy) = serde_json::from_str::<serde_json::Value>(policy_str) {
+                if let Some(statements) = policy.get_mut("Statement").and_then(|s| s.as_array_mut())
+                {
+                    statements.retain(|stmt| {
+                        stmt.get("Sid").and_then(|s| s.as_str()) != Some(&input.label)
+                    });
                 }
+                topic.attributes.policy = Some(policy.to_string());
             }
         }
 
-        Ok(PublishBatchOutput { successful, failed })
+        debug!(
+            topic_arn = %input.topic_arn,
+            label = %input.label,
+            "removed permission"
+        );
+
+        Ok(RemovePermissionOutput {})
+    }
+
+    // ---- Data Protection ----
+
+    /// Handle `GetDataProtectionPolicy`.
+    pub fn get_data_protection_policy(
+        &self,
+        input: &GetDataProtectionPolicyInput,
+    ) -> Result<GetDataProtectionPolicyOutput, SnsError> {
+        let topic = self
+            .topics
+            .get_topic(&input.resource_arn)
+            .ok_or_else(|| SnsError::not_found("Topic does not exist"))?;
+
+        Ok(GetDataProtectionPolicyOutput {
+            data_protection_policy: topic.data_protection_policy.clone(),
+        })
+    }
+
+    /// Handle `PutDataProtectionPolicy`.
+    pub fn put_data_protection_policy(
+        &self,
+        input: &PutDataProtectionPolicyInput,
+    ) -> Result<PutDataProtectionPolicyOutput, SnsError> {
+        let mut topic = self
+            .topics
+            .get_topic_mut(&input.resource_arn)
+            .ok_or_else(|| SnsError::not_found("Topic does not exist"))?;
+
+        topic.data_protection_policy = if input.data_protection_policy.is_empty() {
+            None
+        } else {
+            Some(input.data_protection_policy.clone())
+        };
+
+        debug!(
+            resource_arn = %input.resource_arn,
+            "updated data protection policy"
+        );
+
+        Ok(PutDataProtectionPolicyOutput {})
     }
 
     // ---- Internal Helpers ----
@@ -1109,6 +1248,75 @@ fn validate_topic_name(name: &str) -> Result<(), SnsError> {
     }
 
     Ok(())
+}
+
+/// Compute the SHA-256 hex digest of a message for content-based deduplication.
+fn compute_sha256(data: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data.as_bytes());
+    let result = hasher.finalize();
+    // Format as lowercase hex string.
+    result
+        .iter()
+        .fold(String::with_capacity(64), |mut acc, byte| {
+            use std::fmt::Write;
+            let _ = write!(acc, "{byte:02x}");
+            acc
+        })
+}
+
+/// Build a default SNS policy document.
+fn default_policy(topic_arn: &str, owner: &str) -> serde_json::Value {
+    serde_json::json!({
+        "Version": "2012-10-17",
+        "Id": format!("{topic_arn}/__default_policy_ID"),
+        "Statement": [
+            {
+                "Sid": "__default_statement_ID",
+                "Effect": "Allow",
+                "Principal": { "AWS": "*" },
+                "Action": [
+                    "SNS:GetTopicAttributes",
+                    "SNS:SetTopicAttributes",
+                    "SNS:AddPermission",
+                    "SNS:RemovePermission",
+                    "SNS:DeleteTopic",
+                    "SNS:Subscribe",
+                    "SNS:ListSubscriptionsByTopic",
+                    "SNS:Publish"
+                ],
+                "Resource": topic_arn,
+                "Condition": {
+                    "StringEquals": {
+                        "AWS:SourceOwner": owner
+                    }
+                }
+            }
+        ]
+    })
+}
+
+/// Build a permission statement for `AddPermission`.
+fn build_permission_statement(
+    label: &str,
+    topic_arn: &str,
+    account_ids: &[String],
+    actions: &[String],
+) -> serde_json::Value {
+    let principals: Vec<String> = account_ids
+        .iter()
+        .map(|id| format!("arn:aws:iam::{id}:root"))
+        .collect();
+
+    let sns_actions: Vec<String> = actions.iter().map(|a| format!("SNS:{a}")).collect();
+
+    serde_json::json!({
+        "Sid": label,
+        "Effect": "Allow",
+        "Principal": { "AWS": principals },
+        "Action": sns_actions,
+        "Resource": topic_arn,
+    })
 }
 
 #[cfg(test)]
@@ -1657,5 +1865,304 @@ mod tests {
             .await
             .unwrap();
         assert!(output.message_id.is_some());
+    }
+
+    // ---- Phase 2 Tests ----
+
+    #[tokio::test]
+    async fn test_should_publish_to_fifo_topic_with_dedup_id() {
+        let provider = make_provider();
+        let mut attrs = HashMap::new();
+        attrs.insert("FifoTopic".to_owned(), "true".to_owned());
+        let topic = provider
+            .create_topic(CreateTopicInput {
+                name: "fifo-pub.fifo".to_owned(),
+                attributes: attrs,
+                ..Default::default()
+            })
+            .unwrap();
+
+        let output = provider
+            .publish(PublishInput {
+                topic_arn: Some(topic.topic_arn),
+                message: "Hello FIFO".to_owned(),
+                message_group_id: Some("group1".to_owned()),
+                message_deduplication_id: Some("dedup1".to_owned()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(output.message_id.is_some());
+        assert!(output.sequence_number.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_should_reject_fifo_publish_without_group_id() {
+        let provider = make_provider();
+        let mut attrs = HashMap::new();
+        attrs.insert("FifoTopic".to_owned(), "true".to_owned());
+        let topic = provider
+            .create_topic(CreateTopicInput {
+                name: "fifo-nogroup.fifo".to_owned(),
+                attributes: attrs,
+                ..Default::default()
+            })
+            .unwrap();
+
+        let err = provider
+            .publish(PublishInput {
+                topic_arn: Some(topic.topic_arn),
+                message: "Hello".to_owned(),
+                message_deduplication_id: Some("dedup1".to_owned()),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("MessageGroupId"));
+    }
+
+    #[tokio::test]
+    async fn test_should_auto_generate_dedup_id_for_content_based_dedup() {
+        let provider = make_provider();
+        let mut attrs = HashMap::new();
+        attrs.insert("FifoTopic".to_owned(), "true".to_owned());
+        attrs.insert("ContentBasedDeduplication".to_owned(), "true".to_owned());
+        let topic = provider
+            .create_topic(CreateTopicInput {
+                name: "fifo-cbd.fifo".to_owned(),
+                attributes: attrs,
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Should succeed without explicit dedup ID.
+        let output = provider
+            .publish(PublishInput {
+                topic_arn: Some(topic.topic_arn),
+                message: "Hello CBD".to_owned(),
+                message_group_id: Some("group1".to_owned()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(output.message_id.is_some());
+        assert!(output.sequence_number.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_should_deduplicate_fifo_messages() {
+        let provider = make_provider();
+        let mut attrs = HashMap::new();
+        attrs.insert("FifoTopic".to_owned(), "true".to_owned());
+        let topic = provider
+            .create_topic(CreateTopicInput {
+                name: "fifo-dedup.fifo".to_owned(),
+                attributes: attrs,
+                ..Default::default()
+            })
+            .unwrap();
+
+        // First publish should succeed with sequence 0.
+        let o1 = provider
+            .publish(PublishInput {
+                topic_arn: Some(topic.topic_arn.clone()),
+                message: "Msg".to_owned(),
+                message_group_id: Some("g1".to_owned()),
+                message_deduplication_id: Some("same-dedup".to_owned()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // Second publish with same dedup ID should be deduplicated.
+        let o2 = provider
+            .publish(PublishInput {
+                topic_arn: Some(topic.topic_arn),
+                message: "Msg".to_owned(),
+                message_group_id: Some("g1".to_owned()),
+                message_deduplication_id: Some("same-dedup".to_owned()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // Both should succeed (deduplicated messages return success).
+        assert!(o1.message_id.is_some());
+        assert!(o2.message_id.is_some());
+        // But they should have different message IDs.
+        assert_ne!(o1.message_id, o2.message_id);
+        // Both should have sequence numbers.
+        assert!(o1.sequence_number.is_some());
+        assert!(o2.sequence_number.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_should_assign_incrementing_sequence_numbers() {
+        let provider = make_provider();
+        let mut attrs = HashMap::new();
+        attrs.insert("FifoTopic".to_owned(), "true".to_owned());
+        let topic = provider
+            .create_topic(CreateTopicInput {
+                name: "fifo-seq.fifo".to_owned(),
+                attributes: attrs,
+                ..Default::default()
+            })
+            .unwrap();
+
+        let o1 = provider
+            .publish(PublishInput {
+                topic_arn: Some(topic.topic_arn.clone()),
+                message: "Msg1".to_owned(),
+                message_group_id: Some("g1".to_owned()),
+                message_deduplication_id: Some("d1".to_owned()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let o2 = provider
+            .publish(PublishInput {
+                topic_arn: Some(topic.topic_arn),
+                message: "Msg2".to_owned(),
+                message_group_id: Some("g1".to_owned()),
+                message_deduplication_id: Some("d2".to_owned()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let seq1: u64 = o1
+            .sequence_number
+            .as_ref()
+            .map_or(0, |s| s.parse().unwrap_or(0));
+        let seq2: u64 = o2
+            .sequence_number
+            .as_ref()
+            .map_or(0, |s| s.parse().unwrap_or(0));
+        assert!(seq2 > seq1, "sequence numbers should be incrementing");
+    }
+
+    #[test]
+    fn test_should_add_and_remove_permission() {
+        let provider = make_provider();
+        let topic = provider
+            .create_topic(CreateTopicInput {
+                name: "perm-topic".to_owned(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Add a permission.
+        provider
+            .add_permission(&AddPermissionInput {
+                topic_arn: topic.topic_arn.clone(),
+                label: "my-perm".to_owned(),
+                aws_account_id: vec!["123456789012".to_owned()],
+                action_name: vec!["Publish".to_owned(), "Subscribe".to_owned()],
+            })
+            .unwrap();
+
+        // Verify policy was stored.
+        let attrs = provider
+            .get_topic_attributes(&GetTopicAttributesInput {
+                topic_arn: topic.topic_arn.clone(),
+            })
+            .unwrap();
+        let policy_str = attrs.attributes.get("Policy").expect("Policy should exist");
+        let policy: serde_json::Value = serde_json::from_str(policy_str).unwrap();
+        let stmts = policy["Statement"].as_array().unwrap();
+        assert!(stmts.iter().any(|s| s["Sid"] == "my-perm"));
+
+        // Remove it.
+        provider
+            .remove_permission(&RemovePermissionInput {
+                topic_arn: topic.topic_arn.clone(),
+                label: "my-perm".to_owned(),
+            })
+            .unwrap();
+
+        // Verify it was removed.
+        let attrs = provider
+            .get_topic_attributes(&GetTopicAttributesInput {
+                topic_arn: topic.topic_arn,
+            })
+            .unwrap();
+        let policy_str = attrs.attributes.get("Policy").expect("Policy should exist");
+        let policy: serde_json::Value = serde_json::from_str(policy_str).unwrap();
+        let stmts = policy["Statement"].as_array().unwrap();
+        assert!(!stmts.iter().any(|s| s["Sid"] == "my-perm"));
+    }
+
+    #[test]
+    fn test_should_add_permission_to_nonexistent_topic_fails() {
+        let provider = make_provider();
+        let err = provider
+            .add_permission(&AddPermissionInput {
+                topic_arn: "arn:aws:sns:us-east-1:000000000000:nope".to_owned(),
+                label: "perm".to_owned(),
+                aws_account_id: vec!["111111111111".to_owned()],
+                action_name: vec!["Publish".to_owned()],
+            })
+            .unwrap_err();
+        assert_eq!(err.code, SnsErrorCode::NotFound);
+    }
+
+    #[test]
+    fn test_should_put_and_get_data_protection_policy() {
+        let provider = make_provider();
+        let topic = provider
+            .create_topic(CreateTopicInput {
+                name: "dpp-topic".to_owned(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Initially empty.
+        let output = provider
+            .get_data_protection_policy(&GetDataProtectionPolicyInput {
+                resource_arn: topic.topic_arn.clone(),
+            })
+            .unwrap();
+        assert!(output.data_protection_policy.is_none());
+
+        // Put a policy.
+        let policy_json = r#"{"Name":"data-protection","Statement":[]}"#;
+        provider
+            .put_data_protection_policy(&PutDataProtectionPolicyInput {
+                resource_arn: topic.topic_arn.clone(),
+                data_protection_policy: policy_json.to_owned(),
+            })
+            .unwrap();
+
+        // Get it back.
+        let output = provider
+            .get_data_protection_policy(&GetDataProtectionPolicyInput {
+                resource_arn: topic.topic_arn.clone(),
+            })
+            .unwrap();
+        assert_eq!(output.data_protection_policy.as_deref(), Some(policy_json));
+
+        // Clear it.
+        provider
+            .put_data_protection_policy(&PutDataProtectionPolicyInput {
+                resource_arn: topic.topic_arn.clone(),
+                data_protection_policy: String::new(),
+            })
+            .unwrap();
+        let output = provider
+            .get_data_protection_policy(&GetDataProtectionPolicyInput {
+                resource_arn: topic.topic_arn,
+            })
+            .unwrap();
+        assert!(output.data_protection_policy.is_none());
+    }
+
+    #[test]
+    fn test_should_compute_sha256() {
+        let hash = compute_sha256("hello");
+        assert_eq!(
+            hash,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
     }
 }

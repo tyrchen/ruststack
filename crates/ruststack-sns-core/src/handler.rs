@@ -20,11 +20,12 @@ use ruststack_sns_http::request::{
 use ruststack_sns_http::response::{XmlWriter, xml_response};
 use ruststack_sns_model::error::SnsError;
 use ruststack_sns_model::input::{
-    ConfirmSubscriptionInput, CreateTopicInput, DeleteTopicInput, GetSubscriptionAttributesInput,
-    GetTopicAttributesInput, ListSubscriptionsByTopicInput, ListSubscriptionsInput,
-    ListTagsForResourceInput, ListTopicsInput, PublishBatchInput, PublishInput,
-    SetSubscriptionAttributesInput, SetTopicAttributesInput, SubscribeInput, TagResourceInput,
-    UnsubscribeInput, UntagResourceInput,
+    AddPermissionInput, ConfirmSubscriptionInput, CreateTopicInput, DeleteTopicInput,
+    GetDataProtectionPolicyInput, GetSubscriptionAttributesInput, GetTopicAttributesInput,
+    ListSubscriptionsByTopicInput, ListSubscriptionsInput, ListTagsForResourceInput,
+    ListTopicsInput, PublishBatchInput, PublishInput, PutDataProtectionPolicyInput,
+    RemovePermissionInput, SetSubscriptionAttributesInput, SetTopicAttributesInput, SubscribeInput,
+    TagResourceInput, UnsubscribeInput, UntagResourceInput,
 };
 use ruststack_sns_model::operations::SnsOperation;
 use ruststack_sns_model::types::Subscription;
@@ -306,6 +307,52 @@ async fn dispatch(
             Ok(xml_response(w.into_string(), &request_id))
         }
 
+        SnsOperation::AddPermission => {
+            let input = deserialize_add_permission(&params)?;
+            let _output = provider.add_permission(&input)?;
+            let mut w = XmlWriter::new();
+            w.start_response("AddPermission");
+            w.write_response_metadata(&request_id);
+            w.end_element("AddPermissionResponse");
+            Ok(xml_response(w.into_string(), &request_id))
+        }
+
+        SnsOperation::RemovePermission => {
+            let input = deserialize_remove_permission(&params)?;
+            let _output = provider.remove_permission(&input)?;
+            let mut w = XmlWriter::new();
+            w.start_response("RemovePermission");
+            w.write_response_metadata(&request_id);
+            w.end_element("RemovePermissionResponse");
+            Ok(xml_response(w.into_string(), &request_id))
+        }
+
+        SnsOperation::GetDataProtectionPolicy => {
+            let input = deserialize_get_data_protection_policy(&params)?;
+            let output = provider.get_data_protection_policy(&input)?;
+            let mut w = XmlWriter::new();
+            w.start_response("GetDataProtectionPolicy");
+            w.start_result("GetDataProtectionPolicy");
+            w.write_optional_element(
+                "DataProtectionPolicy",
+                output.data_protection_policy.as_deref(),
+            );
+            w.end_element("GetDataProtectionPolicyResult");
+            w.write_response_metadata(&request_id);
+            w.end_element("GetDataProtectionPolicyResponse");
+            Ok(xml_response(w.into_string(), &request_id))
+        }
+
+        SnsOperation::PutDataProtectionPolicy => {
+            let input = deserialize_put_data_protection_policy(&params)?;
+            let _output = provider.put_data_protection_policy(&input)?;
+            let mut w = XmlWriter::new();
+            w.start_response("PutDataProtectionPolicy");
+            w.write_response_metadata(&request_id);
+            w.end_element("PutDataProtectionPolicyResponse");
+            Ok(xml_response(w.into_string(), &request_id))
+        }
+
         // All other operations are not yet implemented.
         _ => Err(SnsError::invalid_parameter(format!(
             "Operation not yet supported: {op}"
@@ -524,4 +571,43 @@ fn deserialize_list_tags_for_resource(
 ) -> Result<ListTagsForResourceInput, SnsError> {
     let resource_arn = get_required_param(params, "ResourceArn")?.to_owned();
     Ok(ListTagsForResourceInput { resource_arn })
+}
+
+fn deserialize_add_permission(params: &[(String, String)]) -> Result<AddPermissionInput, SnsError> {
+    let topic_arn = get_required_param(params, "TopicArn")?.to_owned();
+    let label = get_required_param(params, "Label")?.to_owned();
+    let aws_account_id = parse_string_list(params, "AWSAccountId");
+    let action_name = parse_string_list(params, "ActionName");
+    Ok(AddPermissionInput {
+        topic_arn,
+        label,
+        aws_account_id,
+        action_name,
+    })
+}
+
+fn deserialize_remove_permission(
+    params: &[(String, String)],
+) -> Result<RemovePermissionInput, SnsError> {
+    let topic_arn = get_required_param(params, "TopicArn")?.to_owned();
+    let label = get_required_param(params, "Label")?.to_owned();
+    Ok(RemovePermissionInput { topic_arn, label })
+}
+
+fn deserialize_get_data_protection_policy(
+    params: &[(String, String)],
+) -> Result<GetDataProtectionPolicyInput, SnsError> {
+    let resource_arn = get_required_param(params, "ResourceArn")?.to_owned();
+    Ok(GetDataProtectionPolicyInput { resource_arn })
+}
+
+fn deserialize_put_data_protection_policy(
+    params: &[(String, String)],
+) -> Result<PutDataProtectionPolicyInput, SnsError> {
+    let resource_arn = get_required_param(params, "ResourceArn")?.to_owned();
+    let data_protection_policy = get_required_param(params, "DataProtectionPolicy")?.to_owned();
+    Ok(PutDataProtectionPolicyInput {
+        resource_arn,
+        data_protection_policy,
+    })
 }

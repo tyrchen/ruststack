@@ -2287,6 +2287,7 @@ dependencies = [
  "ruststack-sns-model",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "tokio",
  "tracing",

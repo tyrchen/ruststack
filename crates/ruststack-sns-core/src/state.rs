@@ -113,6 +113,8 @@ mod tests {
             data_protection_policy: None,
             created_at: 0,
             subscription_counter: 0,
+            fifo_sequence_counter: std::sync::atomic::AtomicU64::new(0),
+            fifo_dedup_cache: HashMap::new(),
         }
     }
 
