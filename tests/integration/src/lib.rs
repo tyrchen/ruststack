@@ -1,4 +1,4 @@
-//! Integration tests for `RustStack` server (S3 + DynamoDB + SQS).
+//! Integration tests for `RustStack` server (S3 + DynamoDB + SQS + SNS).
 //!
 //! These tests require a running `RustStack` server at `localhost:4566`.
 //! They are marked `#[ignore]` so they don't run during normal `cargo test`.
@@ -11,6 +11,7 @@
 use std::sync::Once;
 
 use aws_sdk_s3::config::{BehaviorVersion, Credentials, Region};
+use aws_sdk_sns as sns;
 use aws_sdk_sqs as sqs;
 
 static INIT: Once = Once::new();
@@ -199,6 +200,23 @@ pub fn ssm_client() -> aws_sdk_ssm::Client {
     aws_sdk_ssm::Client::from_conf(config)
 }
 
+/// Create a configured SNS client pointing at the local server.
+#[must_use]
+pub fn sns_client() -> sns::Client {
+    init_tracing();
+
+    let creds = Credentials::new("test", "test", None, None, "integration-test");
+
+    let config = sns::config::Builder::new()
+        .behavior_version(BehaviorVersion::latest())
+        .region(Region::new("us-east-1"))
+        .credentials_provider(creds)
+        .endpoint_url(endpoint_url())
+        .build();
+
+    sns::Client::from_conf(config)
+}
+
 mod test_bucket;
 mod test_cors;
 mod test_dynamodb;
@@ -207,6 +225,7 @@ mod test_list;
 mod test_multipart;
 mod test_object;
 mod test_precondition;
+mod test_sns;
 mod test_sqs;
 mod test_ssm;
 mod test_versioning;
