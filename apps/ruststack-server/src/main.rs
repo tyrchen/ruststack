@@ -20,6 +20,7 @@
 //! | `DYNAMODB_SKIP_SIGNATURE_VALIDATION` | `true` | Skip DynamoDB SigV4 verification |
 //! | `SQS_SKIP_SIGNATURE_VALIDATION` | `true` | Skip SQS SigV4 verification |
 //! | `SSM_SKIP_SIGNATURE_VALIDATION` | `true` | Skip SSM SigV4 verification |
+//! | `SNS_SKIP_SIGNATURE_VALIDATION` | `true` | Skip SNS SigV4 verification |
 //! | `S3_DOMAIN` | `s3.localhost.localstack.cloud` | Virtual hosting domain |
 //! | `LOG_LEVEL` | `info` | Log level filter |
 //! | `RUST_LOG` | *(unset)* | Fine-grained tracing filter (overrides `LOG_LEVEL`) |
@@ -28,6 +29,8 @@ mod gateway;
 #[cfg(feature = "s3")]
 mod handler;
 mod service;
+#[cfg(feature = "sns")]
+mod sns_bridge;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -65,6 +68,17 @@ use ruststack_ssm_core::handler::RustStackSsmHandler;
 use ruststack_ssm_core::provider::RustStackSsm;
 #[cfg(feature = "ssm")]
 use ruststack_ssm_http::service::{SsmHttpConfig, SsmHttpService};
+
+#[cfg(feature = "sns")]
+use crate::sns_bridge::RustStackSqsPublisher;
+#[cfg(feature = "sns")]
+use ruststack_sns_core::config::SnsConfig;
+#[cfg(feature = "sns")]
+use ruststack_sns_core::handler::RustStackSnsHandler;
+#[cfg(feature = "sns")]
+use ruststack_sns_core::provider::RustStackSns;
+#[cfg(feature = "sns")]
+use ruststack_sns_http::service::{SnsHttpConfig, SnsHttpService};
 
 #[cfg(feature = "s3")]
 use ruststack_s3_core::{RustStackS3, S3Config};
@@ -146,9 +160,27 @@ fn build_ssm_http_config(config: &SsmConfig) -> SsmHttpConfig {
     }
 }
 
+/// Build the [`SnsHttpConfig`] from the [`SnsConfig`].
+#[cfg(feature = "sns")]
+fn build_sns_http_config(config: &SnsConfig) -> SnsHttpConfig {
+    let credential_provider = build_credential_provider();
+
+    SnsHttpConfig {
+        skip_signature_validation: config.skip_signature_validation,
+        region: config.default_region.clone(),
+        credential_provider,
+    }
+}
+
 /// Build a credential provider from `ACCESS_KEY` / `SECRET_KEY` environment
 /// variables (used by MinIO Mint and other test harnesses).
-#[cfg(any(feature = "s3", feature = "dynamodb", feature = "sqs", feature = "ssm"))]
+#[cfg(any(
+    feature = "s3",
+    feature = "dynamodb",
+    feature = "sqs",
+    feature = "ssm",
+    feature = "sns"
+))]
 fn build_credential_provider() -> Option<Arc<dyn ruststack_auth::CredentialProvider>> {
     use ruststack_auth::StaticCredentialProvider;
 
@@ -223,6 +255,7 @@ fn is_compiled_in(name: &str) -> bool {
         || (name == "dynamodb" && cfg!(feature = "dynamodb"))
         || (name == "sqs" && cfg!(feature = "sqs"))
         || (name == "ssm" && cfg!(feature = "ssm"))
+        || (name == "sns" && cfg!(feature = "sns"))
 }
 
 /// Parse the `SERVICES` environment variable into a list of service names.
@@ -252,6 +285,9 @@ fn parse_services_value(raw: &str) -> Vec<String> {
         }
         if cfg!(feature = "ssm") {
             all.push("ssm".to_string());
+        }
+        if cfg!(feature = "sns") {
+            all.push("sns".to_string());
         }
         all
     } else {
@@ -306,6 +342,105 @@ fn log_level() -> String {
     std::env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string())
 }
 
+/// Build all enabled service routers based on environment configuration.
+fn build_services(is_enabled: impl Fn(&str) -> bool) -> Vec<Box<dyn ServiceRouter>> {
+    let mut services: Vec<Box<dyn ServiceRouter>> = Vec::new();
+
+    // ----- DynamoDB (register before S3: S3 is the catch-all) -----
+    #[cfg(feature = "dynamodb")]
+    if is_enabled("dynamodb") {
+        let dynamodb_config = DynamoDBConfig::from_env();
+        info!(
+            dynamodb_skip_signature_validation = dynamodb_config.skip_signature_validation,
+            "initializing DynamoDB service",
+        );
+        let dynamodb_provider = RustStackDynamoDB::new(dynamodb_config.clone());
+        let dynamodb_handler = RustStackDynamoDBHandler::new(Arc::new(dynamodb_provider));
+        let dynamodb_http_config = build_dynamodb_http_config(&dynamodb_config);
+        let dynamodb_service =
+            DynamoDBHttpService::new(Arc::new(dynamodb_handler), dynamodb_http_config);
+        services.push(Box::new(service::DynamoDBServiceRouter::new(
+            dynamodb_service,
+        )));
+    }
+
+    // ----- SQS (register before S3: S3 is the catch-all) -----
+    #[cfg(feature = "sqs")]
+    let sqs_provider_arc: Option<Arc<RustStackSqs>> = if is_enabled("sqs") {
+        let sqs_config = SqsConfig::from_env();
+        info!(
+            sqs_skip_signature_validation = sqs_config.skip_signature_validation,
+            "initializing SQS service",
+        );
+        let sqs_provider = Arc::new(RustStackSqs::new(sqs_config.clone()));
+        let sqs_handler = RustStackSqsHandler::new(Arc::clone(&sqs_provider));
+        let sqs_http_config = build_sqs_http_config(&sqs_config);
+        let sqs_service = SqsHttpService::new(Arc::new(sqs_handler), sqs_http_config);
+        services.push(Box::new(service::SqsServiceRouter::new(sqs_service)));
+        Some(sqs_provider)
+    } else {
+        None
+    };
+
+    // ----- SSM (register before S3: S3 is the catch-all) -----
+    #[cfg(feature = "ssm")]
+    if is_enabled("ssm") {
+        let ssm_config = SsmConfig::from_env();
+        info!(
+            ssm_skip_signature_validation = ssm_config.skip_signature_validation,
+            "initializing SSM service",
+        );
+        let ssm_provider = RustStackSsm::new(ssm_config.clone());
+        let ssm_handler = RustStackSsmHandler::new(Arc::new(ssm_provider));
+        let ssm_http_config = build_ssm_http_config(&ssm_config);
+        let ssm_service = SsmHttpService::new(Arc::new(ssm_handler), ssm_http_config);
+        services.push(Box::new(service::SsmServiceRouter::new(ssm_service)));
+    }
+
+    // ----- SNS (register before S3: S3 is the catch-all) -----
+    #[cfg(feature = "sns")]
+    if is_enabled("sns") {
+        let sns_config = SnsConfig::from_env();
+        info!(
+            sns_skip_signature_validation = sns_config.skip_signature_validation,
+            "initializing SNS service",
+        );
+        let sqs_publisher: Arc<dyn ruststack_sns_core::publisher::SqsPublisher> =
+            if let Some(ref sqs) = sqs_provider_arc {
+                Arc::new(RustStackSqsPublisher::new(
+                    Arc::clone(sqs),
+                    sns_config.clone(),
+                ))
+            } else {
+                Arc::new(ruststack_sns_core::publisher::NoopSqsPublisher)
+            };
+        let sns_provider = RustStackSns::new(sns_config.clone(), sqs_publisher);
+        let sns_handler = RustStackSnsHandler::new(Arc::new(sns_provider));
+        let sns_http_config = build_sns_http_config(&sns_config);
+        let sns_service = SnsHttpService::new(Arc::new(sns_handler), sns_http_config);
+        services.push(Box::new(service::SnsServiceRouter::new(sns_service)));
+    }
+
+    // ----- S3 (catch-all, must be last) -----
+    #[cfg(feature = "s3")]
+    if is_enabled("s3") {
+        let s3_config = S3Config::from_env();
+        info!(
+            s3_domain = %s3_config.s3_domain,
+            s3_virtual_hosting = s3_config.s3_virtual_hosting,
+            s3_skip_signature_validation = s3_config.s3_skip_signature_validation,
+            "initializing S3 service",
+        );
+        let s3_provider = RustStackS3::new(s3_config.clone());
+        let s3_handler = handler::RustStackHandler(s3_provider);
+        let s3_http_config = build_s3_http_config(&s3_config);
+        let s3_service = S3HttpService::new(s3_handler, s3_http_config);
+        services.push(Box::new(service::S3ServiceRouter::new(s3_service)));
+    }
+
+    services
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let listen_addr = gateway_listen_addr();
@@ -329,74 +464,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let is_enabled = |name: &str| enabled.iter().any(|s| s == name) && is_compiled_in(name);
-
-    let mut services: Vec<Box<dyn ServiceRouter>> = Vec::new();
-
-    // ----- DynamoDB (register before S3: S3 is the catch-all) -----
-    #[cfg(feature = "dynamodb")]
-    if is_enabled("dynamodb") {
-        let dynamodb_config = DynamoDBConfig::from_env();
-        info!(
-            dynamodb_skip_signature_validation = dynamodb_config.skip_signature_validation,
-            "initializing DynamoDB service",
-        );
-        let dynamodb_provider = RustStackDynamoDB::new(dynamodb_config.clone());
-        let dynamodb_handler = RustStackDynamoDBHandler::new(Arc::new(dynamodb_provider));
-        let dynamodb_http_config = build_dynamodb_http_config(&dynamodb_config);
-        let dynamodb_service =
-            DynamoDBHttpService::new(Arc::new(dynamodb_handler), dynamodb_http_config);
-        services.push(Box::new(service::DynamoDBServiceRouter::new(
-            dynamodb_service,
-        )));
-    }
-
-    // ----- SQS (register before S3: S3 is the catch-all) -----
-    #[cfg(feature = "sqs")]
-    if is_enabled("sqs") {
-        let sqs_config = SqsConfig::from_env();
-        info!(
-            sqs_skip_signature_validation = sqs_config.skip_signature_validation,
-            "initializing SQS service",
-        );
-        let sqs_provider = RustStackSqs::new(sqs_config.clone());
-        let sqs_handler = RustStackSqsHandler::new(Arc::new(sqs_provider));
-        let sqs_http_config = build_sqs_http_config(&sqs_config);
-        let sqs_service = SqsHttpService::new(Arc::new(sqs_handler), sqs_http_config);
-        services.push(Box::new(service::SqsServiceRouter::new(sqs_service)));
-    }
-
-    // ----- SSM (register before S3: S3 is the catch-all) -----
-    #[cfg(feature = "ssm")]
-    if is_enabled("ssm") {
-        let ssm_config = SsmConfig::from_env();
-        info!(
-            ssm_skip_signature_validation = ssm_config.skip_signature_validation,
-            "initializing SSM service",
-        );
-        let ssm_provider = RustStackSsm::new(ssm_config.clone());
-        let ssm_handler = RustStackSsmHandler::new(Arc::new(ssm_provider));
-        let ssm_http_config = build_ssm_http_config(&ssm_config);
-        let ssm_service = SsmHttpService::new(Arc::new(ssm_handler), ssm_http_config);
-        services.push(Box::new(service::SsmServiceRouter::new(ssm_service)));
-    }
-
-    // ----- S3 (catch-all, must be last) -----
-    #[cfg(feature = "s3")]
-    if is_enabled("s3") {
-        let s3_config = S3Config::from_env();
-        info!(
-            s3_domain = %s3_config.s3_domain,
-            s3_virtual_hosting = s3_config.s3_virtual_hosting,
-            s3_skip_signature_validation = s3_config.s3_skip_signature_validation,
-            "initializing S3 service",
-        );
-        let s3_provider = RustStackS3::new(s3_config.clone());
-        let s3_handler = handler::RustStackHandler(s3_provider);
-        let s3_http_config = build_s3_http_config(&s3_config);
-        let s3_service = S3HttpService::new(s3_handler, s3_http_config);
-        services.push(Box::new(service::S3ServiceRouter::new(s3_service)));
-    }
+    let services = build_services(|name| enabled.iter().any(|s| s == name) && is_compiled_in(name));
 
     if services.is_empty() {
         anyhow::bail!(
@@ -473,6 +541,7 @@ mod tests {
         assert_eq!(is_compiled_in("dynamodb"), cfg!(feature = "dynamodb"));
         assert_eq!(is_compiled_in("sqs"), cfg!(feature = "sqs"));
         assert_eq!(is_compiled_in("ssm"), cfg!(feature = "ssm"));
+        assert_eq!(is_compiled_in("sns"), cfg!(feature = "sns"));
     }
 
     #[cfg(feature = "s3")]

@@ -39,6 +39,9 @@ ruststack-sqs-core = { path = "crates/ruststack-sqs-core" }
 ruststack-ssm-model = { path = "crates/ruststack-ssm-model" }
 ruststack-ssm-http = { path = "crates/ruststack-ssm-http" }
 ruststack-ssm-core = { path = "crates/ruststack-ssm-core" }
+ruststack-sns-model = { path = "crates/ruststack-sns-model" }
+ruststack-sns-http = { path = "crates/ruststack-sns-http" }
+ruststack-sns-core = { path = "crates/ruststack-sns-core" }
 
 # Async runtime
 tokio = { version = "1.49", features = [
@@ -111,6 +114,7 @@ mime = "0.3"
 futures = "0.3"
 pin-project-lite = "0.2"
 typed-builder = "0.23"
+form_urlencoded = "1.2"
 
 # Testing
 tokio-test = "0.4"
@@ -119,5 +123,6 @@ aws-sdk-s3 = "1.124"
 aws-sdk-dynamodb = "1.72"
 aws-sdk-sqs = "1.60"
 aws-sdk-ssm = "1.107"
+aws-sdk-sns = "1.65"
 aws-credential-types = "1.2"
 aws-smithy-runtime-api = "1.11"

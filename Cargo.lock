@@ -33,6 +33,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "async-trait"
+version = "0.1.89"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -193,6 +204,31 @@ dependencies = [
  "sha2",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "aws-sdk-sns"
+version = "1.96.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f758ec1ac64cebd667c0785e9f4c0fa3e727504bb3898bbdadf687de301270cb"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-query",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-smithy-xml",
+ "aws-types",
+ "fastrand",
+ "http 0.2.12",
+ "http 1.4.0",
+ "regex-lite",
+ "tracing",
 ]
 
 [[package]]
@@ -2095,11 +2131,13 @@ dependencies = [
  "aws-credential-types",
  "aws-sdk-dynamodb",
  "aws-sdk-s3",
+ "aws-sdk-sns",
  "aws-sdk-sqs",
  "aws-sdk-ssm",
  "aws-smithy-runtime-api",
  "bytes",
  "rand",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2196,6 +2234,7 @@ name = "ruststack-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "aws-config",
  "aws-credential-types",
  "aws-sdk-dynamodb",
@@ -2214,8 +2253,11 @@ dependencies = [
  "ruststack-s3-core",
  "ruststack-s3-http",
  "ruststack-s3-model",
+ "ruststack-sns-core",
+ "ruststack-sns-http",
  "ruststack-sqs-core",
  "ruststack-sqs-http",
+ "ruststack-sqs-model",
  "ruststack-ssm-core",
  "ruststack-ssm-http",
  "serde",
@@ -2224,6 +2266,60 @@ dependencies = [
  "tokio-test",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "ruststack-sns-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "parking_lot",
+ "regex",
+ "ruststack-auth",
+ "ruststack-core",
+ "ruststack-sns-http",
+ "ruststack-sns-model",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ruststack-sns-http"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "form_urlencoded",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "ruststack-auth",
+ "ruststack-sns-model",
+ "serde",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ruststack-sns-model"
+version = "0.1.0"
+dependencies = [
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

@@ -1,6 +1,10 @@
 [default.extend-words]
 # moto test function name: test_get_nonexistant_parameter
 nonexistant = "nonexistant"
+# UUID-like example tokens in spec files (e.g., "fedc-ba987SECRET1")
+ba = "ba"
+# HashiCorp is a company name
+Hashi = "Hashi"
 
 [files]
 extend-exclude = ["CHANGELOG.md", "notebooks/*", "vendors/*", "codegen/smithy-model/*"]

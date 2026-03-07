@@ -289,3 +289,70 @@ mod ssm_router {
 
 #[cfg(feature = "ssm")]
 pub use ssm_router::SsmServiceRouter;
+
+// ---------------------------------------------------------------------------
+// SNS
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "sns")]
+mod sns_router {
+    use std::convert::Infallible;
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use http_body_util::BodyExt;
+    use hyper::body::Incoming;
+    use hyper::service::Service;
+    use ruststack_sns_http::dispatch::SnsHandler;
+    use ruststack_sns_http::service::SnsHttpService;
+
+    use super::{GatewayBody, ServiceRouter};
+
+    /// Routes requests to the SNS service.
+    ///
+    /// Matches `POST /` requests with `Content-Type: application/x-www-form-urlencoded`.
+    /// SNS uses the `awsQuery` protocol where the operation is determined by
+    /// the `Action=` parameter in the form body.
+    pub struct SnsServiceRouter<H: SnsHandler> {
+        inner: SnsHttpService<H>,
+    }
+
+    impl<H: SnsHandler> SnsServiceRouter<H> {
+        /// Wrap an [`SnsHttpService`] in a router.
+        pub fn new(inner: SnsHttpService<H>) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl<H: SnsHandler> ServiceRouter for SnsServiceRouter<H> {
+        fn name(&self) -> &'static str {
+            "sns"
+        }
+
+        /// SNS matches form-urlencoded POST requests to `/`.
+        fn matches(&self, req: &http::Request<Incoming>) -> bool {
+            if *req.method() != http::Method::POST {
+                return false;
+            }
+            req.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|ct| ct.contains("x-www-form-urlencoded"))
+        }
+
+        fn call(
+            &self,
+            req: http::Request<Incoming>,
+        ) -> Pin<Box<dyn Future<Output = Result<http::Response<GatewayBody>, Infallible>> + Send>>
+        {
+            let svc = self.inner.clone();
+            Box::pin(async move {
+                let resp = svc.call(req).await;
+                Ok(resp.unwrap_or_else(|e| match e {}).map(BodyExt::boxed))
+            })
+        }
+    }
+}
+
+#[cfg(feature = "sns")]
+pub use sns_router::SnsServiceRouter;

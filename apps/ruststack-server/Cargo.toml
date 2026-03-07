@@ -15,11 +15,12 @@ name = "ruststack-server"
 path = "src/main.rs"
 
 [features]
-default = ["s3", "dynamodb", "sqs", "ssm"]
+default = ["s3", "dynamodb", "sqs", "ssm", "sns"]
 s3 = ["dep:ruststack-s3-core", "dep:ruststack-s3-http", "dep:ruststack-s3-model"]
 dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
 sqs = ["dep:ruststack-sqs-core", "dep:ruststack-sqs-http"]
 ssm = ["dep:ruststack-ssm-core", "dep:ruststack-ssm-http"]
+sns = ["dep:ruststack-sns-core", "dep:ruststack-sns-http", "dep:ruststack-sqs-model", "sqs"]
 
 [dependencies]
 # Internal crates - shared
@@ -43,6 +44,11 @@ ruststack-sqs-http = { workspace = true, optional = true }
 ruststack-ssm-core = { workspace = true, optional = true }
 ruststack-ssm-http = { workspace = true, optional = true }
 
+# Internal crates - SNS (optional, gated by "sns" feature)
+ruststack-sns-core = { workspace = true, optional = true }
+ruststack-sns-http = { workspace = true, optional = true }
+ruststack-sqs-model = { workspace = true, optional = true }
+
 # Async
 tokio = { workspace = true }
 
@@ -62,6 +68,9 @@ anyhow = { workspace = true }
 # Logging
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+# Async utilities
+async-trait = { workspace = true }
 
 # Utilities
 bytes = { workspace = true }
