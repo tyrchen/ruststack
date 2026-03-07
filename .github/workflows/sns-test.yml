@@ -1,0 +1,215 @@
+name: sns-test
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  sns-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup toolchain install stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and start RustStack
+        id: ruststack
+        run: |
+          cargo build --release -p ruststack-server
+
+          S3_SKIP_SIGNATURE_VALIDATION=true \
+          DYNAMODB_SKIP_SIGNATURE_VALIDATION=true \
+          SQS_SKIP_SIGNATURE_VALIDATION=true \
+          SSM_SKIP_SIGNATURE_VALIDATION=true \
+          SNS_SKIP_SIGNATURE_VALIDATION=true \
+          GATEWAY_LISTEN=0.0.0.0:4566 \
+          LOG_LEVEL=warn \
+          cargo run --release -p ruststack-server &
+
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then
+              echo "Server is ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Server did not start within 30s"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "endpoint=http://localhost:4566" >> "$GITHUB_OUTPUT"
+
+          echo "AWS_ENDPOINT_URL=http://localhost:4566" >> "$GITHUB_ENV"
+          echo "AWS_DEFAULT_REGION=us-east-1" >> "$GITHUB_ENV"
+          echo "AWS_ACCESS_KEY_ID=test" >> "$GITHUB_ENV"
+          echo "AWS_SECRET_ACCESS_KEY=test" >> "$GITHUB_ENV"
+
+      # ── CreateTopic + DeleteTopic ────────────────────────────────────
+      - name: "CreateTopic + DeleteTopic: basic CRUD"
+        run: |
+          set -euo pipefail
+
+          TOPIC_ARN=$(aws sns create-topic \
+            --name test-ci-topic \
+            --query "TopicArn" --output text)
+          echo "Created topic: $TOPIC_ARN"
+          [ -n "$TOPIC_ARN" ]
+
+          # Idempotent create returns same ARN
+          TOPIC_ARN2=$(aws sns create-topic \
+            --name test-ci-topic \
+            --query "TopicArn" --output text)
+          [ "$TOPIC_ARN" = "$TOPIC_ARN2" ]
+
+          aws sns delete-topic --topic-arn "$TOPIC_ARN"
+
+      # ── ListTopics ──────────────────────────────────────────────────
+      - name: "ListTopics: verify topic listing"
+        run: |
+          set -euo pipefail
+
+          ARN1=$(aws sns create-topic --name test-list-a --query "TopicArn" --output text)
+          ARN2=$(aws sns create-topic --name test-list-b --query "TopicArn" --output text)
+
+          TOPICS=$(aws sns list-topics --query "Topics[].TopicArn" --output text)
+          echo "$TOPICS" | grep -q "test-list-a"
+          echo "$TOPICS" | grep -q "test-list-b"
+
+          aws sns delete-topic --topic-arn "$ARN1"
+          aws sns delete-topic --topic-arn "$ARN2"
+
+      # ── GetTopicAttributes + SetTopicAttributes ─────────────────────
+      - name: "Attributes: get and set topic attributes"
+        run: |
+          set -euo pipefail
+
+          TOPIC_ARN=$(aws sns create-topic --name test-attrs --query "TopicArn" --output text)
+
+          aws sns set-topic-attributes \
+            --topic-arn "$TOPIC_ARN" \
+            --attribute-name DisplayName \
+            --attribute-value "My Display Name"
+
+          DISPLAY=$(aws sns get-topic-attributes \
+            --topic-arn "$TOPIC_ARN" \
+            --query "Attributes.DisplayName" --output text)
+          [ "$DISPLAY" = "My Display Name" ]
+
+          aws sns delete-topic --topic-arn "$TOPIC_ARN"
+
+      # ── Subscribe + Publish + Fan-out to SQS ────────────────────────
+      - name: "Fan-out: subscribe SQS queue, publish, receive"
+        run: |
+          set -euo pipefail
+
+          TOPIC_ARN=$(aws sns create-topic --name test-fanout --query "TopicArn" --output text)
+
+          QUEUE_URL=$(aws sqs create-queue --queue-name test-sns-fanout --query "QueueUrl" --output text)
+          QUEUE_ARN=$(aws sqs get-queue-attributes \
+            --queue-url "$QUEUE_URL" \
+            --attribute-names QueueArn \
+            --query "Attributes.QueueArn" --output text)
+
+          SUB_ARN=$(aws sns subscribe \
+            --topic-arn "$TOPIC_ARN" \
+            --protocol sqs \
+            --notification-endpoint "$QUEUE_ARN" \
+            --query "SubscriptionArn" --output text)
+          echo "Subscription: $SUB_ARN"
+          [ -n "$SUB_ARN" ]
+
+          MSG_ID=$(aws sns publish \
+            --topic-arn "$TOPIC_ARN" \
+            --message "Hello from SNS CI" \
+            --query "MessageId" --output text)
+          echo "Published: $MSG_ID"
+          [ -n "$MSG_ID" ]
+
+          # Receive from SQS
+          sleep 1
+          BODY=$(aws sqs receive-message \
+            --queue-url "$QUEUE_URL" \
+            --query "Messages[0].Body" --output text)
+          echo "$BODY" | grep -q "Hello from SNS CI"
+
+          aws sns unsubscribe --subscription-arn "$SUB_ARN"
+          aws sqs delete-queue --queue-url "$QUEUE_URL"
+          aws sns delete-topic --topic-arn "$TOPIC_ARN"
+
+      # ── Tags ────────────────────────────────────────────────────────
+      - name: "Tags: add, list, remove"
+        run: |
+          set -euo pipefail
+
+          TOPIC_ARN=$(aws sns create-topic --name test-tags --query "TopicArn" --output text)
+
+          aws sns tag-resource \
+            --resource-arn "$TOPIC_ARN" \
+            --tags "Key=env,Value=ci" "Key=team,Value=infra"
+
+          TAG_COUNT=$(aws sns list-tags-for-resource \
+            --resource-arn "$TOPIC_ARN" \
+            --query "Tags | length(@)" --output text)
+          [ "$TAG_COUNT" = "2" ]
+
+          aws sns untag-resource \
+            --resource-arn "$TOPIC_ARN" \
+            --tag-keys "team"
+
+          TAG_COUNT=$(aws sns list-tags-for-resource \
+            --resource-arn "$TOPIC_ARN" \
+            --query "Tags | length(@)" --output text)
+          [ "$TAG_COUNT" = "1" ]
+
+          aws sns delete-topic --topic-arn "$TOPIC_ARN"
+
+      # ── FIFO Topic ─────────────────────────────────────────────────
+      - name: "FIFO: create FIFO topic and publish"
+        run: |
+          set -euo pipefail
+
+          TOPIC_ARN=$(aws sns create-topic \
+            --name test-fifo.fifo \
+            --attributes FifoTopic=true,ContentBasedDeduplication=true \
+            --query "TopicArn" --output text)
+          echo "FIFO topic: $TOPIC_ARN"
+
+          FIFO_ATTR=$(aws sns get-topic-attributes \
+            --topic-arn "$TOPIC_ARN" \
+            --query "Attributes.FifoTopic" --output text)
+          [ "$FIFO_ATTR" = "true" ]
+
+          MSG_ID=$(aws sns publish \
+            --topic-arn "$TOPIC_ARN" \
+            --message "FIFO message" \
+            --message-group-id "group1" \
+            --query "MessageId" --output text)
+          [ -n "$MSG_ID" ]
+
+          aws sns delete-topic --topic-arn "$TOPIC_ARN"
+
+      # ── Rust Integration Tests ─────────────────────────────────────
+      - name: "Rust integration tests"
+        run: |
+          cargo test -p ruststack-integration test_sns -- --ignored
+
+      # ── Cleanup ────────────────────────────────────────────────────
+      - name: "Cleanup"
+        if: always()
+        run: |
+          set -uo pipefail
+          for TOPIC in test-ci-topic test-list-a test-list-b test-attrs test-fanout test-tags; do
+            ARN="arn:aws:sns:us-east-1:000000000000:$TOPIC"
+            aws sns delete-topic --topic-arn "$ARN" 2>/dev/null || true
+          done
+          aws sns delete-topic --topic-arn "arn:aws:sns:us-east-1:000000000000:test-fifo.fifo" 2>/dev/null || true
+          echo "Cleanup complete."
