@@ -393,6 +393,41 @@ pub enum SortKeyCondition {
     BeginsWithBytes(bytes::Bytes),
 }
 
+impl SortKeyCondition {
+    /// Tests whether the given [`SortableAttributeValue`] satisfies this condition.
+    ///
+    /// Used for in-memory filtering when querying items by a secondary index
+    /// (where items are not stored in a dedicated B-Tree ordered by the index
+    /// sort key).
+    #[must_use]
+    pub fn matches(&self, value: &SortableAttributeValue) -> bool {
+        match self {
+            Self::Eq(v) => value.cmp(v) == Ordering::Equal,
+            Self::Lt(v) => value.cmp(v) == Ordering::Less,
+            Self::Le(v) => value.cmp(v) != Ordering::Greater,
+            Self::Gt(v) => value.cmp(v) == Ordering::Greater,
+            Self::Ge(v) => value.cmp(v) != Ordering::Less,
+            Self::Between(low, high) => {
+                value.cmp(low) != Ordering::Less && value.cmp(high) != Ordering::Greater
+            }
+            Self::BeginsWithStr(prefix) => {
+                if let SortableAttributeValue::S(s) = value {
+                    s.starts_with(prefix.as_str())
+                } else {
+                    false
+                }
+            }
+            Self::BeginsWithBytes(prefix) => {
+                if let SortableAttributeValue::B(b) = value {
+                    b.starts_with(prefix.as_ref())
+                } else {
+                    false
+                }
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // StoredItem
 // ---------------------------------------------------------------------------

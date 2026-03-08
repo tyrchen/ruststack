@@ -1327,6 +1327,27 @@ impl RustStackDynamoDB {
         // Reject empty filter expression (before parsing attempt).
         validate_filter_not_empty(input.filter_expression.as_deref())?;
 
+        // Resolve the effective key schema: use GSI key schema if querying an
+        // index, otherwise use the table's primary key schema.
+        let gsi_key_schema = if let Some(ref index_name) = input.index_name {
+            let gsi = table
+                .gsi_definitions
+                .iter()
+                .find(|g| g.index_name == *index_name)
+                .ok_or_else(|| {
+                    DynamoDBError::validation(format!(
+                        "The table does not have the specified index: {index_name}"
+                    ))
+                })?;
+            Some(parse_key_schema(
+                &gsi.key_schema,
+                &table.attribute_definitions,
+            )?)
+        } else {
+            None
+        };
+        let effective_key_schema = gsi_key_schema.as_ref().unwrap_or(&table.key_schema);
+
         // Validate unused expression attribute names/values.
         {
             let mut used_names = HashSet::new();
@@ -1342,10 +1363,11 @@ impl RustStackDynamoDB {
                 collect_names_from_expr(&parsed, &mut used_names);
                 collect_values_from_expr(&parsed, &mut used_values);
 
-                // FilterExpression must not reference key attributes.
+                // FilterExpression must not reference key attributes of the
+                // index being queried.
                 validate_filter_no_key_attrs(
                     &parsed,
-                    &table.key_schema,
+                    effective_key_schema,
                     &input.expression_attribute_names,
                 )?;
             }
@@ -1360,14 +1382,17 @@ impl RustStackDynamoDB {
 
         let expr = parse_condition(key_condition).map_err(expression_error_to_dynamodb)?;
 
-        // Validate key condition: reject OR, NOT, non-key attributes, forbidden
-        // operators.
-        validate_key_condition_expr(&expr, &table.key_schema, &input.expression_attribute_names)?;
+        // Validate key condition against the effective key schema (table or GSI).
+        validate_key_condition_expr(
+            &expr,
+            effective_key_schema,
+            &input.expression_attribute_names,
+        )?;
 
         // Extract partition key value and sort condition from the parsed expression.
         let (partition_value, sort_condition) = extract_key_condition(
             &expr,
-            &table.key_schema,
+            effective_key_schema,
             &input.expression_attribute_names,
             &input.expression_attribute_values,
         )?;
@@ -1377,21 +1402,44 @@ impl RustStackDynamoDB {
             .limit
             .map(|l| usize::try_from(l.max(0)).unwrap_or(usize::MAX));
 
-        let exclusive_start_sort = if input.exclusive_start_key.is_empty() {
-            None
+        // Branch: table query vs. GSI query.
+        let (mut items, last_evaluated_key) = if gsi_key_schema.is_some() {
+            query_gsi(
+                &table,
+                effective_key_schema,
+                &partition_value,
+                sort_condition.as_ref(),
+                scan_forward,
+                limit,
+                &input.exclusive_start_key,
+            )
         } else {
-            let start_pk = extract_primary_key(&table.key_schema, &input.exclusive_start_key)
-                .map_err(storage_error_to_dynamodb)?;
-            start_pk.sort_key
-        };
+            let exclusive_start_sort = if input.exclusive_start_key.is_empty() {
+                None
+            } else {
+                let start_pk = extract_primary_key(&table.key_schema, &input.exclusive_start_key)
+                    .map_err(storage_error_to_dynamodb)?;
+                start_pk.sort_key
+            };
 
-        let (mut items, last_key_sort) = table.storage.query(
-            &partition_value,
-            sort_condition.as_ref(),
-            scan_forward,
-            limit,
-            exclusive_start_sort.as_ref(),
-        );
+            let (items, last_key_sort) = table.storage.query(
+                &partition_value,
+                sort_condition.as_ref(),
+                scan_forward,
+                limit,
+                exclusive_start_sort.as_ref(),
+            );
+
+            let last_evaluated_key = last_key_sort.map(|pk| {
+                let sort_av = pk
+                    .sort_key
+                    .as_ref()
+                    .and_then(SortableAttributeValue::to_attribute_value);
+                build_last_evaluated_key(&table.key_schema, &pk.partition_key, sort_av.as_ref())
+            });
+
+            (items, last_evaluated_key)
+        };
 
         let scanned_count = i32::try_from(items.len()).unwrap_or(i32::MAX);
 
@@ -1434,15 +1482,6 @@ impl RustStackDynamoDB {
         }
 
         let count = i32::try_from(items.len()).unwrap_or(i32::MAX);
-
-        // Build last evaluated key for pagination.
-        let last_evaluated_key = last_key_sort.map(|pk| {
-            let sort_av = pk
-                .sort_key
-                .as_ref()
-                .and_then(SortableAttributeValue::to_attribute_value);
-            build_last_evaluated_key(&table.key_schema, &pk.partition_key, sort_av.as_ref())
-        });
 
         // If Select=COUNT, return only the count (no items).
         if input.select == Some(Select::Count) {
@@ -3586,6 +3625,236 @@ fn build_last_evaluated_key(
     if let (Some(sk), Some(sv)) = (&key_schema.sort_key, sort) {
         key.insert(sk.name.clone(), sv.clone());
     }
+    key
+}
+
+/// Maximum response size for a single Query/Scan response (1 MB).
+const MAX_RESPONSE_BYTES: u64 = 1_048_576;
+
+/// Result type for GSI query operations.
+type GsiQueryResult = (
+    Vec<HashMap<String, AttributeValue>>,
+    Option<HashMap<String, AttributeValue>>,
+);
+
+/// Execute a query against a Global Secondary Index.
+///
+/// Because GSI items are not stored in a separate index structure, this
+/// function scans all items in the table's primary storage, filters by the
+/// GSI partition key, applies the sort condition on the GSI sort key, sorts
+/// the results, and applies pagination/limit.
+///
+/// Returns `(items, last_evaluated_key)` where `last_evaluated_key` contains
+/// both the GSI keys and the table's primary keys (matching DynamoDB
+/// behaviour for GSI query responses).
+fn query_gsi(
+    table: &DynamoDBTable,
+    gsi_key_schema: &KeySchema,
+    partition_value: &AttributeValue,
+    sort_condition: Option<&SortKeyCondition>,
+    scan_forward: bool,
+    limit: Option<usize>,
+    exclusive_start_key: &HashMap<String, AttributeValue>,
+) -> GsiQueryResult {
+    let gsi_pk_name = &gsi_key_schema.partition_key.name;
+
+    // Scan all items, filter by GSI partition key, apply sort condition, and sort.
+    let mut matching = gsi_filter_and_sort(
+        table,
+        gsi_key_schema,
+        gsi_pk_name,
+        partition_value,
+        sort_condition,
+        scan_forward,
+    );
+
+    // Apply exclusive_start_key pagination.
+    if !exclusive_start_key.is_empty() {
+        gsi_apply_pagination(
+            &mut matching,
+            exclusive_start_key,
+            gsi_pk_name,
+            gsi_key_schema,
+            &table.key_schema,
+        );
+    }
+
+    // Apply limit and 1 MB size cap.
+    let (selected, has_more) = gsi_apply_limit(matching, limit);
+
+    // Build last_evaluated_key containing both GSI keys and table primary keys.
+    let last_evaluated_key = if has_more {
+        selected
+            .last()
+            .map(|last_item| gsi_build_last_key(last_item, gsi_key_schema, &table.key_schema))
+    } else {
+        None
+    };
+
+    (selected, last_evaluated_key)
+}
+
+/// Scan, filter by GSI partition key, apply sort condition, and sort items.
+fn gsi_filter_and_sort(
+    table: &DynamoDBTable,
+    gsi_key_schema: &KeySchema,
+    gsi_pk_name: &str,
+    partition_value: &AttributeValue,
+    sort_condition: Option<&SortKeyCondition>,
+    scan_forward: bool,
+) -> Vec<HashMap<String, AttributeValue>> {
+    let (all_items, _) = table.storage.scan(None, None, None, None);
+
+    let mut matching: Vec<HashMap<String, AttributeValue>> = all_items
+        .into_iter()
+        .filter(|item| item.get(gsi_pk_name).is_some_and(|v| v == partition_value))
+        .collect();
+
+    // Apply GSI sort key condition if present.
+    if let Some(sk_def) = &gsi_key_schema.sort_key {
+        if let Some(condition) = sort_condition {
+            matching.retain(|item| {
+                item.get(&sk_def.name)
+                    .and_then(|v| {
+                        SortableAttributeValue::from_attribute_value(&sk_def.name, v).ok()
+                    })
+                    .is_some_and(|sv| condition.matches(&sv))
+            });
+        }
+        // Sort by the GSI sort key.
+        matching.sort_by(|a, b| {
+            let a_sk = a
+                .get(&sk_def.name)
+                .and_then(|v| SortableAttributeValue::from_attribute_value(&sk_def.name, v).ok());
+            let b_sk = b
+                .get(&sk_def.name)
+                .and_then(|v| SortableAttributeValue::from_attribute_value(&sk_def.name, v).ok());
+            match (a_sk, b_sk) {
+                (Some(av), Some(bv)) => av.cmp(&bv),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        });
+    }
+
+    if !scan_forward {
+        matching.reverse();
+    }
+
+    matching
+}
+
+/// Apply exclusive_start_key pagination to GSI query results.
+///
+/// Removes all items up to and including the item that matches the start key.
+fn gsi_apply_pagination(
+    items: &mut Vec<HashMap<String, AttributeValue>>,
+    start_key: &HashMap<String, AttributeValue>,
+    gsi_pk_name: &str,
+    gsi_key_schema: &KeySchema,
+    table_key_schema: &KeySchema,
+) {
+    // An item matches the start key when every key component present in
+    // `start_key` has an equal value in the item.
+    let matches_start = |item: &HashMap<String, AttributeValue>| -> bool {
+        start_key.iter().all(|(key_name, expected)| {
+            // For sort key attributes, compare via SortableAttributeValue to
+            // get correct DynamoDB ordering semantics.
+            let is_sort_attr = gsi_key_schema
+                .sort_key
+                .as_ref()
+                .is_some_and(|sk| sk.name == *key_name)
+                || table_key_schema
+                    .sort_key
+                    .as_ref()
+                    .is_some_and(|sk| sk.name == *key_name);
+
+            if is_sort_attr {
+                item.get(key_name).is_some_and(|v| v == expected)
+            } else {
+                // Partition key: direct equality.
+                item.get(key_name).is_some_and(|v| v == expected)
+            }
+        })
+    };
+
+    // Find the position of the start key item, then keep only items after it.
+    let skip_pos = items.iter().position(|item| {
+        // Must match GSI PK at minimum.
+        item.get(gsi_pk_name).is_some_and(|v| {
+            start_key
+                .get(gsi_pk_name)
+                .is_some_and(|expected| v == expected)
+        }) && matches_start(item)
+    });
+
+    if let Some(pos) = skip_pos {
+        // Remove everything up to and including the matched item.
+        items.drain(..=pos);
+    } else {
+        // Start key not found -- this shouldn't normally happen, but if it
+        // does, return no items (consistent with DynamoDB).
+        items.clear();
+    }
+}
+
+/// Apply count limit and 1 MB size cap, returning `(selected_items, has_more)`.
+fn gsi_apply_limit(
+    items: Vec<HashMap<String, AttributeValue>>,
+    limit: Option<usize>,
+) -> (Vec<HashMap<String, AttributeValue>>, bool) {
+    let effective_limit = limit.unwrap_or(usize::MAX);
+    let mut selected: Vec<HashMap<String, AttributeValue>> = Vec::new();
+    let mut cumulative_size: u64 = 0;
+
+    for item in items {
+        if selected.len() >= effective_limit {
+            return (selected, true);
+        }
+        let item_size = calculate_item_size(&item);
+        if !selected.is_empty() && cumulative_size + item_size > MAX_RESPONSE_BYTES {
+            return (selected, true);
+        }
+        cumulative_size += item_size;
+        selected.push(item);
+    }
+
+    (selected, false)
+}
+
+/// Build the `last_evaluated_key` for a GSI query response.
+///
+/// DynamoDB includes both the GSI keys and the table's primary keys in the
+/// last evaluated key for GSI query responses.
+fn gsi_build_last_key(
+    last_item: &HashMap<String, AttributeValue>,
+    gsi_key_schema: &KeySchema,
+    table_key_schema: &KeySchema,
+) -> HashMap<String, AttributeValue> {
+    let mut key = HashMap::new();
+
+    // Include GSI partition key.
+    if let Some(v) = last_item.get(&gsi_key_schema.partition_key.name) {
+        key.insert(gsi_key_schema.partition_key.name.clone(), v.clone());
+    }
+    // Include GSI sort key.
+    if let Some(sk_def) = &gsi_key_schema.sort_key {
+        if let Some(v) = last_item.get(&sk_def.name) {
+            key.insert(sk_def.name.clone(), v.clone());
+        }
+    }
+    // Include table primary partition key.
+    if let Some(v) = last_item.get(&table_key_schema.partition_key.name) {
+        key.insert(table_key_schema.partition_key.name.clone(), v.clone());
+    }
+    // Include table primary sort key.
+    if let Some(sk_def) = &table_key_schema.sort_key {
+        if let Some(v) = last_item.get(&sk_def.name) {
+            key.insert(sk_def.name.clone(), v.clone());
+        }
+    }
+
     key
 }
 
