@@ -99,6 +99,8 @@ async fn dispatch(
             let _output = provider.delete_topic(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("DeleteTopic");
+            w.start_result("DeleteTopic");
+            w.end_element("DeleteTopicResult");
             w.write_response_metadata(&request_id);
             w.end_element("DeleteTopicResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -122,6 +124,8 @@ async fn dispatch(
             let _output = provider.set_topic_attributes(input)?;
             let mut w = XmlWriter::new();
             w.start_response("SetTopicAttributes");
+            w.start_result("SetTopicAttributes");
+            w.end_element("SetTopicAttributesResult");
             w.write_response_metadata(&request_id);
             w.end_element("SetTopicAttributesResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -165,6 +169,8 @@ async fn dispatch(
             let _output = provider.unsubscribe(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("Unsubscribe");
+            w.start_result("Unsubscribe");
+            w.end_element("UnsubscribeResult");
             w.write_response_metadata(&request_id);
             w.end_element("UnsubscribeResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -201,6 +207,8 @@ async fn dispatch(
             let _output = provider.set_subscription_attributes(input)?;
             let mut w = XmlWriter::new();
             w.start_response("SetSubscriptionAttributes");
+            w.start_result("SetSubscriptionAttributes");
+            w.end_element("SetSubscriptionAttributesResult");
             w.write_response_metadata(&request_id);
             w.end_element("SetSubscriptionAttributesResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -284,6 +292,8 @@ async fn dispatch(
             let _output = provider.tag_resource(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("TagResource");
+            w.start_result("TagResource");
+            w.end_element("TagResourceResult");
             w.write_response_metadata(&request_id);
             w.end_element("TagResourceResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -294,6 +304,8 @@ async fn dispatch(
             let _output = provider.untag_resource(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("UntagResource");
+            w.start_result("UntagResource");
+            w.end_element("UntagResourceResult");
             w.write_response_metadata(&request_id);
             w.end_element("UntagResourceResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -324,6 +336,8 @@ async fn dispatch(
             let _output = provider.add_permission(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("AddPermission");
+            w.start_result("AddPermission");
+            w.end_element("AddPermissionResult");
             w.write_response_metadata(&request_id);
             w.end_element("AddPermissionResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -334,6 +348,8 @@ async fn dispatch(
             let _output = provider.remove_permission(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("RemovePermission");
+            w.start_result("RemovePermission");
+            w.end_element("RemovePermissionResult");
             w.write_response_metadata(&request_id);
             w.end_element("RemovePermissionResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -360,6 +376,8 @@ async fn dispatch(
             let _output = provider.put_data_protection_policy(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("PutDataProtectionPolicy");
+            w.start_result("PutDataProtectionPolicy");
+            w.end_element("PutDataProtectionPolicyResult");
             w.write_response_metadata(&request_id);
             w.end_element("PutDataProtectionPolicyResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -384,6 +402,8 @@ async fn dispatch(
             let _output = provider.delete_platform_application(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("DeletePlatformApplication");
+            w.start_result("DeletePlatformApplication");
+            w.end_element("DeletePlatformApplicationResult");
             w.write_response_metadata(&request_id);
             w.end_element("DeletePlatformApplicationResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -407,6 +427,8 @@ async fn dispatch(
             let _output = provider.set_platform_application_attributes(input)?;
             let mut w = XmlWriter::new();
             w.start_response("SetPlatformApplicationAttributes");
+            w.start_result("SetPlatformApplicationAttributes");
+            w.end_element("SetPlatformApplicationAttributesResult");
             w.write_response_metadata(&request_id);
             w.end_element("SetPlatformApplicationAttributesResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -452,6 +474,8 @@ async fn dispatch(
             let _output = provider.delete_endpoint(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("DeleteEndpoint");
+            w.start_result("DeleteEndpoint");
+            w.end_element("DeleteEndpointResult");
             w.write_response_metadata(&request_id);
             w.end_element("DeleteEndpointResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -475,6 +499,8 @@ async fn dispatch(
             let _output = provider.set_endpoint_attributes(input)?;
             let mut w = XmlWriter::new();
             w.start_response("SetEndpointAttributes");
+            w.start_result("SetEndpointAttributes");
+            w.end_element("SetEndpointAttributesResult");
             w.write_response_metadata(&request_id);
             w.end_element("SetEndpointAttributesResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -533,6 +559,8 @@ async fn dispatch(
             let _output = provider.set_sms_attributes(input)?;
             let mut w = XmlWriter::new();
             w.start_response("SetSMSAttributes");
+            w.start_result("SetSMSAttributes");
+            w.end_element("SetSMSAttributesResult");
             w.write_response_metadata(&request_id);
             w.end_element("SetSMSAttributesResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -563,6 +591,8 @@ async fn dispatch(
             let _output = provider.opt_in_phone_number(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("OptInPhoneNumber");
+            w.start_result("OptInPhoneNumber");
+            w.end_element("OptInPhoneNumberResult");
             w.write_response_metadata(&request_id);
             w.end_element("OptInPhoneNumberResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -586,6 +616,8 @@ async fn dispatch(
             let _output = provider.create_sms_sandbox_phone_number(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("CreateSMSSandboxPhoneNumber");
+            w.start_result("CreateSMSSandboxPhoneNumber");
+            w.end_element("CreateSMSSandboxPhoneNumberResult");
             w.write_response_metadata(&request_id);
             w.end_element("CreateSMSSandboxPhoneNumberResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -596,6 +628,8 @@ async fn dispatch(
             let _output = provider.delete_sms_sandbox_phone_number(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("DeleteSMSSandboxPhoneNumber");
+            w.start_result("DeleteSMSSandboxPhoneNumber");
+            w.end_element("DeleteSMSSandboxPhoneNumberResult");
             w.write_response_metadata(&request_id);
             w.end_element("DeleteSMSSandboxPhoneNumberResponse");
             Ok(xml_response(w.into_string(), &request_id))
@@ -606,6 +640,8 @@ async fn dispatch(
             let _output = provider.verify_sms_sandbox_phone_number(&input)?;
             let mut w = XmlWriter::new();
             w.start_response("VerifySMSSandboxPhoneNumber");
+            w.start_result("VerifySMSSandboxPhoneNumber");
+            w.end_element("VerifySMSSandboxPhoneNumberResult");
             w.write_response_metadata(&request_id);
             w.end_element("VerifySMSSandboxPhoneNumberResponse");
             Ok(xml_response(w.into_string(), &request_id))
