@@ -238,6 +238,7 @@ mod test_bucket;
 mod test_cors;
 mod test_dynamodb;
 mod test_error;
+mod test_health;
 mod test_lambda;
 mod test_list;
 mod test_multipart;

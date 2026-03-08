@@ -31,7 +31,7 @@ jobs:
           SSM_SKIP_SIGNATURE_VALIDATION=true \
           GATEWAY_LISTEN=0.0.0.0:4566 \
           LOG_LEVEL=warn \
-          cargo run --release -p ruststack-server &
+          cargo run --release -p ruststack-server > /tmp/ruststack.log 2>&1 &
 
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then
@@ -51,6 +51,25 @@ jobs:
           echo "AWS_DEFAULT_REGION=us-east-1" >> "$GITHUB_ENV"
           echo "AWS_ACCESS_KEY_ID=test" >> "$GITHUB_ENV"
           echo "AWS_SECRET_ACCESS_KEY=test" >> "$GITHUB_ENV"
+
+      # ── Health Check Verification ────────────────────────────────────
+      - name: "Health Check: verify --health-check flag and no connection errors"
+        run: |
+          set -euo pipefail
+
+          # Run the built-in health check multiple times
+          for i in $(seq 1 5); do
+            ./target/release/ruststack-server --health-check
+          done
+
+          # Verify the server log has no "connection closed before message completed" errors
+          if grep -q "connection closed before message completed" /tmp/ruststack.log; then
+            echo "::error::Server logged 'connection closed before message completed' — health check is broken"
+            cat /tmp/ruststack.log
+            exit 1
+          fi
+
+          echo "Health check passed 5 times with no connection errors"
 
       # ── Bucket Operations ───────────────────────────────────────────
       - name: "Bucket Operations: create, head, list, locate, delete"
