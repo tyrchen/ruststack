@@ -39,7 +39,7 @@ use anyhow::{Context, Result};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as HttpConnBuilder;
 use tokio::net::TcpListener;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 #[cfg(feature = "dynamodb")]
@@ -252,7 +252,7 @@ async fn serve(listener: TcpListener, service: GatewayService) -> Result<()> {
 
                 tokio::spawn(async move {
                     if let Err(e) = conn.await {
-                        error!(peer_addr = %peer_addr, error = %e, "connection error");
+                        warn!(peer_addr = %peer_addr, error = %e, "connection error");
                     }
                 });
             }
@@ -333,19 +333,20 @@ async fn run_health_check(addr: &str) -> Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    let stream = TcpStream::connect(addr)
+    let mut stream = TcpStream::connect(addr)
         .await
         .with_context(|| format!("cannot connect to {addr}"))?;
 
-    let (mut reader, mut writer) = stream.into_split();
-
     let request =
         format!("GET /_localstack/health HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
-    writer.write_all(request.as_bytes()).await?;
-    writer.shutdown().await?;
+    stream.write_all(request.as_bytes()).await?;
+    // Do not half-close the write side: the HTTP request is self-framing
+    // (GET with no body) and the Connection: close header tells hyper not
+    // to expect further requests.  Hyper will close after responding,
+    // which gives read_to_string its EOF.
 
     let mut response = String::new();
-    reader.read_to_string(&mut response).await?;
+    stream.read_to_string(&mut response).await?;
 
     // Accept any 200 response that reports at least one running service.
     if response.contains("200 OK") && response.contains("\"running\"") {
