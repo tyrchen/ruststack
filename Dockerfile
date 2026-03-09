@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 # Builder stage: compile a fully static binary with musl
 # ---------------------------------------------------------------------------
-FROM rust:1.86-slim AS builder
+FROM rust:1.93-slim AS builder
 
 RUN apt-get update && apt-get install -y musl-tools && rm -rf /var/lib/apt/lists/*
 
