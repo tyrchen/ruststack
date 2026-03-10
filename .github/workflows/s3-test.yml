@@ -30,7 +30,7 @@ jobs:
           SQS_SKIP_SIGNATURE_VALIDATION=true \
           SSM_SKIP_SIGNATURE_VALIDATION=true \
           GATEWAY_LISTEN=0.0.0.0:4566 \
-          LOG_LEVEL=info \
+          LOG_LEVEL=warn \
           cargo run --release -p ruststack-server > /tmp/ruststack.log 2>&1 &
 
           for i in $(seq 1 30); do
@@ -286,11 +286,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          aws --version
           aws s3api create-bucket --bucket test-config
 
           # CORS
-          echo "==> put-bucket-cors"
           aws s3api put-bucket-cors --bucket test-config --cors-configuration '{
             "CORSRules": [{
               "AllowedOrigins": ["https://example.com"],
@@ -298,13 +296,10 @@ jobs:
               "AllowedHeaders": ["*"],
               "MaxAgeSeconds": 3600
             }]
-          }' 2>&1
-          echo "==> get-bucket-cors"
-          aws s3api get-bucket-cors --bucket test-config 2>&1 | tee /tmp/cors-out.json
-          grep -q "example.com" /tmp/cors-out.json
+          }'
+          aws s3api get-bucket-cors --bucket test-config | grep -q "example.com"
 
           # Lifecycle
-          echo "==> put-bucket-lifecycle-configuration"
           aws s3api put-bucket-lifecycle-configuration --bucket test-config \
             --lifecycle-configuration '{
               "Rules": [{
@@ -313,13 +308,10 @@ jobs:
                 "Filter": {"Prefix": "logs/"},
                 "Expiration": {"Days": 30}
               }]
-            }' 2>&1
-          echo "==> get-bucket-lifecycle-configuration"
-          aws s3api get-bucket-lifecycle-configuration --bucket test-config 2>&1 | tee /tmp/lifecycle-out.json
-          grep -q "expire-old" /tmp/lifecycle-out.json
+            }'
+          aws s3api get-bucket-lifecycle-configuration --bucket test-config | grep -q "expire-old"
 
           # Encryption
-          echo "==> put-bucket-encryption"
           aws s3api put-bucket-encryption --bucket test-config \
             --server-side-encryption-configuration '{
               "Rules": [{
@@ -327,29 +319,21 @@ jobs:
                   "SSEAlgorithm": "AES256"
                 }
               }]
-            }' 2>&1
-          echo "==> get-bucket-encryption"
-          aws s3api get-bucket-encryption --bucket test-config 2>&1 | tee /tmp/encryption-out.json
-          grep -q "AES256" /tmp/encryption-out.json
+            }'
+          aws s3api get-bucket-encryption --bucket test-config | grep -q "AES256"
 
           # Tagging
-          echo "==> put-bucket-tagging"
           aws s3api put-bucket-tagging --bucket test-config \
-            --tagging '{"TagSet": [{"Key": "env", "Value": "ci"}, {"Key": "team", "Value": "platform"}]}' 2>&1
-          echo "==> get-bucket-tagging"
-          aws s3api get-bucket-tagging --bucket test-config 2>&1 | tee /tmp/tagging-out.json
-          grep -q "platform" /tmp/tagging-out.json
+            --tagging '{"TagSet": [{"Key": "env", "Value": "ci"}, {"Key": "team", "Value": "platform"}]}'
+          aws s3api get-bucket-tagging --bucket test-config | grep -q "platform"
 
           # Website
-          echo "==> put-bucket-website"
           aws s3api put-bucket-website --bucket test-config \
             --website-configuration '{
               "IndexDocument": {"Suffix": "index.html"},
               "ErrorDocument": {"Key": "error.html"}
-            }' 2>&1
-          echo "==> get-bucket-website"
-          aws s3api get-bucket-website --bucket test-config 2>&1 | tee /tmp/website-out.json
-          grep -q "index.html" /tmp/website-out.json
+            }'
+          aws s3api get-bucket-website --bucket test-config | grep -q "index.html"
 
       # ── Object Lock ─────────────────────────────────────────────────
       - name: "Object Lock: retention and legal hold"
