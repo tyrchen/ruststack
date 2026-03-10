@@ -339,11 +339,14 @@ impl RustStackS3 {
             obj_meta.user_metadata.clone()
         };
 
-        // Only return checksums when ChecksumMode=ENABLED (matching AWS behavior).
+        // Only return checksums when ChecksumMode=ENABLED (matching AWS behavior)
+        // and the request is for the full object (not a range request). A range
+        // response covers a subset of the object data, so the full-object
+        // checksum would not match and SDKs would reject the response.
         let checksum_enabled = checksum_mode
             .as_ref()
             .is_some_and(|m| m.as_str() == "ENABLED");
-        let cksum = if checksum_enabled {
+        let cksum = if checksum_enabled && range.is_none() {
             obj_checksum.as_ref().map(checksum_to_fields)
         } else {
             None
