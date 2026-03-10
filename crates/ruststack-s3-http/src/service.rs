@@ -219,15 +219,27 @@ async fn process_request<H: S3Handler>(
     // 4c. Decode AWS chunked transfer encoding.
     if crate::codec::is_aws_chunked(&parts) {
         match crate::codec::decode_aws_chunked(&body) {
-            Ok(decoded) => {
+            Ok(result) => {
                 debug!(
                     raw_len = body.len(),
-                    decoded_len = decoded.len(),
+                    decoded_len = result.body.len(),
+                    trailing_header_count = result.trailing_headers.len(),
                     request_id,
                     "decoded aws-chunked body"
                 );
-                body = decoded;
+                body = result.body;
                 crate::codec::strip_aws_chunked_encoding(&mut parts.headers);
+
+                // Inject trailing headers (e.g. checksum values) into request
+                // headers so downstream request parsing picks them up.
+                for (key, value) in &result.trailing_headers {
+                    if let Ok(hv) = http::header::HeaderValue::from_str(value) {
+                        if let Ok(hn) = http::header::HeaderName::from_bytes(key.as_bytes()) {
+                            // Only insert if not already present in the request headers.
+                            parts.headers.entry(hn).or_insert(hv);
+                        }
+                    }
+                }
             }
             Err(s3_err) => {
                 warn!(error = %s3_err.message, request_id, "failed to decode aws-chunked body");
