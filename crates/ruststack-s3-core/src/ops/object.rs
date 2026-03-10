@@ -146,6 +146,7 @@ impl RustStackS3 {
         let checksum = checksum.unwrap_or_else(|| ChecksumData {
             algorithm: "CRC32".to_owned(),
             value: compute_checksum(ChecksumAlgorithm::Crc32, &body_data),
+            checksum_type: "FULL_OBJECT".to_owned(),
         });
 
         // Validate client-provided checksum against server-computed value.
@@ -947,7 +948,10 @@ fn checksum_to_fields(checksum: &ChecksumData) -> ChecksumFields {
         "SHA256" => fields.sha256 = Some(checksum.value.clone()),
         _ => {}
     }
-    fields.checksum_type = Some(ChecksumType::FullObject);
+    fields.checksum_type = Some(match checksum.checksum_type.as_str() {
+        "COMPOSITE" => ChecksumType::Composite,
+        _ => ChecksumType::FullObject,
+    });
     fields
 }
 
@@ -975,6 +979,7 @@ fn extract_checksum_from_put(
     Ok(found.into_iter().next().map(|(alg, val)| ChecksumData {
         algorithm: (*alg).to_owned(),
         value: val.as_ref().unwrap_or(&String::new()).clone(),
+        checksum_type: "FULL_OBJECT".to_owned(),
     }))
 }
 

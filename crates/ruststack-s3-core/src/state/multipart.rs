@@ -209,6 +209,7 @@ mod tests {
             checksum: Some(ChecksumData {
                 algorithm: "CRC32".to_owned(),
                 value: "AAAAAA==".to_owned(),
+                checksum_type: "FULL_OBJECT".to_owned(),
             }),
         };
         let cs = part.checksum.as_ref();
