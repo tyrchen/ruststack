@@ -20,3 +20,4 @@ All specs that for AI to generate code.
 | [ruststack-kms-design](./ruststack-kms-design.md) | Design | Draft | Native Rust KMS implementation -- ~35 operations, AES-256-GCM/RSA/ECC/HMAC crypto engine, envelope encryption, key state machine, alias management |
 | [ruststack-kinesis-design](./ruststack-kinesis-design.md) | Design | Draft | Native Rust Kinesis Data Streams implementation -- ~40 operations, actor-per-shard architecture, MD5 partition key routing, shard iterators, CBOR+JSON wire formats |
 | [s3-checksum-parity-design](./s3-checksum-parity-design.md) | Design | Draft | S3 checksum parity -- CRC64NVME, ChecksumMode gating, aws-chunked trailing headers, multipart checksum combination, upload validation |
+| [smithy-codegen-all-services-design](./smithy-codegen-all-services-design.md) | Design | Draft | Universal Smithy codegen -- extend S3-only codegen to all 7+ services with TOML configs, protocol-aware serde, error extraction, overlay system |

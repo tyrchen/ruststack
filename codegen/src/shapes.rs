@@ -7,93 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
 
+use crate::config::ServiceConfig;
 use crate::model::{MemberShape, Shape, SmithyModel, StructureShape};
-
-/// The namespace prefix for all S3 shapes.
-const S3_NAMESPACE: &str = "com.amazonaws.s3#";
 
 /// Maximum recursion depth when resolving shape references.
 const MAX_RESOLVE_DEPTH: usize = 15;
-
-/// All S3 operations we want to generate code for.
-pub const TARGET_OPERATIONS: &[&str] = &[
-    // Bucket CRUD
-    "CreateBucket",
-    "DeleteBucket",
-    "HeadBucket",
-    "ListBuckets",
-    "GetBucketLocation",
-    // Bucket config
-    "GetBucketVersioning",
-    "PutBucketVersioning",
-    "GetBucketEncryption",
-    "PutBucketEncryption",
-    "DeleteBucketEncryption",
-    "GetBucketCors",
-    "PutBucketCors",
-    "DeleteBucketCors",
-    "GetBucketLifecycleConfiguration",
-    "PutBucketLifecycleConfiguration",
-    "DeleteBucketLifecycle",
-    "GetBucketPolicy",
-    "PutBucketPolicy",
-    "DeleteBucketPolicy",
-    "GetBucketTagging",
-    "PutBucketTagging",
-    "DeleteBucketTagging",
-    "GetBucketNotificationConfiguration",
-    "PutBucketNotificationConfiguration",
-    "GetBucketLogging",
-    "PutBucketLogging",
-    "GetPublicAccessBlock",
-    "PutPublicAccessBlock",
-    "DeletePublicAccessBlock",
-    "GetBucketOwnershipControls",
-    "PutBucketOwnershipControls",
-    "DeleteBucketOwnershipControls",
-    "GetObjectLockConfiguration",
-    "PutObjectLockConfiguration",
-    "GetBucketAccelerateConfiguration",
-    "PutBucketAccelerateConfiguration",
-    "GetBucketRequestPayment",
-    "PutBucketRequestPayment",
-    "GetBucketWebsite",
-    "PutBucketWebsite",
-    "DeleteBucketWebsite",
-    "GetBucketAcl",
-    "PutBucketAcl",
-    "GetBucketPolicyStatus",
-    // Object CRUD
-    "PutObject",
-    "GetObject",
-    "HeadObject",
-    "DeleteObject",
-    "DeleteObjects",
-    "CopyObject",
-    // Object config
-    "GetObjectTagging",
-    "PutObjectTagging",
-    "DeleteObjectTagging",
-    "GetObjectAcl",
-    "PutObjectAcl",
-    "GetObjectRetention",
-    "PutObjectRetention",
-    "GetObjectLegalHold",
-    "PutObjectLegalHold",
-    "GetObjectAttributes",
-    // Multipart
-    "CreateMultipartUpload",
-    "UploadPart",
-    "UploadPartCopy",
-    "CompleteMultipartUpload",
-    "AbortMultipartUpload",
-    "ListParts",
-    "ListMultipartUploads",
-    // List
-    "ListObjects",
-    "ListObjectsV2",
-    "ListObjectVersions",
-];
 
 /// Categorized operation info for code generation.
 #[derive(Debug)]
@@ -166,102 +84,25 @@ pub struct ResolvedModel {
     pub output_structs: BTreeMap<String, Vec<FieldInfo>>,
 }
 
-/// Categorize operations into file categories.
-fn categorize_operations() -> (OperationCategories, OperationCategories) {
-    let bucket_crud = &[
-        "CreateBucket",
-        "DeleteBucket",
-        "HeadBucket",
-        "ListBuckets",
-        "GetBucketLocation",
-    ];
-    let object_crud = &[
-        "PutObject",
-        "GetObject",
-        "HeadObject",
-        "DeleteObject",
-        "DeleteObjects",
-        "CopyObject",
-    ];
-    let multipart = &[
-        "CreateMultipartUpload",
-        "UploadPart",
-        "UploadPartCopy",
-        "CompleteMultipartUpload",
-        "AbortMultipartUpload",
-        "ListParts",
-        "ListMultipartUploads",
-    ];
-    let list = &["ListObjects", "ListObjectsV2", "ListObjectVersions"];
-
-    let config = &[
-        "GetBucketVersioning",
-        "PutBucketVersioning",
-        "GetBucketEncryption",
-        "PutBucketEncryption",
-        "DeleteBucketEncryption",
-        "GetBucketCors",
-        "PutBucketCors",
-        "DeleteBucketCors",
-        "GetBucketLifecycleConfiguration",
-        "PutBucketLifecycleConfiguration",
-        "DeleteBucketLifecycle",
-        "GetBucketPolicy",
-        "PutBucketPolicy",
-        "DeleteBucketPolicy",
-        "GetBucketTagging",
-        "PutBucketTagging",
-        "DeleteBucketTagging",
-        "GetBucketNotificationConfiguration",
-        "PutBucketNotificationConfiguration",
-        "GetBucketLogging",
-        "PutBucketLogging",
-        "GetPublicAccessBlock",
-        "PutPublicAccessBlock",
-        "DeletePublicAccessBlock",
-        "GetBucketOwnershipControls",
-        "PutBucketOwnershipControls",
-        "DeleteBucketOwnershipControls",
-        "GetObjectLockConfiguration",
-        "PutObjectLockConfiguration",
-        "GetBucketAccelerateConfiguration",
-        "PutBucketAccelerateConfiguration",
-        "GetBucketRequestPayment",
-        "PutBucketRequestPayment",
-        "GetBucketWebsite",
-        "PutBucketWebsite",
-        "DeleteBucketWebsite",
-        "GetBucketAcl",
-        "PutBucketAcl",
-        "GetBucketPolicyStatus",
-        "GetObjectTagging",
-        "PutObjectTagging",
-        "DeleteObjectTagging",
-        "GetObjectAcl",
-        "PutObjectAcl",
-        "GetObjectRetention",
-        "PutObjectRetention",
-        "GetObjectLegalHold",
-        "PutObjectLegalHold",
-        "GetObjectAttributes",
-    ];
-
-    let mut input_cats = BTreeMap::new();
-    let mut output_cats = BTreeMap::new();
-
-    for (cat, ops) in [
-        ("bucket", bucket_crud.as_slice()),
-        ("object", object_crud.as_slice()),
-        ("multipart", multipart.as_slice()),
-        ("list", list.as_slice()),
-        ("config", config.as_slice()),
-    ] {
-        let ops_vec: Vec<String> = ops.iter().map(|s| (*s).to_owned()).collect();
-        input_cats.insert(cat.to_owned(), ops_vec.clone());
-        output_cats.insert(cat.to_owned(), ops_vec);
+/// Build operation categories from the service config.
+fn build_categories(config: &ServiceConfig) -> (OperationCategories, OperationCategories) {
+    if let Some(ref cats) = config.categories {
+        // Use config-defined categories
+        let mut input_cats = BTreeMap::new();
+        let mut output_cats = BTreeMap::new();
+        for (cat, ops) in cats {
+            input_cats.insert(cat.clone(), ops.clone());
+            output_cats.insert(cat.clone(), ops.clone());
+        }
+        (input_cats, output_cats)
+    } else {
+        // Flat layout: all operations in a single "all" category
+        let mut input_cats = BTreeMap::new();
+        let mut output_cats = BTreeMap::new();
+        input_cats.insert("all".to_owned(), config.all_operations.clone());
+        output_cats.insert("all".to_owned(), config.all_operations.clone());
+        (input_cats, output_cats)
     }
-
-    (input_cats, output_cats)
 }
 
 /// Resolve a Smithy shape target to a Rust type string.
@@ -361,23 +202,23 @@ fn extract_http_binding(member: &MemberShape) -> Option<HttpBinding> {
     if member.traits.contains_key("smithy.api#httpLabel") {
         return Some(HttpBinding::Label);
     }
-    if let Some(val) = member.traits.get("smithy.api#httpQuery") {
-        if let Some(s) = val.as_str() {
-            return Some(HttpBinding::Query(s.to_owned()));
-        }
+    if let Some(val) = member.traits.get("smithy.api#httpQuery")
+        && let Some(s) = val.as_str()
+    {
+        return Some(HttpBinding::Query(s.to_owned()));
     }
-    if let Some(val) = member.traits.get("smithy.api#httpHeader") {
-        if let Some(s) = val.as_str() {
-            return Some(HttpBinding::Header(s.to_owned()));
-        }
+    if let Some(val) = member.traits.get("smithy.api#httpHeader")
+        && let Some(s) = val.as_str()
+    {
+        return Some(HttpBinding::Header(s.to_owned()));
     }
     if member.traits.contains_key("smithy.api#httpPayload") {
         return Some(HttpBinding::Payload);
     }
-    if let Some(val) = member.traits.get("smithy.api#httpPrefixHeaders") {
-        if let Some(s) = val.as_str() {
-            return Some(HttpBinding::PrefixHeaders(s.to_owned()));
-        }
+    if let Some(val) = member.traits.get("smithy.api#httpPrefixHeaders")
+        && let Some(s) = val.as_str()
+    {
+        return Some(HttpBinding::PrefixHeaders(s.to_owned()));
     }
     None
 }
@@ -485,8 +326,9 @@ fn is_collection_type(ty: &str) -> bool {
 }
 
 /// Resolve all needed shapes from the Smithy model.
-pub fn resolve_model(model: &SmithyModel) -> Result<ResolvedModel> {
-    let (input_categories, output_categories) = categorize_operations();
+pub fn resolve_model(model: &SmithyModel, config: &ServiceConfig) -> Result<ResolvedModel> {
+    let (input_categories, output_categories) = build_categories(config);
+    let namespace_prefix = config.namespace_prefix();
 
     // Step 1: Collect all operation info and referenced shapes.
     let mut operations = Vec::new();
@@ -494,8 +336,8 @@ pub fn resolve_model(model: &SmithyModel) -> Result<ResolvedModel> {
     let mut input_shape_ids = BTreeSet::new();
     let mut output_shape_ids = BTreeSet::new();
 
-    for op_name in TARGET_OPERATIONS {
-        let full_name = format!("{S3_NAMESPACE}{op_name}");
+    for op_name in &config.all_operations {
+        let full_name = format!("{namespace_prefix}{op_name}");
         let shape = model
             .shapes
             .get(&full_name)
@@ -509,21 +351,21 @@ pub fn resolve_model(model: &SmithyModel) -> Result<ResolvedModel> {
             _ => anyhow::bail!("{op_name} is not an operation shape"),
         };
 
-        if let Some(ref inp) = input_target {
-            if inp != "smithy.api#Unit" {
-                collect_referenced_shapes(model, inp, &mut all_referenced, 0);
-                input_shape_ids.insert(inp.clone());
-            }
+        if let Some(ref inp) = input_target
+            && inp != "smithy.api#Unit"
+        {
+            collect_referenced_shapes(model, inp, &mut all_referenced, 0);
+            input_shape_ids.insert(inp.clone());
         }
-        if let Some(ref out) = output_target {
-            if out != "smithy.api#Unit" {
-                collect_referenced_shapes(model, out, &mut all_referenced, 0);
-                output_shape_ids.insert(out.clone());
-            }
+        if let Some(ref out) = output_target
+            && out != "smithy.api#Unit"
+        {
+            collect_referenced_shapes(model, out, &mut all_referenced, 0);
+            output_shape_ids.insert(out.clone());
         }
 
         operations.push(OperationInfo {
-            name: (*op_name).to_owned(),
+            name: op_name.clone(),
             input_shape: input_target.filter(|t| t != "smithy.api#Unit"),
             output_shape: output_target.filter(|t| t != "smithy.api#Unit"),
         });

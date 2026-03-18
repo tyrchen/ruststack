@@ -8,22 +8,31 @@ use std::fmt::Write;
 
 use anyhow::Result;
 
-use crate::shapes::{
-    EnumVariantInfo, FieldInfo, HttpBinding, OperationCategories, ResolvedModel, TARGET_OPERATIONS,
-};
+use crate::config::ServiceConfig;
+use crate::shapes::{EnumVariantInfo, FieldInfo, HttpBinding, OperationCategories, ResolvedModel};
 
 /// Header comment placed at the top of every generated file.
-const FILE_HEADER: &str = "//! Auto-generated from AWS S3 Smithy model. DO NOT EDIT.";
+fn file_header(config: &ServiceConfig) -> String {
+    format!(
+        "//! Auto-generated from AWS {} Smithy model. DO NOT EDIT.",
+        config.display_name
+    )
+}
 
 /// Generate all source files and return them as a map of path -> content.
-pub fn generate_all(resolved: &ResolvedModel) -> Result<BTreeMap<String, String>> {
+pub fn generate_all(
+    resolved: &ResolvedModel,
+    config: &ServiceConfig,
+) -> Result<BTreeMap<String, String>> {
     let mut files = BTreeMap::new();
 
-    files.insert("types.rs".to_owned(), generate_types(resolved)?);
-    files.insert("operations.rs".to_owned(), generate_operations()?);
-    files.insert("error.rs".to_owned(), generate_error()?);
-    files.insert("request.rs".to_owned(), generate_request()?);
-    files.insert("lib.rs".to_owned(), generate_lib(resolved)?);
+    files.insert("types.rs".to_owned(), generate_types(resolved, config)?);
+    files.insert("operations.rs".to_owned(), generate_operations(config)?);
+    files.insert("error.rs".to_owned(), generate_error(config)?);
+    if config.emit_request_wrapper {
+        files.insert("request.rs".to_owned(), generate_request(config)?);
+    }
+    files.insert("lib.rs".to_owned(), generate_lib(resolved, config)?);
 
     // Generate input modules
     generate_io_modules(
@@ -32,6 +41,7 @@ pub fn generate_all(resolved: &ResolvedModel) -> Result<BTreeMap<String, String>
         &resolved.input_categories,
         &resolved.input_structs,
         resolved,
+        config,
     )?;
 
     // Generate output modules
@@ -41,15 +51,18 @@ pub fn generate_all(resolved: &ResolvedModel) -> Result<BTreeMap<String, String>
         &resolved.output_categories,
         &resolved.output_structs,
         resolved,
+        config,
     )?;
 
     Ok(files)
 }
 
 /// Generate types.rs with all shared enums and structs.
-fn generate_types(resolved: &ResolvedModel) -> Result<String> {
+fn generate_types(resolved: &ResolvedModel, config: &ServiceConfig) -> Result<String> {
+    let header = file_header(config);
+    let display_name = &config.display_name;
     let mut out = String::with_capacity(64 * 1024);
-    writeln!(out, "{FILE_HEADER}")?;
+    writeln!(out, "{header}")?;
     writeln!(out)?;
 
     // Check if HashMap is needed in shared structs
@@ -77,20 +90,25 @@ fn generate_types(resolved: &ResolvedModel) -> Result<String> {
 
     // Generate enums
     for (name, variants) in &resolved.enums {
-        write_enum(&mut out, name, variants)?;
+        write_enum(&mut out, name, variants, display_name)?;
     }
 
     // Generate shared structs
     for (name, fields) in &resolved.shared_structs {
-        write_struct(&mut out, name, fields, false)?;
+        write_struct(&mut out, name, fields, false, display_name)?;
     }
 
     Ok(out)
 }
 
 /// Generate a single Rust enum.
-fn write_enum(out: &mut String, name: &str, variants: &[EnumVariantInfo]) -> Result<()> {
-    writeln!(out, "/// S3 {name} enum.")?;
+fn write_enum(
+    out: &mut String,
+    name: &str,
+    variants: &[EnumVariantInfo],
+    display_name: &str,
+) -> Result<()> {
+    writeln!(out, "/// {display_name} {name} enum.")?;
     writeln!(
         out,
         "#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]"
@@ -169,26 +187,25 @@ fn write_struct(
     name: &str,
     fields: &[FieldInfo],
     include_http_comments: bool,
+    display_name: &str,
 ) -> Result<()> {
-    writeln!(out, "/// S3 {name}.")?;
+    writeln!(out, "/// {display_name} {name}.")?;
     writeln!(out, "#[derive(Debug, Clone, Default)]")?;
     writeln!(out, "pub struct {name} {{")?;
 
     for field in fields {
         // Write HTTP binding comment if requested
-        if include_http_comments {
-            if let Some(ref binding) = field.http_binding {
-                let comment = match binding {
-                    HttpBinding::Label => "    /// HTTP label (URI path).".to_owned(),
-                    HttpBinding::Query(q) => format!("    /// HTTP query: `{q}`."),
-                    HttpBinding::Header(h) => format!("    /// HTTP header: `{h}`."),
-                    HttpBinding::Payload => "    /// HTTP payload body.".to_owned(),
-                    HttpBinding::PrefixHeaders(p) => {
-                        format!("    /// HTTP prefix headers: `{p}`.")
-                    }
-                };
-                writeln!(out, "{comment}")?;
-            }
+        if include_http_comments && let Some(ref binding) = field.http_binding {
+            let comment = match binding {
+                HttpBinding::Label => "    /// HTTP label (URI path).".to_owned(),
+                HttpBinding::Query(q) => format!("    /// HTTP query: `{q}`."),
+                HttpBinding::Header(h) => format!("    /// HTTP header: `{h}`."),
+                HttpBinding::Payload => "    /// HTTP payload body.".to_owned(),
+                HttpBinding::PrefixHeaders(p) => {
+                    format!("    /// HTTP prefix headers: `{p}`.")
+                }
+            };
+            writeln!(out, "{comment}")?;
         }
 
         writeln!(out, "    pub {}: {},", field.rust_name, field.rust_type)?;
@@ -206,10 +223,14 @@ fn generate_io_modules(
     categories: &OperationCategories,
     structs: &BTreeMap<String, Vec<FieldInfo>>,
     resolved: &ResolvedModel,
+    config: &ServiceConfig,
 ) -> Result<()> {
+    let header = file_header(config);
+    let display_name = &config.display_name;
+
     // Generate mod.rs
     let mut mod_out = String::with_capacity(4096);
-    writeln!(mod_out, "{FILE_HEADER}")?;
+    writeln!(mod_out, "{header}")?;
     writeln!(mod_out)?;
 
     for cat_name in categories.keys() {
@@ -226,7 +247,7 @@ fn generate_io_modules(
     // Generate each category file
     for (cat_name, ops) in categories {
         let mut out = String::with_capacity(16 * 1024);
-        writeln!(out, "{FILE_HEADER}")?;
+        writeln!(out, "{header}")?;
         writeln!(out)?;
 
         // Collect which structs belong to this category (owned names for lifetime safety)
@@ -296,7 +317,7 @@ fn generate_io_modules(
 
         // Write structs
         for (name, fields) in &category_structs {
-            write_struct(&mut out, name, fields, true)?;
+            write_struct(&mut out, name, fields, true, display_name)?;
         }
 
         files.insert(format!("{kind}/{cat_name}.rs"), out);
@@ -334,8 +355,7 @@ fn collect_type_references(
         .replace("Vec<", " ")
         .replace("HashMap<", " ")
         .replace("Box<", " ")
-        .replace('>', " ")
-        .replace(',', " ");
+        .replace(['>', ','], " ");
 
     for token in cleaned.split_whitespace() {
         // Skip primitive types and known external types
@@ -368,17 +388,21 @@ fn collect_type_references(
     }
 }
 
-/// Generate operations.rs with the S3Operation enum.
-fn generate_operations() -> Result<String> {
+/// Generate operations.rs with the operation enum.
+fn generate_operations(config: &ServiceConfig) -> Result<String> {
+    let header = file_header(config);
+    let prefix = &config.rust_prefix;
+    let all_operations = &config.all_operations;
+
     let mut out = String::with_capacity(8192);
-    writeln!(out, "{FILE_HEADER}")?;
+    writeln!(out, "{header}")?;
     writeln!(out)?;
 
-    writeln!(out, "/// All supported S3 operations.")?;
+    writeln!(out, "/// All supported {prefix} operations.")?;
     writeln!(out, "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]")?;
-    writeln!(out, "pub enum S3Operation {{")?;
+    writeln!(out, "pub enum {prefix}Operation {{")?;
 
-    for op in TARGET_OPERATIONS {
+    for op in all_operations {
         writeln!(out, "    /// The {op} operation.")?;
         writeln!(out, "    {op},")?;
     }
@@ -387,12 +411,12 @@ fn generate_operations() -> Result<String> {
     writeln!(out)?;
 
     // Generate as_str()
-    writeln!(out, "impl S3Operation {{")?;
+    writeln!(out, "impl {prefix}Operation {{")?;
     writeln!(out, "    /// Returns the AWS operation name string.")?;
     writeln!(out, "    #[must_use]")?;
     writeln!(out, "    pub fn as_str(&self) -> &'static str {{")?;
     writeln!(out, "        match self {{")?;
-    for op in TARGET_OPERATIONS {
+    for op in all_operations {
         writeln!(out, "            Self::{op} => \"{op}\",")?;
     }
     writeln!(out, "        }}")?;
@@ -402,12 +426,12 @@ fn generate_operations() -> Result<String> {
     // Generate from_str
     writeln!(
         out,
-        "    /// Parse an operation name string into an S3Operation."
+        "    /// Parse an operation name string into an {prefix}Operation."
     )?;
     writeln!(out, "    #[must_use]")?;
     writeln!(out, "    pub fn from_name(name: &str) -> Option<Self> {{")?;
     writeln!(out, "        match name {{")?;
-    for op in TARGET_OPERATIONS {
+    for op in all_operations {
         writeln!(out, "            \"{op}\" => Some(Self::{op}),")?;
     }
     writeln!(out, "            _ => None,")?;
@@ -417,7 +441,7 @@ fn generate_operations() -> Result<String> {
     writeln!(out)?;
 
     // Display
-    writeln!(out, "impl std::fmt::Display for S3Operation {{")?;
+    writeln!(out, "impl std::fmt::Display for {prefix}Operation {{")?;
     writeln!(
         out,
         "    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{"
@@ -429,10 +453,13 @@ fn generate_operations() -> Result<String> {
     Ok(out)
 }
 
-/// Generate error.rs with S3ErrorCode enum and S3Error struct.
-fn generate_error() -> Result<String> {
+/// Generate error.rs with error code enum and error struct.
+fn generate_error(config: &ServiceConfig) -> Result<String> {
+    let header = file_header(config);
+    let prefix = &config.rust_prefix;
+
     let mut out = String::with_capacity(16 * 1024);
-    writeln!(out, "{FILE_HEADER}")?;
+    writeln!(out, "{header}")?;
     writeln!(out)?;
     writeln!(out, "use std::fmt;")?;
     writeln!(out)?;
@@ -595,14 +622,14 @@ fn generate_error() -> Result<String> {
         ),
     ];
 
-    // Generate S3ErrorCode enum
-    writeln!(out, "/// Well-known S3 error codes.")?;
+    // Generate error code enum
+    writeln!(out, "/// Well-known {prefix} error codes.")?;
     writeln!(
         out,
         "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]"
     )?;
     writeln!(out, "#[non_exhaustive]")?;
-    writeln!(out, "pub enum S3ErrorCode {{")?;
+    writeln!(out, "pub enum {prefix}ErrorCode {{")?;
     for (i, (code, _msg, _status)) in error_codes.iter().enumerate() {
         if i == 0 {
             writeln!(out, "    /// Default error code.")?;
@@ -616,8 +643,8 @@ fn generate_error() -> Result<String> {
     writeln!(out, "}}")?;
     writeln!(out)?;
 
-    // S3ErrorCode as_str
-    writeln!(out, "impl S3ErrorCode {{")?;
+    // Error code as_str
+    writeln!(out, "impl {prefix}ErrorCode {{")?;
     writeln!(out, "    /// Returns the error code as a string.")?;
     writeln!(out, "    #[must_use]")?;
     writeln!(out, "    pub fn as_str(&self) -> &'static str {{")?;
@@ -685,8 +712,8 @@ fn generate_error() -> Result<String> {
     writeln!(out, "}}")?;
     writeln!(out)?;
 
-    // S3ErrorCode Display
-    writeln!(out, "impl fmt::Display for S3ErrorCode {{")?;
+    // Error code Display
+    writeln!(out, "impl fmt::Display for {prefix}ErrorCode {{")?;
     writeln!(
         out,
         "    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {{"
@@ -696,12 +723,12 @@ fn generate_error() -> Result<String> {
     writeln!(out, "}}")?;
     writeln!(out)?;
 
-    // S3Error struct
-    writeln!(out, "/// An S3 error response.")?;
+    // Error struct
+    writeln!(out, "/// An {prefix} error response.")?;
     writeln!(out, "#[derive(Debug)]")?;
-    writeln!(out, "pub struct S3Error {{")?;
+    writeln!(out, "pub struct {prefix}Error {{")?;
     writeln!(out, "    /// The error code.")?;
-    writeln!(out, "    pub code: S3ErrorCode,")?;
+    writeln!(out, "    pub code: {prefix}ErrorCode,")?;
     writeln!(out, "    /// A human-readable error message.")?;
     writeln!(out, "    pub message: String,")?;
     writeln!(out, "    /// The resource that caused the error.")?;
@@ -718,22 +745,22 @@ fn generate_error() -> Result<String> {
     writeln!(out, "}}")?;
     writeln!(out)?;
 
-    // S3Error Display
-    writeln!(out, "impl fmt::Display for S3Error {{")?;
+    // Error Display
+    writeln!(out, "impl fmt::Display for {prefix}Error {{")?;
     writeln!(
         out,
         "    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {{"
     )?;
     writeln!(
         out,
-        "        write!(f, \"S3Error({{}}): {{}}\", self.code, self.message)"
+        "        write!(f, \"{prefix}Error({{}}): {{}}\", self.code, self.message)"
     )?;
     writeln!(out, "    }}")?;
     writeln!(out, "}}")?;
     writeln!(out)?;
 
-    // S3Error std::error::Error
-    writeln!(out, "impl std::error::Error for S3Error {{")?;
+    // Error std::error::Error
+    writeln!(out, "impl std::error::Error for {prefix}Error {{")?;
     writeln!(
         out,
         "    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {{"
@@ -746,11 +773,14 @@ fn generate_error() -> Result<String> {
     writeln!(out, "}}")?;
     writeln!(out)?;
 
-    // S3Error constructors
-    writeln!(out, "impl S3Error {{")?;
-    writeln!(out, "    /// Create a new S3Error from an error code.")?;
+    // Error constructors
+    writeln!(out, "impl {prefix}Error {{")?;
+    writeln!(
+        out,
+        "    /// Create a new {prefix}Error from an error code."
+    )?;
     writeln!(out, "    #[must_use]")?;
-    writeln!(out, "    pub fn new(code: S3ErrorCode) -> Self {{")?;
+    writeln!(out, "    pub fn new(code: {prefix}ErrorCode) -> Self {{")?;
     writeln!(out, "        let status_code = code.default_status_code();")?;
     writeln!(
         out,
@@ -767,11 +797,14 @@ fn generate_error() -> Result<String> {
     writeln!(out, "    }}")?;
     writeln!(out)?;
 
-    writeln!(out, "    /// Create a new S3Error with a custom message.")?;
+    writeln!(
+        out,
+        "    /// Create a new {prefix}Error with a custom message."
+    )?;
     writeln!(out, "    #[must_use]")?;
     writeln!(
         out,
-        "    pub fn with_message(code: S3ErrorCode, message: impl Into<String>) -> Self {{"
+        "    pub fn with_message(code: {prefix}ErrorCode, message: impl Into<String>) -> Self {{"
     )?;
     writeln!(out, "        Self {{")?;
     writeln!(out, "            status_code: code.default_status_code(),")?;
@@ -862,12 +895,12 @@ fn generate_error() -> Result<String> {
         if *param == "message" {
             writeln!(
                 out,
-                "        Self::with_message(S3ErrorCode::{code}, {param})"
+                "        Self::with_message({prefix}ErrorCode::{code}, {param})"
             )?;
         } else {
             writeln!(
                 out,
-                "        Self::new(S3ErrorCode::{code}).with_resource({param})"
+                "        Self::new({prefix}ErrorCode::{code}).with_resource({param})"
             )?;
         }
         writeln!(out, "    }}")?;
@@ -878,7 +911,7 @@ fn generate_error() -> Result<String> {
     writeln!(out)?;
 
     // s3_error! macro
-    writeln!(out, "/// Create an S3Error from an error code.")?;
+    writeln!(out, "/// Create an {prefix}Error from an error code.")?;
     writeln!(out, "///")?;
     writeln!(out, "/// # Examples")?;
     writeln!(out, "///")?;
@@ -917,10 +950,13 @@ fn generate_error() -> Result<String> {
     Ok(out)
 }
 
-/// Generate request.rs with S3Request, StreamingBlob, and Credentials.
-fn generate_request() -> Result<String> {
+/// Generate request.rs with request wrapper, StreamingBlob, and Credentials.
+fn generate_request(config: &ServiceConfig) -> Result<String> {
+    let header = file_header(config);
+    let prefix = &config.rust_prefix;
+
     let mut out = String::with_capacity(4096);
-    writeln!(out, "{FILE_HEADER}")?;
+    writeln!(out, "{header}")?;
     writeln!(out)?;
 
     // StreamingBlob
@@ -1033,10 +1069,10 @@ fn generate_request() -> Result<String> {
     // S3Request
     writeln!(
         out,
-        "/// An S3 request wrapping an input type with credentials and headers."
+        "/// An {prefix} request wrapping an input type with credentials and headers."
     )?;
     writeln!(out, "#[derive(Debug, Clone)]")?;
-    writeln!(out, "pub struct S3Request<T> {{")?;
+    writeln!(out, "pub struct {prefix}Request<T> {{")?;
     writeln!(out, "    /// The input payload.")?;
     writeln!(out, "    pub input: T,")?;
     writeln!(out, "    /// Optional credentials for the request.")?;
@@ -1046,7 +1082,7 @@ fn generate_request() -> Result<String> {
     writeln!(out, "}}")?;
     writeln!(out)?;
 
-    writeln!(out, "impl<T: Default> Default for S3Request<T> {{")?;
+    writeln!(out, "impl<T: Default> Default for {prefix}Request<T> {{")?;
     writeln!(out, "    fn default() -> Self {{")?;
     writeln!(out, "        Self {{")?;
     writeln!(out, "            input: T::default(),")?;
@@ -1057,8 +1093,11 @@ fn generate_request() -> Result<String> {
     writeln!(out, "}}")?;
     writeln!(out)?;
 
-    writeln!(out, "impl<T> S3Request<T> {{")?;
-    writeln!(out, "    /// Create a new S3Request with the given input.")?;
+    writeln!(out, "impl<T> {prefix}Request<T> {{")?;
+    writeln!(
+        out,
+        "    /// Create a new {prefix}Request with the given input."
+    )?;
     writeln!(out, "    #[must_use]")?;
     writeln!(out, "    pub fn new(input: T) -> Self {{")?;
     writeln!(out, "        Self {{")?;
@@ -1083,9 +1122,9 @@ fn generate_request() -> Result<String> {
     writeln!(out, "    /// Map the input type to a different type.")?;
     writeln!(
         out,
-        "    pub fn map_input<U>(self, f: impl FnOnce(T) -> U) -> S3Request<U> {{"
+        "    pub fn map_input<U>(self, f: impl FnOnce(T) -> U) -> {prefix}Request<U> {{"
     )?;
-    writeln!(out, "        S3Request {{")?;
+    writeln!(out, "        {prefix}Request {{")?;
     writeln!(out, "            input: f(self.input),")?;
     writeln!(out, "            credentials: self.credentials,")?;
     writeln!(out, "            headers: self.headers,")?;
@@ -1097,9 +1136,12 @@ fn generate_request() -> Result<String> {
 }
 
 /// Generate lib.rs that re-exports all modules.
-fn generate_lib(resolved: &ResolvedModel) -> Result<String> {
+fn generate_lib(resolved: &ResolvedModel, config: &ServiceConfig) -> Result<String> {
+    let header = file_header(config);
+    let prefix = &config.rust_prefix;
+
     let mut out = String::with_capacity(2048);
-    writeln!(out, "{FILE_HEADER}")?;
+    writeln!(out, "{header}")?;
     writeln!(out, "#![allow(clippy::too_many_lines)]")?;
     writeln!(out, "#![allow(clippy::struct_excessive_bools)]")?;
     writeln!(out, "#![allow(missing_docs)]")?;
@@ -1109,17 +1151,21 @@ fn generate_lib(resolved: &ResolvedModel) -> Result<String> {
     writeln!(out, "pub mod input;")?;
     writeln!(out, "pub mod operations;")?;
     writeln!(out, "pub mod output;")?;
-    writeln!(out, "pub mod request;")?;
+    if config.emit_request_wrapper {
+        writeln!(out, "pub mod request;")?;
+    }
     writeln!(out, "pub mod types;")?;
     writeln!(out)?;
 
     // Re-exports
-    writeln!(out, "pub use error::{{S3Error, S3ErrorCode}};")?;
-    writeln!(out, "pub use operations::S3Operation;")?;
-    writeln!(
-        out,
-        "pub use request::{{Credentials, S3Request, StreamingBlob}};"
-    )?;
+    writeln!(out, "pub use error::{{{prefix}Error, {prefix}ErrorCode}};")?;
+    writeln!(out, "pub use operations::{prefix}Operation;")?;
+    if config.emit_request_wrapper {
+        writeln!(
+            out,
+            "pub use request::{{Credentials, {prefix}Request, StreamingBlob}};"
+        )?;
+    }
     writeln!(out)?;
 
     // Count generated items

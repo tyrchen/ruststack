@@ -1,9 +1,10 @@
-//! S3 model code generator.
+//! Universal Smithy model code generator.
 //!
-//! Reads the AWS S3 Smithy JSON AST model and generates Rust source files
-//! for the `ruststack-s3-model` crate.
+//! Reads an AWS Smithy JSON AST model and generates Rust source files
+//! based on a TOML service configuration.
 
 mod codegen;
+mod config;
 mod model;
 mod shapes;
 
@@ -12,15 +13,50 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use crate::config::{ServiceConfig, ServiceConfigFile};
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
-    let model_path = args
-        .get(1)
-        .map_or_else(|| PathBuf::from("smithy-model/s3.json"), PathBuf::from);
+    // Parse named arguments: --config, --model, --output
+    let config_path = find_arg(&args, "--config");
+    let model_path_arg = find_arg(&args, "--model");
+    let output_dir_arg = find_arg(&args, "--output");
 
-    let output_dir = args.get(2).map_or_else(
-        || PathBuf::from("../crates/ruststack-s3-model/src"),
+    // Determine config path, with backward-compatible fallback
+    let config_path = config_path.map_or_else(
+        || {
+            // Legacy positional args: codegen [model_path] [output_dir]
+            // Default to S3 config
+            PathBuf::from("services/s3.toml")
+        },
+        PathBuf::from,
+    );
+
+    // Read and parse the TOML config
+    let config_toml = fs::read_to_string(&config_path)
+        .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
+    let config_file: ServiceConfigFile =
+        toml::from_str(&config_toml).context("Failed to parse TOML config")?;
+    let service_config = ServiceConfig::from_file(config_file);
+
+    // Determine model and output paths (named args > legacy positional > defaults)
+    let model_path = model_path_arg.map_or_else(
+        || {
+            args.get(1)
+                .filter(|a| !a.starts_with("--"))
+                .map_or_else(|| PathBuf::from("smithy-model/s3.json"), PathBuf::from)
+        },
+        PathBuf::from,
+    );
+
+    let output_dir = output_dir_arg.map_or_else(
+        || {
+            args.get(2).filter(|a| !a.starts_with("--")).map_or_else(
+                || PathBuf::from("../crates/ruststack-s3-model/src"),
+                PathBuf::from,
+            )
+        },
         PathBuf::from,
     );
 
@@ -37,8 +73,8 @@ fn main() -> Result<()> {
     eprintln!("Parsed model: {} shapes", smithy_model.shapes.len());
 
     // Resolve shapes and types.
-    let resolved =
-        shapes::resolve_model(&smithy_model).context("Failed to resolve model shapes")?;
+    let resolved = shapes::resolve_model(&smithy_model, &service_config)
+        .context("Failed to resolve model shapes")?;
 
     eprintln!(
         "Resolved: {} operations, {} enums, {} shared structs, {} input structs, {} output structs",
@@ -50,7 +86,8 @@ fn main() -> Result<()> {
     );
 
     // Generate code.
-    let files = codegen::generate_all(&resolved).context("Failed to generate code")?;
+    let files =
+        codegen::generate_all(&resolved, &service_config).context("Failed to generate code")?;
 
     // Write output files.
     for (rel_path, content) in &files {
@@ -64,6 +101,14 @@ fn main() -> Result<()> {
     eprintln!("Code generation complete. {} files written.", files.len());
 
     Ok(())
+}
+
+/// Find a named argument value (e.g., `--config path/to/file`).
+fn find_arg(args: &[String], flag: &str) -> Option<String> {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
 }
 
 /// Ensure the parent directory of a path exists.

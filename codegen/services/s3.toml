@@ -1,0 +1,81 @@
+[service]
+name = "s3"
+display_name = "S3"
+rust_prefix = "S3"
+namespace = "com.amazonaws.s3"
+protocol = "restXml"
+
+[protocol]
+serde_rename = "none"
+emit_http_bindings = true
+emit_serde_derives = false
+emit_request_wrapper = true
+
+[operations]
+# Ordered list of all operations (determines enum variant order)
+all = [
+    # Bucket CRUD
+    "CreateBucket", "DeleteBucket", "HeadBucket", "ListBuckets", "GetBucketLocation",
+    # Bucket config
+    "GetBucketVersioning", "PutBucketVersioning",
+    "GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
+    "GetBucketCors", "PutBucketCors", "DeleteBucketCors",
+    "GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle",
+    "GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
+    "GetBucketTagging", "PutBucketTagging", "DeleteBucketTagging",
+    "GetBucketNotificationConfiguration", "PutBucketNotificationConfiguration",
+    "GetBucketLogging", "PutBucketLogging",
+    "GetPublicAccessBlock", "PutPublicAccessBlock", "DeletePublicAccessBlock",
+    "GetBucketOwnershipControls", "PutBucketOwnershipControls", "DeleteBucketOwnershipControls",
+    "GetObjectLockConfiguration", "PutObjectLockConfiguration",
+    "GetBucketAccelerateConfiguration", "PutBucketAccelerateConfiguration",
+    "GetBucketRequestPayment", "PutBucketRequestPayment",
+    "GetBucketWebsite", "PutBucketWebsite", "DeleteBucketWebsite",
+    "GetBucketAcl", "PutBucketAcl", "GetBucketPolicyStatus",
+    # Object CRUD
+    "PutObject", "GetObject", "HeadObject", "DeleteObject", "DeleteObjects", "CopyObject",
+    # Object config
+    "GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging",
+    "GetObjectAcl", "PutObjectAcl",
+    "GetObjectRetention", "PutObjectRetention",
+    "GetObjectLegalHold", "PutObjectLegalHold",
+    "GetObjectAttributes",
+    # Multipart
+    "CreateMultipartUpload", "UploadPart", "UploadPartCopy",
+    "CompleteMultipartUpload", "AbortMultipartUpload",
+    "ListParts", "ListMultipartUploads",
+    # List
+    "ListObjects", "ListObjectsV2", "ListObjectVersions",
+]
+
+# Categories for file organization (determines which structs go in which files)
+[operations.categories]
+bucket = ["CreateBucket", "DeleteBucket", "HeadBucket", "ListBuckets", "GetBucketLocation"]
+object = ["PutObject", "GetObject", "HeadObject", "DeleteObject", "DeleteObjects", "CopyObject"]
+multipart = ["CreateMultipartUpload", "UploadPart", "UploadPartCopy", "CompleteMultipartUpload", "AbortMultipartUpload", "ListParts", "ListMultipartUploads"]
+list = ["ListObjects", "ListObjectsV2", "ListObjectVersions"]
+config = [
+    "GetBucketVersioning", "PutBucketVersioning",
+    "GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
+    "GetBucketCors", "PutBucketCors", "DeleteBucketCors",
+    "GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle",
+    "GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
+    "GetBucketTagging", "PutBucketTagging", "DeleteBucketTagging",
+    "GetBucketNotificationConfiguration", "PutBucketNotificationConfiguration",
+    "GetBucketLogging", "PutBucketLogging",
+    "GetPublicAccessBlock", "PutPublicAccessBlock", "DeletePublicAccessBlock",
+    "GetBucketOwnershipControls", "PutBucketOwnershipControls", "DeleteBucketOwnershipControls",
+    "GetObjectLockConfiguration", "PutObjectLockConfiguration",
+    "GetBucketAccelerateConfiguration", "PutBucketAccelerateConfiguration",
+    "GetBucketRequestPayment", "PutBucketRequestPayment",
+    "GetBucketWebsite", "PutBucketWebsite", "DeleteBucketWebsite",
+    "GetBucketAcl", "PutBucketAcl", "GetBucketPolicyStatus",
+    "GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging",
+    "GetObjectAcl", "PutObjectAcl",
+    "GetObjectRetention", "PutObjectRetention",
+    "GetObjectLegalHold", "PutObjectLegalHold",
+    "GetObjectAttributes",
+]
+
+[output]
+file_layout = "categorized"
