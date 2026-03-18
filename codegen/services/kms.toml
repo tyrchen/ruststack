@@ -1,0 +1,42 @@
+[service]
+name = "kms"
+display_name = "KMS"
+rust_prefix = "Kms"
+namespace = "com.amazonaws.kms"
+protocol = "awsJson1_1"
+
+[protocol]
+serde_rename = "PascalCase"
+emit_serde_derives = true
+target_prefix = "TrentService"
+
+[operations]
+phase0 = [
+    "CreateKey", "DescribeKey", "ListKeys",
+    "EnableKey", "DisableKey",
+    "ScheduleKeyDeletion", "CancelKeyDeletion",
+    "UpdateKeyDescription",
+    "Encrypt", "Decrypt", "ReEncrypt",
+    "GenerateDataKey", "GenerateDataKeyWithoutPlaintext",
+    "GenerateDataKeyPair", "GenerateDataKeyPairWithoutPlaintext",
+    "Sign", "Verify",
+    "GetPublicKey",
+    "GenerateMac", "VerifyMac",
+    "GenerateRandom",
+]
+phase1 = [
+    "CreateAlias", "DeleteAlias", "ListAliases", "UpdateAlias",
+    "TagResource", "UntagResource", "ListResourceTags",
+    "GetKeyPolicy", "PutKeyPolicy", "ListKeyPolicies",
+]
+phase2 = [
+    "CreateGrant", "ListGrants", "RetireGrant", "RevokeGrant", "ListRetirableGrants",
+    "EnableKeyRotation", "DisableKeyRotation", "GetKeyRotationStatus",
+]
+
+[errors.custom]
+MissingAction = { status = 400, message = "Missing required header: X-Amz-Target" }
+InvalidAction = { status = 400, message = "Operation is not supported" }
+
+[output]
+file_layout = "flat"

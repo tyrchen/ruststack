@@ -57,6 +57,22 @@ codegen-lambda:
 	@cd codegen && cargo run -- --config services/lambda.toml --model smithy-model/lambda.json --output ../crates/ruststack-lambda-model/src
 	@cargo +nightly fmt -p ruststack-lambda-model
 
+codegen-kms:
+	@cd codegen && cargo run -- --config services/kms.toml --model smithy-model/kms.json --output ../crates/ruststack-kms-model/src
+	@cargo +nightly fmt -p ruststack-kms-model
+
+codegen-kinesis:
+	@cd codegen && cargo run -- --config services/kinesis.toml --model smithy-model/kinesis.json --output ../crates/ruststack-kinesis-model/src
+	@cargo +nightly fmt -p ruststack-kinesis-model
+
+codegen-logs:
+	@cd codegen && cargo run -- --config services/logs.toml --model smithy-model/logs.json --output ../crates/ruststack-logs-model/src
+	@cargo +nightly fmt -p ruststack-logs-model
+
+codegen-secretsmanager:
+	@cd codegen && cargo run -- --config services/secretsmanager.toml --model smithy-model/secretsmanager.json --output ../crates/ruststack-secretsmanager-model/src
+	@cargo +nightly fmt -p ruststack-secretsmanager-model
+
 codegen: codegen-s3
 
 SMITHY_MODELS_REPO = https://raw.githubusercontent.com/aws/api-models-aws/main
@@ -68,6 +84,10 @@ codegen-download:
 	@curl -sL $(SMITHY_MODELS_REPO)/models/sqs/service/2012-11-05/sqs-2012-11-05.json -o codegen/smithy-model/sqs.json
 	@curl -sL $(SMITHY_MODELS_REPO)/models/sns/service/2010-03-31/sns-2010-03-31.json -o codegen/smithy-model/sns.json
 	@curl -sL $(SMITHY_MODELS_REPO)/models/lambda/service/2015-03-31/lambda-2015-03-31.json -o codegen/smithy-model/lambda.json
+	@curl -sL $(SMITHY_MODELS_REPO)/models/kms/service/2014-11-01/kms-2014-11-01.json -o codegen/smithy-model/kms.json
+	@curl -sL $(SMITHY_MODELS_REPO)/models/kinesis/service/2013-12-02/kinesis-2013-12-02.json -o codegen/smithy-model/kinesis.json
+	@curl -sL $(SMITHY_MODELS_REPO)/models/cloudwatch-logs/service/2014-03-28/cloudwatch-logs-2014-03-28.json -o codegen/smithy-model/logs.json
+	@curl -sL $(SMITHY_MODELS_REPO)/models/secrets-manager/service/2017-10-17/secrets-manager-2017-10-17.json -o codegen/smithy-model/secretsmanager.json
 	@echo "Done."
 
 integration:
@@ -185,7 +205,8 @@ update-submodule:
 	@git submodule update --init --recursive --remote
 
 .PHONY: build check test fmt clippy audit deny run release update-submodule integration \
-	codegen codegen-s3 codegen-ssm codegen-events codegen-dynamodb codegen-sqs codegen-sns codegen-lambda codegen-download \
+	codegen codegen-s3 codegen-ssm codegen-events codegen-dynamodb codegen-sqs codegen-sns codegen-lambda \
+	codegen-kms codegen-kinesis codegen-logs codegen-secretsmanager codegen-download \
 	mint mint-build mint-start mint-run mint-stop \
 	alternator alternator-setup alternator-run alternator-stop \
 	sqs-compat sqs-compat-setup sqs-compat-run \

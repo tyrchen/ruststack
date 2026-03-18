@@ -309,133 +309,32 @@ This is verified in LocalStack's test suite (`test_subscribe_to_shard_with_at_ti
 
 ## 6. Smithy Code Generation Strategy
 
-### 6.1 Approach: Extend Existing Codegen
+### 6.1 Universal Codegen
 
-The codegen tool currently supports S3. Kinesis uses `awsJson1.1`, the same protocol as SSM. The existing JSON codegen path is directly reusable. The only changes are a new service configuration and the Kinesis Smithy model.
+The `ruststack-kinesis-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
 
-### 6.2 Changes to Codegen
+**Smithy model:** `codegen/smithy-model/kinesis.json` (500KB, namespace `com.amazonaws.kinesis`, 29 operations)
+**Service config:** `codegen/services/kinesis.toml`
+**Generate:** `make codegen-kinesis`
 
-```
-codegen/
-+-- src/
-|   +-- main.rs                   # Add --service kinesis CLI option
-|   +-- shapes.rs                 # Add Kinesis namespace prefix
-+-- smithy-model/
-|   +-- s3.json
-|   +-- kinesis.json              <-- NEW: from aws/api-models-aws
-```
+### 6.2 Generated Output
 
-### 6.3 Kinesis Namespace and Target
+The codegen produces 6 files in `crates/ruststack-kinesis-model/src/`:
 
-- **Smithy namespace**: `com.amazonaws.kinesis#`
-- **X-Amz-Target prefix**: `Kinesis_20131202`
-- **Content-Type**: `application/x-amz-json-1.1`
+| File | Contents |
+|------|----------|
+| `lib.rs` | Module declarations and re-exports |
+| `types.rs` | Shared types (enums and structs) with serde derives |
+| `operations.rs` | `KinesisOperation` enum with `as_str()`, `from_name()`, phase methods |
+| `error.rs` | `KinesisErrorCode` enum + `KinesisError` struct + `kinesis_error!` macro |
+| `input.rs` | All input structs with `#[serde(rename_all = "PascalCase")]` |
+| `output.rs` | All output structs with serde derives |
 
-### 6.4 Key Differences from SSM/DynamoDB Codegen
+### 6.3 Service-Specific Notes
 
-| Aspect | DynamoDB | SSM | Kinesis |
-|--------|---------|-----|---------|
-| Namespace | `com.amazonaws.dynamodb#` | `com.amazonaws.ssm#` | `com.amazonaws.kinesis#` |
-| Target prefix | `DynamoDB_20120810` | `AmazonSSM` | `Kinesis_20131202` |
-| Operations | 66 | 13 | ~30 (targeting ~25 for MVP) |
-| Special types | `AttributeValue` (hand-written) | None | `Blob` as `Bytes` for Data field |
-| Protocol | awsJson1.0 | awsJson1.1 | awsJson1.1 + CBOR |
-| Serde | `#[serde(rename_all = "PascalCase")]` | Same | Same |
+Kinesis uses `awsJson1.1` but also supports CBOR wire format. The codegen generates JSON serde types; CBOR support needs to be handled in the HTTP layer. The `Data` field in records is a blob (base64-encoded in JSON, raw bytes in CBOR) generated as `bytes::Bytes`.
 
-Kinesis types are straightforward structs and enums. The `Data` field in records is a blob (base64-encoded in JSON, raw bytes in CBOR). The codegen generates it as `bytes::Bytes`.
-
-### 6.5 Smithy Model Acquisition
-
-The Kinesis Smithy model is available from:
-
-1. **aws/api-models-aws**: `models/kinesis/service/2013-12-02/kinesis-2013-12-02.json`
-2. **smithy-rs**: Bundled in the smithy-rs codegen
-
-We download the Kinesis Smithy JSON AST and place it at `codegen/smithy-model/kinesis.json`.
-
-### 6.6 Generated Types Example
-
-```rust
-/// Kinesis PutRecordInput.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct PutRecordInput {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stream_name: Option<String>,
-    #[serde(rename = "StreamARN")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stream_arn: Option<String>,
-    /// Base64-encoded in JSON, raw bytes in CBOR.
-    pub data: Bytes,
-    pub partition_key: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub explicit_hash_key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sequence_number_for_ordering: Option<String>,
-}
-
-/// Kinesis PutRecordOutput.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct PutRecordOutput {
-    pub shard_id: String,
-    pub sequence_number: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub encryption_type: Option<String>,
-}
-
-/// Kinesis Record (returned by GetRecords).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct Record {
-    pub sequence_number: String,
-    pub approximate_arrival_timestamp: f64,
-    pub data: Bytes,
-    pub partition_key: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub encryption_type: Option<String>,
-}
-
-/// Shard description.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct Shard {
-    pub shard_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_shard_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub adjacent_parent_shard_id: Option<String>,
-    pub hash_key_range: HashKeyRange,
-    pub sequence_number_range: SequenceNumberRange,
-}
-
-/// Hash key range for a shard.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct HashKeyRange {
-    pub starting_hash_key: String,
-    pub ending_hash_key: String,
-}
-
-/// Sequence number range for a shard.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct SequenceNumberRange {
-    pub starting_sequence_number: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ending_sequence_number: Option<String>,
-}
-```
-
-### 6.7 Makefile Integration
-
-```makefile
-codegen-kinesis:
-    @cd codegen && cargo run -- smithy-model/kinesis.json ../crates/ruststack-kinesis-model/src
-    @cargo +nightly fmt -p ruststack-kinesis-model
-
-codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-kinesis
-```
+See [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design.md) for full codegen architecture details.
 
 ---
 

@@ -265,285 +265,32 @@ CloudWatch Logs was introduced in 2014 with `awsJson1.1` from the start. There i
 
 ## 6. Smithy Code Generation Strategy
 
-### 6.1 Approach: Extract Core Subset from Full CW Logs Model
+### 6.1 Universal Codegen
 
-The full CloudWatch Logs Smithy model defines 152+ operations. We generate types for only the ~35 operations targeted for implementation plus their transitive type dependencies.
+The `ruststack-logs-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
 
-### 6.2 Smithy Model Acquisition
+**Smithy model:** `codegen/smithy-model/logs.json` (780KB, namespace `com.amazonaws.cloudwatchlogs`, 43 operations)
+**Service config:** `codegen/services/logs.toml`
+**Generate:** `make codegen-logs`
 
-The CW Logs Smithy model is available from:
-- **Repository:** `https://github.com/aws/api-models-aws`
-- **Path:** `models/cloudwatch-logs/service/2014-03-28/cloudwatch-logs-2014-03-28.json`
+### 6.2 Generated Output
 
-Download and place at `codegen/smithy-model/logs.json`. The codegen tool resolves transitive type dependencies from the target operations, generating only the types actually needed.
+The codegen produces 6 files in `crates/ruststack-logs-model/src/`:
 
-### 6.3 CW Logs Service Configuration
+| File | Contents |
+|------|----------|
+| `lib.rs` | Module declarations and re-exports |
+| `types.rs` | Shared types (enums and structs) with serde derives |
+| `operations.rs` | `LogsOperation` enum with `as_str()`, `from_name()`, phase methods |
+| `error.rs` | `LogsErrorCode` enum + `LogsError` struct + `logs_error!` macro |
+| `input.rs` | All input structs with `#[serde(rename_all = "camelCase")]` |
+| `output.rs` | All output structs with serde derives |
 
-```rust
-const LOGS_OPERATIONS: &[&str] = &[
-    // Log Group operations
-    "CreateLogGroup",
-    "DeleteLogGroup",
-    "DescribeLogGroups",
-    "ListLogGroups",
-    // Log Stream operations
-    "CreateLogStream",
-    "DeleteLogStream",
-    "DescribeLogStreams",
-    // Log Event operations
-    "PutLogEvents",
-    "GetLogEvents",
-    "FilterLogEvents",
-    // Retention Policy operations
-    "PutRetentionPolicy",
-    "DeleteRetentionPolicy",
-    // Metric Filter operations
-    "PutMetricFilter",
-    "DeleteMetricFilter",
-    "DescribeMetricFilters",
-    "TestMetricFilter",
-    // Subscription Filter operations
-    "PutSubscriptionFilter",
-    "DeleteSubscriptionFilter",
-    "DescribeSubscriptionFilters",
-    // Resource Policy operations
-    "PutResourcePolicy",
-    "DeleteResourcePolicy",
-    "DescribeResourcePolicies",
-    // Destination operations
-    "PutDestination",
-    "PutDestinationPolicy",
-    "DeleteDestination",
-    "DescribeDestinations",
-    // Tag operations
-    "TagLogGroup",
-    "UntagLogGroup",
-    "ListTagsLogGroup",
-    "TagResource",
-    "UntagResource",
-    "ListTagsForResource",
-    // Insights Query operations
-    "StartQuery",
-    "StopQuery",
-    "GetQueryResults",
-    "DescribeQueries",
-    "PutQueryDefinition",
-    "DeleteQueryDefinition",
-    "DescribeQueryDefinitions",
-    // KMS operations
-    "AssociateKmsKey",
-    "DisassociateKmsKey",
-];
-```
+### 6.3 Service-Specific Notes
 
-The codegen `ServiceConfig` trait is extended with a CW Logs implementation:
+CloudWatch Logs uses `camelCase` JSON field naming, which the codegen handles via `serde_rename = "camelCase"` in the service TOML config. This differs from most other services which use `PascalCase`.
 
-```rust
-pub struct LogsServiceConfig;
-
-impl ServiceConfig for LogsServiceConfig {
-    fn namespace(&self) -> &str { "com.amazonaws.cloudwatchlogs#" }
-    fn service_name(&self) -> &str { "Logs" }
-    fn target_operations(&self) -> &[&str] { LOGS_OPERATIONS }
-    fn protocol(&self) -> Protocol { Protocol::AwsJson1_1 }
-    fn target_prefix(&self) -> &str { "Logs_20140328" }
-    // ...
-}
-```
-
-### 6.4 Key Differences from SSM Codegen
-
-| Aspect | SSM | CW Logs |
-|--------|-----|---------|
-| Namespace | `com.amazonaws.ssm#` | `com.amazonaws.cloudwatchlogs#` |
-| Target prefix | `AmazonSSM` | `Logs_20140328` |
-| Operations | 13 | ~40 |
-| Special types | None | None (all types are straightforward) |
-| Serde | `#[serde(rename_all = "camelCase")]` | `#[serde(rename_all = "camelCase")]` |
-
-CW Logs uses `camelCase` for JSON field names (matching the Smithy model member names), same as SSM.
-
-### 6.5 Generated Types Estimate
-
-From the ~40 operations, the codegen will produce roughly:
-
-- ~40 input structs (e.g., `CreateLogGroupInput`, `PutLogEventsInput`)
-- ~40 output structs (e.g., `DescribeLogGroupsOutput`, `GetLogEventsOutput`)
-- ~30 shared types (`LogGroup`, `LogStream`, `OutputLogEvent`, `InputLogEvent`, `MetricFilter`, `MetricTransformation`, `SubscriptionFilter`, `ResourcePolicy`, `Destination`, `QueryInfo`, `QueryDefinition`, `FilteredLogEvent`, `SearchedLogStream`, `RejectedLogEventsInfo`, etc.)
-- 1 operation enum (`LogsOperation` with ~40 variants)
-- ~15 error types
-
-Total: roughly 2,000-3,000 lines of generated code.
-
-### 6.6 Generated Types Example
-
-```rust
-/// CreateLogGroup input.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateLogGroupInput {
-    pub log_group_name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kms_key_id: Option<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub tags: HashMap<String, String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub log_group_class: Option<LogGroupClass>,
-}
-
-/// PutLogEvents input.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PutLogEventsInput {
-    pub log_group_name: String,
-    pub log_stream_name: String,
-    pub log_events: Vec<InputLogEvent>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sequence_token: Option<String>,
-}
-
-/// A single log event to be ingested.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InputLogEvent {
-    pub timestamp: i64,
-    pub message: String,
-}
-
-/// PutLogEvents output.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PutLogEventsOutput {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_sequence_token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rejected_log_events_info: Option<RejectedLogEventsInfo>,
-}
-
-/// Information about rejected log events.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RejectedLogEventsInfo {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub too_new_log_event_start_index: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub too_old_log_event_end_index: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expired_log_event_end_index: Option<i32>,
-}
-
-/// GetLogEvents output.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetLogEventsOutput {
-    #[serde(default)]
-    pub events: Vec<OutputLogEvent>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_forward_token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_backward_token: Option<String>,
-}
-
-/// A log event returned by GetLogEvents.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OutputLogEvent {
-    pub timestamp: i64,
-    pub message: String,
-    pub ingestion_time: i64,
-}
-
-/// FilterLogEvents output.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilterLogEventsOutput {
-    #[serde(default)]
-    pub events: Vec<FilteredLogEvent>,
-    #[serde(default)]
-    pub searched_log_streams: Vec<SearchedLogStream>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_token: Option<String>,
-}
-
-/// A log event returned by FilterLogEvents.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilteredLogEvent {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub log_stream_name: Option<String>,
-    pub timestamp: i64,
-    pub message: String,
-    pub ingestion_time: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub event_id: Option<String>,
-}
-
-/// DescribeLogGroups output.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DescribeLogGroupsOutput {
-    #[serde(default)]
-    pub log_groups: Vec<LogGroup>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_token: Option<String>,
-}
-
-/// A log group.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LogGroup {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub log_group_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub creation_time: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retention_in_days: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metric_filter_count: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub arn: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stored_bytes: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kms_key_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data_protection_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub log_group_class: Option<LogGroupClass>,
-}
-
-/// A log stream.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LogStream {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub log_stream_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub creation_time: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub first_event_timestamp: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_event_timestamp: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_ingestion_time: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upload_sequence_token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub arn: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stored_bytes: Option<i64>,
-}
-```
-
-### 6.7 Makefile Integration
-
-```makefile
-codegen-logs:
-	@cd codegen && cargo run -- --service logs
-	@cargo +nightly fmt -p ruststack-logs-model
-
-codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-logs
-```
+See [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design.md) for full codegen architecture details.
 
 ---
 

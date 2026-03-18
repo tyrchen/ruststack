@@ -264,137 +264,32 @@ mod base64_blob {
 
 ## 6. Smithy Code Generation Strategy
 
-### 6.1 Approach: Full KMS Model
+### 6.1 Universal Codegen
 
-Unlike SSM (where we extracted 13 of 146 operations), KMS is a focused service where most operations are relevant. We generate types for ~35 operations covering the core API surface.
+The `ruststack-kms-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
 
-### 6.2 KMS Service Config
+**Smithy model:** `codegen/smithy-model/kms.json` (764KB, namespace `com.amazonaws.kms`, 39 operations)
+**Service config:** `codegen/services/kms.toml`
+**Generate:** `make codegen-kms`
 
-```rust
-const KMS_OPERATIONS: &[&str] = &[
-    // Key management
-    "CreateKey",
-    "DescribeKey",
-    "ListKeys",
-    "EnableKey",
-    "DisableKey",
-    "ScheduleKeyDeletion",
-    "CancelKeyDeletion",
-    "UpdateKeyDescription",
-    // Symmetric encryption
-    "Encrypt",
-    "Decrypt",
-    "ReEncrypt",
-    // Envelope encryption
-    "GenerateDataKey",
-    "GenerateDataKeyWithoutPlaintext",
-    "GenerateDataKeyPair",
-    "GenerateDataKeyPairWithoutPlaintext",
-    // Signing
-    "Sign",
-    "Verify",
-    // Public key
-    "GetPublicKey",
-    // HMAC
-    "GenerateMac",
-    "VerifyMac",
-    // Aliases
-    "CreateAlias",
-    "DeleteAlias",
-    "ListAliases",
-    "UpdateAlias",
-    // Tags
-    "TagResource",
-    "UntagResource",
-    "ListResourceTags",
-    // Key policies
-    "GetKeyPolicy",
-    "PutKeyPolicy",
-    "ListKeyPolicies",
-    // Grants
-    "CreateGrant",
-    "ListGrants",
-    "RetireGrant",
-    "RevokeGrant",
-    "ListRetirableGrants",
-    // Key rotation
-    "EnableKeyRotation",
-    "DisableKeyRotation",
-    "GetKeyRotationStatus",
-    // Random
-    "GenerateRandom",
-];
-```
+### 6.2 Generated Output
 
-The codegen `ServiceConfig` is extended with a KMS implementation:
+The codegen produces 6 files in `crates/ruststack-kms-model/src/`:
 
-```rust
-pub struct KmsServiceConfig;
+| File | Contents |
+|------|----------|
+| `lib.rs` | Module declarations and re-exports |
+| `types.rs` | Shared types (enums and structs) with serde derives |
+| `operations.rs` | `KmsOperation` enum with `as_str()`, `from_name()`, phase methods |
+| `error.rs` | `KmsErrorCode` enum + `KmsError` struct + `kms_error!` macro |
+| `input.rs` | All input structs with `#[serde(rename_all = "PascalCase")]` |
+| `output.rs` | All output structs with serde derives |
 
-impl ServiceConfig for KmsServiceConfig {
-    fn namespace(&self) -> &str { "com.amazonaws.kms#" }
-    fn service_name(&self) -> &str { "KMS" }
-    fn target_operations(&self) -> &[&str] { KMS_OPERATIONS }
-    fn protocol(&self) -> Protocol { Protocol::AwsJson1_1 }
-    fn target_prefix(&self) -> &str { "TrentService" }
-}
-```
+### 6.3 Service-Specific Notes
 
-### 6.3 Smithy Model Acquisition
+KMS uses blob types extensively (binary ciphertext/plaintext). The codegen generates these as `bytes::Bytes`. Custom base64 serde handling may need an overlay file if serde is used for direct JSON serialization of blob fields.
 
-The KMS Smithy model is available at:
-- **Repository:** `https://github.com/aws/aws-models`
-- **Path:** `kms/smithy/model.json`
-
-Download and place at `codegen/smithy-model/kms.json`. The codegen tool resolves transitive type dependencies from the target operations, generating only the types actually needed.
-
-### 6.4 Generated Types Estimate
-
-From the ~35 operations, the codegen will produce roughly:
-
-- 35 input structs (e.g., `CreateKeyInput`, `EncryptInput`, `SignInput`)
-- 35 output structs (e.g., `CreateKeyOutput`, `EncryptOutput`, `SignOutput`)
-- ~30 shared types (`KeyMetadata`, `AliasListEntry`, `GrantListEntry`, `Tag`, `KeySpec`, `KeyUsageType`, `KeyState`, `EncryptionAlgorithmSpec`, `SigningAlgorithmSpec`, `MacAlgorithmSpec`, `DataKeySpec`, `DataKeyPairSpec`, `GrantOperation`, `GrantConstraints`, `MessageType`, `OriginType`, `ExpirationModelType`, etc.)
-- 1 operation enum (`KmsOperation` with ~35 variants)
-- ~20 error types
-
-Total: roughly 2,500-3,500 lines of generated code.
-
-### 6.5 Special Codegen Requirements: Blob Fields
-
-KMS is the first service in RustStack that uses blob types extensively. The codegen must handle `blob` shapes by generating `Vec<u8>` fields with base64 serde annotations:
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct EncryptOutput {
-    /// The encrypted ciphertext blob.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "option_base64_blob"
-    )]
-    pub ciphertext_blob: Option<Vec<u8>>,
-
-    /// The key ID of the KMS key used.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key_id: Option<String>,
-
-    /// The encryption algorithm used.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub encryption_algorithm: Option<EncryptionAlgorithmSpec>,
-}
-```
-
-### 6.6 Makefile Integration
-
-```makefile
-codegen-kms:
-	@cd codegen && cargo run -- --service kms
-	@cargo +nightly fmt -p ruststack-kms-model
-
-codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-kms
-```
+See [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design.md) for full codegen architecture details.
 
 ---
 

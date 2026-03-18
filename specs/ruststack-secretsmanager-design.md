@@ -283,84 +283,32 @@ Content-Type: application/x-amz-json-1.1
 
 ## 6. Smithy Code Generation Strategy
 
-### 6.1 Approach: Full Service Generation
+### 6.1 Universal Codegen
 
-Unlike SSM (where we extracted a 13-operation subset from 146 operations), Secrets Manager has only 23 operations total. We generate types for all 23 operations plus their transitive type dependencies.
+The `ruststack-secretsmanager-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
 
-### 6.2 Secrets Manager Service Config
+**Smithy model:** `codegen/smithy-model/secretsmanager.json` (269KB, namespace `com.amazonaws.secretsmanager`, 23 operations)
+**Service config:** `codegen/services/secretsmanager.toml`
+**Generate:** `make codegen-secretsmanager`
 
-```rust
-const SECRETSMANAGER_OPERATIONS: &[&str] = &[
-    "BatchGetSecretValue",
-    "CancelRotateSecret",
-    "CreateSecret",
-    "DeleteResourcePolicy",
-    "DeleteSecret",
-    "DescribeSecret",
-    "GetRandomPassword",
-    "GetResourcePolicy",
-    "GetSecretValue",
-    "ListSecrets",
-    "ListSecretVersionIds",
-    "PutResourcePolicy",
-    "PutSecretValue",
-    "RemoveRegionsFromReplication",
-    "ReplicateSecretToRegions",
-    "RestoreSecret",
-    "RotateSecret",
-    "StopReplicationToReplica",
-    "TagResource",
-    "UntagResource",
-    "UpdateSecret",
-    "UpdateSecretVersionStage",
-    "ValidateResourcePolicy",
-];
-```
+### 6.2 Generated Output
 
-The codegen `ServiceConfig` trait is extended with a Secrets Manager implementation:
+The codegen produces 6 files in `crates/ruststack-secretsmanager-model/src/`:
 
-```rust
-pub struct SecretsManagerServiceConfig;
+| File | Contents |
+|------|----------|
+| `lib.rs` | Module declarations and re-exports |
+| `types.rs` | Shared types (enums and structs) with serde derives |
+| `operations.rs` | `SecretsManagerOperation` enum with `as_str()`, `from_name()`, phase methods |
+| `error.rs` | `SecretsManagerErrorCode` enum + `SecretsManagerError` struct + `secretsmanager_error!` macro |
+| `input.rs` | All input structs with `#[serde(rename_all = "PascalCase")]` |
+| `output.rs` | All output structs with serde derives |
 
-impl ServiceConfig for SecretsManagerServiceConfig {
-    fn namespace(&self) -> &str { "com.amazonaws.secretsmanager#" }
-    fn service_name(&self) -> &str { "SecretsManager" }
-    fn target_operations(&self) -> &[&str] { SECRETSMANAGER_OPERATIONS }
-    fn protocol(&self) -> Protocol { Protocol::AwsJson1_1 }
-    // ...
-}
-```
+### 6.3 Service-Specific Notes
 
-### 6.3 Smithy Model Acquisition
+No special considerations; Secrets Manager is a straightforward `awsJson1.1` service with `PascalCase` JSON field naming.
 
-The Secrets Manager Smithy model is available at:
-- **Repository:** `https://github.com/aws/api-models-aws`
-- **Path:** `models/secretsmanager/service/2017-10-17/secretsmanager-2017-10-17.json`
-
-Download and place at `codegen/smithy-model/secretsmanager.json`. The codegen tool resolves transitive type dependencies from the 23 target operations, generating only the types actually needed.
-
-### 6.4 Generated Types Estimate
-
-From the 23 operations, the codegen will produce roughly:
-
-- 23 input structs (e.g., `CreateSecretInput`, `GetSecretValueInput`)
-- 23 output structs (e.g., `CreateSecretOutput`, `GetSecretValueOutput`)
-- ~20 shared types (`Tag`, `Filter`, `SecretListEntry`, `SecretVersionsListEntry`, `RotationRulesType`, `ReplicaRegionType`, `ReplicationStatusType`, etc.)
-- 1 operation enum (`SecretsManagerOperation` with 23 variants)
-- ~15 error types
-- ~5 enums (`FilterNameStringType`, `SortOrderType`, `StatusType`, etc.)
-
-Total: roughly 1,500-2,000 lines of generated code.
-
-### 6.5 Makefile Integration
-
-```makefile
-codegen-secretsmanager:
-	@cd codegen && cargo run -- --service secretsmanager
-	@cargo +nightly fmt -p ruststack-secretsmanager-model
-
-codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-secretsmanager
-```
+See [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design.md) for full codegen architecture details.
 
 ---
 
