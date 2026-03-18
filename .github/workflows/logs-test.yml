@@ -70,9 +70,9 @@ jobs:
 
           GROUP=$(aws logs describe-log-groups \
             --log-group-name-prefix /ci/test-group \
-            --query "logGroups[?logGroupName=='/ci/test-group'].logGroupName" \
+            --query "logGroups[?logGroupName=='/ci/test-group'].logGroupName | [0]" \
             --output text)
-          [ -z "$GROUP" ]
+          [ "$GROUP" = "None" ] || [ -z "$GROUP" ]
 
       # ── LogStream CRUD ─────────────────────────────────────────────
       - name: "LogStream: create, describe, delete"
