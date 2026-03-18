@@ -512,11 +512,11 @@ mod tests {
             .await
             .unwrap();
 
-        // SQS should have 0 messages (short poll)
+        // SQS should have 0 messages (short poll, 0 wait)
         let recv = sqs
             .receive_message()
             .queue_url(&queue_url)
-            .wait_time_seconds(1)
+            .wait_time_seconds(0)
             .send()
             .await
             .unwrap();

@@ -148,6 +148,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-cloudwatchlogs"
+version = "1.120.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de7e25b065067d86f66667ca1a81dbfadd7a1efcd79cc3357dfd634539ad4bff"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-eventstream",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 0.2.12",
+ "http 1.4.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-dynamodb"
 version = "1.107.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2241,6 +2266,7 @@ dependencies = [
  "anyhow",
  "aws-config",
  "aws-credential-types",
+ "aws-sdk-cloudwatchlogs",
  "aws-sdk-dynamodb",
  "aws-sdk-eventbridge",
  "aws-sdk-lambda",
@@ -2308,6 +2334,58 @@ name = "ruststack-lambda-model"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ruststack-logs-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "regex",
+ "ruststack-auth",
+ "ruststack-core",
+ "ruststack-logs-http",
+ "ruststack-logs-model",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ruststack-logs-http"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "ruststack-auth",
+ "ruststack-logs-model",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ruststack-logs-model"
+version = "0.1.0"
+dependencies = [
  "http 1.4.0",
  "serde",
  "serde_json",
@@ -2424,6 +2502,8 @@ dependencies = [
  "ruststack-events-http",
  "ruststack-lambda-core",
  "ruststack-lambda-http",
+ "ruststack-logs-core",
+ "ruststack-logs-http",
  "ruststack-s3-core",
  "ruststack-s3-http",
  "ruststack-s3-model",
