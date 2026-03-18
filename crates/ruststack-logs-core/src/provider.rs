@@ -334,22 +334,25 @@ impl RustStackLogs {
 
         groups.sort_by(|a, b| a.log_group_name.cmp(&b.log_group_name));
 
-        // Pagination
-        let start = input
-            .next_token
-            .as_ref()
-            .and_then(|t| t.parse::<usize>().ok())
-            .unwrap_or(0);
+        // Name-based cursor pagination (stable across concurrent modifications).
+        if let Some(ref cursor) = input.next_token {
+            groups.retain(|g| {
+                g.log_group_name
+                    .as_ref()
+                    .is_some_and(|n| n.as_str() > cursor.as_str())
+            });
+        }
 
-        let page: Vec<LogGroup> = groups.into_iter().skip(start).take(page_size).collect();
-        let next_token = if page.len() == page_size {
-            Some((start + page_size).to_string())
+        let has_more = groups.len() > page_size;
+        groups.truncate(page_size);
+        let next_token = if has_more {
+            groups.last().and_then(|g| g.log_group_name.clone())
         } else {
             None
         };
 
         Ok(DescribeLogGroupsResponse {
-            log_groups: page,
+            log_groups: groups,
             next_token,
         })
     }
@@ -498,21 +501,25 @@ impl RustStackLogs {
             }
         }
 
-        let start = input
-            .next_token
-            .as_ref()
-            .and_then(|t| t.parse::<usize>().ok())
-            .unwrap_or(0);
+        // Name-based cursor pagination.
+        if let Some(ref cursor) = input.next_token {
+            streams.retain(|s| {
+                s.log_stream_name
+                    .as_ref()
+                    .is_some_and(|n| n.as_str() > cursor.as_str())
+            });
+        }
 
-        let page: Vec<LogStream> = streams.into_iter().skip(start).take(page_size).collect();
-        let next_token = if page.len() == page_size {
-            Some((start + page_size).to_string())
+        let has_more = streams.len() > page_size;
+        streams.truncate(page_size);
+        let next_token = if has_more {
+            streams.last().and_then(|s| s.log_stream_name.clone())
         } else {
             None
         };
 
         Ok(DescribeLogStreamsResponse {
-            log_streams: page,
+            log_streams: streams,
             next_token,
         })
     }
@@ -602,6 +609,9 @@ impl RustStackLogs {
             });
         }
 
+        // Re-sort to maintain time order across multiple PutLogEvents calls.
+        stream.events.sort_by_key(|e| e.timestamp);
+
         // Update stream metadata
         if let Some(first) = sorted_events.first() {
             if stream.first_event_timestamp.is_none()
@@ -673,48 +683,75 @@ impl RustStackLogs {
         let end_time = input.end_time.unwrap_or(i64::MAX);
         let start_from_head = input.start_from_head.unwrap_or(false);
 
-        let filtered: Vec<&StoredLogEvent> = stream
+        let filtered: Vec<(usize, &StoredLogEvent)> = stream
             .events
             .iter()
-            .filter(|e| e.timestamp >= start_time && e.timestamp <= end_time)
+            .enumerate()
+            .filter(|(_, e)| e.timestamp >= start_time && e.timestamp < end_time)
             .collect();
 
-        let events: Vec<OutputLogEvent> = if start_from_head {
-            filtered
-                .iter()
-                .take(limit)
-                .map(|e| OutputLogEvent {
-                    timestamp: Some(e.timestamp),
-                    message: Some(e.message.clone()),
-                    ingestion_time: Some(e.ingestion_time),
-                })
-                .collect()
-        } else {
-            // From the tail (most recent first)
-            let skip = if filtered.len() > limit {
-                filtered.len() - limit
+        // Decode cursor from next_token if provided (format: "f/{index}" or "b/{index}")
+        let cursor = input.next_token.as_ref().and_then(|t| {
+            let parts: Vec<&str> = t.splitn(2, '/').collect();
+            if parts.len() == 2 {
+                parts[1].parse::<usize>().ok().map(|idx| (parts[0], idx))
             } else {
-                0
-            };
-            filtered
-                .iter()
-                .skip(skip)
-                .map(|e| OutputLogEvent {
-                    timestamp: Some(e.timestamp),
-                    message: Some(e.message.clone()),
-                    ingestion_time: Some(e.ingestion_time),
-                })
-                .collect()
-        };
+                None
+            }
+        });
 
-        // Tokens for forward/backward pagination
-        let forward_token = format!("f/{}", uuid::Uuid::new_v4());
-        let backward_token = format!("b/{}", uuid::Uuid::new_v4());
+        let (events, forward_idx, backward_idx) =
+            if start_from_head || cursor.as_ref().is_some_and(|(dir, _)| *dir == "f") {
+                let start_idx = cursor.map_or(0, |(_, idx)| idx);
+                let page: Vec<OutputLogEvent> = filtered
+                    .iter()
+                    .filter(|(orig_idx, _)| *orig_idx >= start_idx)
+                    .take(limit)
+                    .map(|(_, e)| OutputLogEvent {
+                        timestamp: Some(e.timestamp),
+                        message: Some(e.message.clone()),
+                        ingestion_time: Some(e.ingestion_time),
+                    })
+                    .collect();
+                let fwd = filtered
+                    .iter()
+                    .filter(|(orig_idx, _)| *orig_idx >= start_idx)
+                    .nth(limit)
+                    .map(|(idx, _)| *idx);
+                let bwd = if start_idx > 0 { Some(start_idx) } else { None };
+                (page, fwd, bwd)
+            } else {
+                let end_idx = cursor.map_or(filtered.len(), |(_, idx)| {
+                    filtered
+                        .iter()
+                        .position(|(orig, _)| *orig >= idx)
+                        .unwrap_or(filtered.len())
+                });
+                let start_pos = end_idx.saturating_sub(limit);
+                let page: Vec<OutputLogEvent> = filtered[start_pos..end_idx]
+                    .iter()
+                    .map(|(_, e)| OutputLogEvent {
+                        timestamp: Some(e.timestamp),
+                        message: Some(e.message.clone()),
+                        ingestion_time: Some(e.ingestion_time),
+                    })
+                    .collect();
+                let fwd = filtered.get(end_idx).map(|(idx, _)| *idx);
+                let bwd = if start_pos > 0 {
+                    Some(filtered[start_pos].0)
+                } else {
+                    None
+                };
+                (page, fwd, bwd)
+            };
+
+        let forward_token = forward_idx.map(|idx| format!("f/{idx}"));
+        let backward_token = backward_idx.map(|idx| format!("b/{idx}"));
 
         Ok(GetLogEventsResponse {
             events,
-            next_forward_token: Some(forward_token),
-            next_backward_token: Some(backward_token),
+            next_forward_token: forward_token,
+            next_backward_token: backward_token,
         })
     }
 
@@ -748,6 +785,7 @@ impl RustStackLogs {
         let mut events: Vec<FilteredLogEvent> = Vec::new();
         let mut searched_streams: Vec<SearchedLogStream> = Vec::new();
 
+        // Collect ALL matching events from all streams (no per-stream break).
         for (stream_name, stream) in &group.streams {
             // Filter by specific stream names or prefix
             if !input.log_stream_names.is_empty() && !input.log_stream_names.contains(stream_name) {
@@ -759,9 +797,9 @@ impl RustStackLogs {
                 }
             }
 
-            let mut searched_completely = true;
             for event in &stream.events {
-                if event.timestamp < start_time || event.timestamp > end_time {
+                // end_time is exclusive per AWS docs
+                if event.timestamp < start_time || event.timestamp >= end_time {
                     continue;
                 }
                 // Empty pattern matches all
@@ -776,22 +814,25 @@ impl RustStackLogs {
                     ingestion_time: Some(event.ingestion_time),
                     event_id: Some(uuid::Uuid::new_v4().to_string()),
                 });
-
-                if events.len() >= limit {
-                    searched_completely = false;
-                    break;
-                }
             }
 
             searched_streams.push(SearchedLogStream {
                 log_stream_name: Some(stream_name.clone()),
-                searched_completely: Some(searched_completely),
+                searched_completely: Some(true),
             });
         }
 
-        // Sort by timestamp
+        // Sort globally by timestamp, then truncate to limit.
         events.sort_by_key(|e| e.timestamp);
+        let has_more = events.len() > limit;
         events.truncate(limit);
+
+        // If we had to truncate, mark streams whose events were excluded as not fully searched.
+        if has_more {
+            for ss in &mut searched_streams {
+                ss.searched_completely = Some(false);
+            }
+        }
 
         Ok(FilterLogEventsResponse {
             events,
