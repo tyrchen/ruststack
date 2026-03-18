@@ -135,10 +135,20 @@ sqs-compat-run:
 		ERRORS=$$(grep -oP '\d+ error' /tmp/sqs-compat-output.txt || echo "0 errors"); \
 		echo "SQS compat results: $$PASSED, $$FAILED, $$ERRORS"
 
+test-events-unit:
+	@cargo test -p ruststack-events-model -p ruststack-events-core -p ruststack-events-http
+
+test-events-patterns:
+	@cargo test -p ruststack-events-core -- pattern
+
+test-events-integration:
+	@cargo test -p ruststack-integration -- events --ignored
+
 update-submodule:
 	@git submodule update --init --recursive --remote
 
 .PHONY: build check test fmt clippy audit deny run release update-submodule codegen integration \
 	mint mint-build mint-start mint-run mint-stop \
 	alternator alternator-setup alternator-run alternator-stop \
-	sqs-compat sqs-compat-setup sqs-compat-run
+	sqs-compat sqs-compat-setup sqs-compat-run \
+	test-events-unit test-events-patterns test-events-integration
