@@ -91,7 +91,7 @@ pub struct DescribeEventBusOutput {
 #[serde(rename_all = "PascalCase")]
 pub struct ListEventBusesOutput {
     /// The event buses.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub event_buses: Vec<EventBus>,
 
     /// The token for the next page of results, if any.
@@ -179,7 +179,7 @@ pub struct DescribeRuleOutput {
 #[serde(rename_all = "PascalCase")]
 pub struct ListRulesOutput {
     /// The rules that match the request.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub rules: Vec<Rule>,
 
     /// The token for the next page of results, if any.
@@ -217,7 +217,7 @@ pub struct PutTargetsOutput {
     pub failed_entry_count: i32,
 
     /// The failed entries.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub failed_entries: Vec<PutTargetsResultEntry>,
 }
 
@@ -233,7 +233,7 @@ pub struct RemoveTargetsOutput {
     pub failed_entry_count: i32,
 
     /// The failed entries.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub failed_entries: Vec<RemoveTargetsResultEntry>,
 }
 
@@ -246,7 +246,7 @@ pub struct RemoveTargetsOutput {
 #[serde(rename_all = "PascalCase")]
 pub struct ListTargetsByRuleOutput {
     /// The targets assigned to the rule.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub targets: Vec<Target>,
 
     /// The token for the next page of results, if any.
@@ -266,7 +266,7 @@ pub struct PutEventsOutput {
     pub failed_entry_count: i32,
 
     /// The result entries.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub entries: Vec<PutEventsResultEntry>,
 }
 
@@ -313,7 +313,7 @@ pub struct UntagResourceOutput {}
 #[serde(rename_all = "PascalCase")]
 pub struct ListTagsForResourceOutput {
     /// The tags associated with the resource.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub tags: Vec<Tag>,
 }
 
@@ -344,7 +344,7 @@ pub struct RemovePermissionOutput {}
 #[serde(rename_all = "PascalCase")]
 pub struct ListRuleNamesByTargetOutput {
     /// The names of the rules that reference the specified target.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub rule_names: Vec<String>,
 
     /// The token for the next page of results, if any.
