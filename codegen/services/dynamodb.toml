@@ -1,0 +1,33 @@
+[service]
+name = "dynamodb"
+display_name = "DynamoDB"
+rust_prefix = "DynamoDB"
+namespace = "com.amazonaws.dynamodb"
+protocol = "awsJson1_0"
+
+[protocol]
+serde_rename = "PascalCase"
+emit_serde_derives = true
+
+[operations]
+phase0 = [
+    # Table management
+    "CreateTable", "DeleteTable", "UpdateTable", "DescribeTable", "ListTables",
+    # Item CRUD
+    "PutItem", "GetItem", "UpdateItem", "DeleteItem",
+    # Query & Scan
+    "Query", "Scan",
+    # Batch operations
+    "BatchGetItem", "BatchWriteItem",
+]
+
+[errors.custom]
+MissingAction = { status = 400, message = "Missing required header: X-Amz-Target" }
+InvalidAction = { status = 400, message = "Operation is not supported" }
+SerializationException = { status = 400, message = "Serialization error" }
+AccessDeniedException = { status = 400, message = "Access denied" }
+UnrecognizedClientException = { status = 400, message = "Unknown operation" }
+ValidationException = { status = 400, message = "Validation error" }
+
+[output]
+file_layout = "flat"

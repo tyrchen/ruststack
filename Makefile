@@ -29,9 +29,46 @@ release:
 	@git push origin master
 	@cargo release push --execute
 
-codegen:
-	@cd codegen && cargo run
+codegen-s3:
+	@cd codegen && cargo run -- --config services/s3.toml --model smithy-model/s3.json --output ../crates/ruststack-s3-model/src
 	@cargo +nightly fmt -p ruststack-s3-model
+
+codegen-ssm:
+	@cd codegen && cargo run -- --config services/ssm.toml --model smithy-model/ssm.json --output ../crates/ruststack-ssm-model/src
+	@cargo +nightly fmt -p ruststack-ssm-model
+
+codegen-events:
+	@cd codegen && cargo run -- --config services/events.toml --model smithy-model/events.json --output ../crates/ruststack-events-model/src
+	@cargo +nightly fmt -p ruststack-events-model
+
+codegen-dynamodb:
+	@cd codegen && cargo run -- --config services/dynamodb.toml --model smithy-model/dynamodb.json --output ../crates/ruststack-dynamodb-model/src
+	@cargo +nightly fmt -p ruststack-dynamodb-model
+
+codegen-sqs:
+	@cd codegen && cargo run -- --config services/sqs.toml --model smithy-model/sqs.json --output ../crates/ruststack-sqs-model/src
+	@cargo +nightly fmt -p ruststack-sqs-model
+
+codegen-sns:
+	@cd codegen && cargo run -- --config services/sns.toml --model smithy-model/sns.json --output ../crates/ruststack-sns-model/src
+	@cargo +nightly fmt -p ruststack-sns-model
+
+codegen-lambda:
+	@cd codegen && cargo run -- --config services/lambda.toml --model smithy-model/lambda.json --output ../crates/ruststack-lambda-model/src
+	@cargo +nightly fmt -p ruststack-lambda-model
+
+codegen: codegen-s3
+
+SMITHY_MODELS_REPO = https://raw.githubusercontent.com/aws/api-models-aws/main
+codegen-download:
+	@echo "Downloading Smithy models from aws/api-models-aws..."
+	@curl -sL $(SMITHY_MODELS_REPO)/models/ssm/service/2014-11-06/ssm-2014-11-06.json -o codegen/smithy-model/ssm.json
+	@curl -sL $(SMITHY_MODELS_REPO)/models/eventbridge/service/2015-10-07/eventbridge-2015-10-07.json -o codegen/smithy-model/events.json
+	@curl -sL $(SMITHY_MODELS_REPO)/models/dynamodb/service/2012-08-10/dynamodb-2012-08-10.json -o codegen/smithy-model/dynamodb.json
+	@curl -sL $(SMITHY_MODELS_REPO)/models/sqs/service/2012-11-05/sqs-2012-11-05.json -o codegen/smithy-model/sqs.json
+	@curl -sL $(SMITHY_MODELS_REPO)/models/sns/service/2010-03-31/sns-2010-03-31.json -o codegen/smithy-model/sns.json
+	@curl -sL $(SMITHY_MODELS_REPO)/models/lambda/service/2015-03-31/lambda-2015-03-31.json -o codegen/smithy-model/lambda.json
+	@echo "Done."
 
 integration:
 	@cargo test -p ruststack-integration -- --ignored
@@ -147,7 +184,8 @@ test-events-integration:
 update-submodule:
 	@git submodule update --init --recursive --remote
 
-.PHONY: build check test fmt clippy audit deny run release update-submodule codegen integration \
+.PHONY: build check test fmt clippy audit deny run release update-submodule integration \
+	codegen codegen-s3 codegen-ssm codegen-events codegen-dynamodb codegen-sqs codegen-sns codegen-lambda codegen-download \
 	mint mint-build mint-start mint-run mint-stop \
 	alternator alternator-setup alternator-run alternator-stop \
 	sqs-compat sqs-compat-setup sqs-compat-run \

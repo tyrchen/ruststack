@@ -1,0 +1,43 @@
+[service]
+name = "lambda"
+display_name = "Lambda"
+rust_prefix = "Lambda"
+namespace = "com.amazonaws.lambda"
+protocol = "restJson1"
+
+[protocol]
+serde_rename = "camelCase"
+emit_serde_derives = true
+emit_http_bindings = true
+
+[operations]
+phase0 = [
+    # Function CRUD + Invoke
+    "CreateFunction", "GetFunction", "GetFunctionConfiguration",
+    "UpdateFunctionCode", "UpdateFunctionConfiguration",
+    "DeleteFunction", "ListFunctions",
+    "Invoke",
+]
+phase1 = [
+    # Versions + Aliases
+    "PublishVersion", "ListVersionsByFunction",
+    "CreateAlias", "GetAlias", "UpdateAlias", "DeleteAlias", "ListAliases",
+]
+phase2 = [
+    # Permissions + Tags + Account
+    "AddPermission", "RemovePermission", "GetPolicy",
+    "TagResource", "UntagResource", "ListTags",
+    "GetAccountSettings",
+]
+phase3 = [
+    # Function URLs
+    "CreateFunctionUrlConfig", "GetFunctionUrlConfig",
+    "UpdateFunctionUrlConfig", "DeleteFunctionUrlConfig",
+    "ListFunctionUrlConfigs",
+]
+
+[errors.custom]
+UnknownOperation = { status = 500, message = "Unknown operation" }
+
+[output]
+file_layout = "flat"

@@ -1,0 +1,47 @@
+[service]
+name = "sqs"
+display_name = "SQS"
+rust_prefix = "Sqs"
+namespace = "com.amazonaws.sqs"
+protocol = "awsJson1_0"
+aws_query_compatible = true
+
+[protocol]
+serde_rename = "PascalCase"
+emit_serde_derives = true
+
+[operations]
+phase0 = [
+    # Queue management
+    "CreateQueue", "DeleteQueue", "GetQueueUrl", "ListQueues",
+    "GetQueueAttributes", "SetQueueAttributes", "PurgeQueue",
+    # Message operations
+    "SendMessage", "SendMessageBatch", "ReceiveMessage",
+    "DeleteMessage", "DeleteMessageBatch",
+    "ChangeMessageVisibility", "ChangeMessageVisibilityBatch",
+]
+phase1 = [
+    # Tags
+    "TagQueue", "UntagQueue", "ListQueueTags",
+    # Permissions
+    "AddPermission", "RemovePermission",
+]
+phase2 = [
+    # Dead-letter queue
+    "ListDeadLetterSourceQueues",
+    "StartMessageMoveTask", "CancelMessageMoveTask", "ListMessageMoveTasks",
+]
+
+[errors.custom]
+NonExistentQueue = { status = 400, error_type = "AWS.SimpleQueueService.NonExistentQueue", message = "Queue does not exist" }
+InvalidParameterValue = { status = 400, message = "Invalid parameter value" }
+MissingParameter = { status = 400, message = "Required parameter missing" }
+InvalidSecurity = { status = 400, message = "Invalid security token or credentials" }
+MissingAction = { status = 400, message = "Missing action header" }
+InternalError = { status = 500, message = "Internal server error" }
+
+[overlay]
+preserve = ["types_custom.rs"]
+
+[output]
+file_layout = "flat"

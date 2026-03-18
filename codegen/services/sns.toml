@@ -1,0 +1,62 @@
+[service]
+name = "sns"
+display_name = "SNS"
+rust_prefix = "Sns"
+namespace = "com.amazonaws.sns"
+protocol = "awsQuery"
+
+[protocol]
+serde_rename = "PascalCase"
+emit_serde_derives = true
+
+[operations]
+phase0 = [
+    # Topic management
+    "CreateTopic", "DeleteTopic", "GetTopicAttributes", "SetTopicAttributes", "ListTopics",
+    # Subscription management
+    "Subscribe", "Unsubscribe", "ConfirmSubscription",
+    "GetSubscriptionAttributes", "SetSubscriptionAttributes",
+    "ListSubscriptions", "ListSubscriptionsByTopic",
+    # Publishing
+    "Publish", "PublishBatch",
+]
+phase1 = [
+    # Permissions
+    "AddPermission", "RemovePermission",
+    # Tagging
+    "TagResource", "UntagResource", "ListTagsForResource",
+]
+phase2 = [
+    # Platform applications
+    "CreatePlatformApplication", "DeletePlatformApplication",
+    "GetPlatformApplicationAttributes", "SetPlatformApplicationAttributes",
+    "ListPlatformApplications",
+    "CreatePlatformEndpoint", "DeleteEndpoint",
+    "GetEndpointAttributes", "SetEndpointAttributes",
+    "ListEndpointsByPlatformApplication",
+]
+phase3 = [
+    # SMS
+    "CheckIfPhoneNumberIsOptedOut",
+    "GetSMSAttributes", "SetSMSAttributes",
+    "ListPhoneNumbersOptedOut", "OptInPhoneNumber",
+    "GetSMSSandboxAccountStatus",
+    "CreateSMSSandboxPhoneNumber", "DeleteSMSSandboxPhoneNumber",
+    "VerifySMSSandboxPhoneNumber", "ListSMSSandboxPhoneNumbers",
+    "ListOriginationNumbers",
+    # Data protection
+    "GetDataProtectionPolicy", "PutDataProtectionPolicy",
+]
+
+[errors.custom]
+NotFound = { status = 404, message = "Resource not found" }
+InvalidParameter = { status = 400, message = "Invalid parameter" }
+InvalidParameterValue = { status = 400, message = "Invalid parameter value" }
+AuthorizationError = { status = 403, message = "Authorization error" }
+InternalError = { status = 500, message = "Internal server error" }
+Throttled = { status = 429, message = "Request was throttled" }
+InvalidSecurity = { status = 403, message = "Invalid security token or credentials" }
+MissingAction = { status = 400, message = "Missing action parameter" }
+
+[output]
+file_layout = "flat"
