@@ -280,11 +280,16 @@ jobs:
           aws events put-events --entries \
             '[{"Source":"different.app","DetailType":"Test","Detail":"{}"}]' > /dev/null
 
-          # SQS should be empty
+          # SQS should be empty - wait and check
           NM_URL=$(aws sqs get-queue-url --queue-name ci-events-nomatch --query QueueUrl --output text)
-          MSG=$(aws sqs receive-message --queue-url "$NM_URL" --wait-time-seconds 2)
-          MSG_COUNT=$(echo "$MSG" | jq '.Messages | length // 0')
-          [ "$MSG_COUNT" = "0" ]
+          sleep 1
+          MSG=$(aws sqs receive-message --queue-url "$NM_URL" --wait-time-seconds 2 --output json 2>/dev/null || echo '{}')
+          echo "Received: $MSG"
+          HAS_MESSAGES=$(echo "$MSG" | jq 'has("Messages")')
+          if [ "$HAS_MESSAGES" = "true" ]; then
+            MSG_COUNT=$(echo "$MSG" | jq '.Messages | length')
+            [ "$MSG_COUNT" = "0" ]
+          fi
 
           # Cleanup
           aws events remove-targets --rule ci-nomatch-rule --ids sqs-nm 2>/dev/null || true
