@@ -139,6 +139,17 @@ use ruststack_secretsmanager_core::provider::RustStackSecretsManager;
 #[cfg(feature = "secretsmanager")]
 use ruststack_secretsmanager_http::service::{SecretsManagerHttpConfig, SecretsManagerHttpService};
 
+#[cfg(feature = "ses")]
+use ruststack_ses_core::config::SesConfig;
+#[cfg(feature = "ses")]
+use ruststack_ses_core::handler::RustStackSesHandler;
+#[cfg(feature = "ses")]
+use ruststack_ses_core::provider::RustStackSes;
+#[cfg(feature = "ses")]
+use ruststack_ses_http::service::{SesHttpConfig, SesHttpService};
+#[cfg(feature = "ses")]
+use ruststack_ses_http::v2::SesV2HttpService;
+
 #[cfg(feature = "s3")]
 use ruststack_s3_core::{RustStackS3, S3Config};
 #[cfg(feature = "s3")]
@@ -303,6 +314,18 @@ fn build_secretsmanager_http_config(config: &SecretsManagerConfig) -> SecretsMan
     }
 }
 
+/// Build the [`SesHttpConfig`] from the [`SesConfig`].
+#[cfg(feature = "ses")]
+fn build_ses_http_config(config: &SesConfig) -> SesHttpConfig {
+    let credential_provider = build_credential_provider();
+
+    SesHttpConfig {
+        skip_signature_validation: config.skip_signature_validation,
+        region: config.default_region.clone(),
+        credential_provider,
+    }
+}
+
 /// Build a credential provider from `ACCESS_KEY` / `SECRET_KEY` environment
 /// variables (used by MinIO Mint and other test harnesses).
 #[cfg(any(
@@ -316,7 +339,8 @@ fn build_secretsmanager_http_config(config: &SecretsManagerConfig) -> SecretsMan
     feature = "logs",
     feature = "kms",
     feature = "kinesis",
-    feature = "secretsmanager"
+    feature = "secretsmanager",
+    feature = "ses"
 ))]
 fn build_credential_provider() -> Option<Arc<dyn ruststack_auth::CredentialProvider>> {
     use ruststack_auth::StaticCredentialProvider;
@@ -399,6 +423,7 @@ fn is_compiled_in(name: &str) -> bool {
         || (name == "kms" && cfg!(feature = "kms"))
         || (name == "kinesis" && cfg!(feature = "kinesis"))
         || (name == "secretsmanager" && cfg!(feature = "secretsmanager"))
+        || (name == "ses" && cfg!(feature = "ses"))
 }
 
 /// Parse the `SERVICES` environment variable into a list of service names.
@@ -449,6 +474,9 @@ fn parse_services_value(raw: &str) -> Vec<String> {
         }
         if cfg!(feature = "secretsmanager") {
             all.push("secretsmanager".to_string());
+        }
+        if cfg!(feature = "ses") {
+            all.push("ses".to_string());
         }
         all
     } else {
@@ -558,6 +586,26 @@ fn build_services(is_enabled: impl Fn(&str) -> bool) -> Vec<Box<dyn ServiceRoute
         let ssm_http_config = build_ssm_http_config(&ssm_config);
         let ssm_service = SsmHttpService::new(Arc::new(ssm_handler), ssm_http_config);
         services.push(Box::new(service::SsmServiceRouter::new(ssm_service)));
+    }
+
+    // ----- SES (register BEFORE SNS: both use form-urlencoded POST) -----
+    #[cfg(feature = "ses")]
+    if is_enabled("ses") {
+        let ses_config = SesConfig::from_env();
+        info!(
+            ses_skip_signature_validation = ses_config.skip_signature_validation,
+            ses_require_verified_identity = ses_config.require_verified_identity,
+            "initializing SES service",
+        );
+        let ses_provider = RustStackSes::new(ses_config.clone());
+        let ses_handler = Arc::new(RustStackSesHandler::new(Arc::new(ses_provider)));
+        let ses_http_config = build_ses_http_config(&ses_config);
+        let ses_v1_service = SesHttpService::new(Arc::clone(&ses_handler), ses_http_config);
+        let ses_v2_service = SesV2HttpService::new(Arc::clone(&ses_handler));
+        services.push(Box::new(service::SesServiceRouter::new(
+            ses_v1_service,
+            ses_v2_service,
+        )));
     }
 
     // ----- SNS (register before S3: S3 is the catch-all) -----
@@ -821,6 +869,7 @@ mod tests {
             is_compiled_in("secretsmanager"),
             cfg!(feature = "secretsmanager")
         );
+        assert_eq!(is_compiled_in("ses"), cfg!(feature = "ses"));
     }
 
     #[cfg(feature = "s3")]

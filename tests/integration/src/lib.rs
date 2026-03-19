@@ -333,6 +333,23 @@ pub fn test_secret_name(prefix: &str) -> String {
     format!("test/{prefix}/{id}")
 }
 
+/// Create a configured SES client pointing at the local server.
+#[must_use]
+pub fn ses_client() -> aws_sdk_ses::Client {
+    init_tracing();
+
+    let creds = Credentials::new("test", "test", None, None, "integration-test");
+
+    let config = aws_sdk_ses::config::Builder::new()
+        .behavior_version(BehaviorVersion::latest())
+        .region(Region::new("us-east-1"))
+        .credentials_provider(creds)
+        .endpoint_url(endpoint_url())
+        .build();
+
+    aws_sdk_ses::Client::from_conf(config)
+}
+
 mod test_bucket;
 mod test_cors;
 mod test_dynamodb;
@@ -348,6 +365,7 @@ mod test_multipart;
 mod test_object;
 mod test_precondition;
 mod test_secretsmanager;
+mod test_ses;
 mod test_sns;
 mod test_sqs;
 mod test_ssm;

@@ -1,0 +1,68 @@
+[service]
+name = "ses"
+display_name = "SES"
+rust_prefix = "Ses"
+namespace = "com.amazonaws.ses"
+protocol = "awsQuery"
+
+[protocol]
+serde_rename = "PascalCase"
+emit_serde_derives = true
+
+[operations]
+phase0 = [
+    # Identity management
+    "VerifyEmailIdentity", "VerifyDomainIdentity", "ListIdentities",
+    "DeleteIdentity", "GetIdentityVerificationAttributes",
+    "VerifyEmailAddress", "DeleteVerifiedEmailAddress", "ListVerifiedEmailAddresses",
+    # Sending
+    "SendEmail", "SendRawEmail",
+    # Statistics
+    "GetSendQuota", "GetSendStatistics",
+]
+phase1 = [
+    # Templates
+    "CreateTemplate", "GetTemplate", "UpdateTemplate", "DeleteTemplate", "ListTemplates",
+    "SendTemplatedEmail",
+    # Configuration sets
+    "CreateConfigurationSet", "DeleteConfigurationSet",
+    "DescribeConfigurationSet", "ListConfigurationSets",
+]
+phase2 = [
+    # Configuration set event destinations
+    "CreateConfigurationSetEventDestination",
+    "UpdateConfigurationSetEventDestination",
+    "DeleteConfigurationSetEventDestination",
+    # Receipt rules
+    "CreateReceiptRuleSet", "DeleteReceiptRuleSet",
+    "CreateReceiptRule", "DeleteReceiptRule",
+    "DescribeReceiptRuleSet", "CloneReceiptRuleSet",
+    "DescribeActiveReceiptRuleSet", "SetActiveReceiptRuleSet",
+]
+phase3 = [
+    # Identity notification configuration
+    "SetIdentityNotificationTopic", "SetIdentityFeedbackForwardingEnabled",
+    "GetIdentityNotificationAttributes",
+    # Identity DKIM
+    "VerifyDomainDkim", "GetIdentityDkimAttributes",
+    # Identity mail-from
+    "SetIdentityMailFromDomain", "GetIdentityMailFromDomainAttributes",
+    # Sending authorization
+    "GetIdentityPolicies", "PutIdentityPolicy", "DeleteIdentityPolicy", "ListIdentityPolicies",
+]
+
+[errors.custom]
+MessageRejected = { status = 400, message = "Email address is not verified." }
+ConfigurationSetDoesNotExist = { status = 400, message = "Configuration set does not exist." }
+TemplateDoesNotExist = { status = 400, message = "Template does not exist." }
+AlreadyExists = { status = 400, message = "Resource already exists." }
+InvalidParameterValue = { status = 400, message = "Invalid parameter value." }
+RuleSetDoesNotExist = { status = 400, message = "Rule set does not exist." }
+RuleDoesNotExist = { status = 400, message = "Rule does not exist." }
+LimitExceeded = { status = 400, message = "Limit exceeded." }
+InvalidTemplate = { status = 400, message = "Invalid template." }
+MissingAction = { status = 400, message = "Missing action parameter." }
+InternalError = { status = 500, message = "Internal server error." }
+
+[output]
+file_layout = "flat"

@@ -355,6 +355,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-ses"
+version = "1.98.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "027189a9e30b99b618a9d450503cdc97a79d3f7e4a6682b38ad01afaced38e39"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-query",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-smithy-xml",
+ "aws-types",
+ "fastrand",
+ "http 0.2.12",
+ "http 1.4.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-sns"
 version = "1.96.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2351,6 +2376,7 @@ dependencies = [
  "aws-sdk-lambda",
  "aws-sdk-s3",
  "aws-sdk-secretsmanager",
+ "aws-sdk-ses",
  "aws-sdk-sns",
  "aws-sdk-sqs",
  "aws-sdk-ssm",
@@ -2760,6 +2786,8 @@ dependencies = [
  "ruststack-s3-model",
  "ruststack-secretsmanager-core",
  "ruststack-secretsmanager-http",
+ "ruststack-ses-core",
+ "ruststack-ses-http",
  "ruststack-sns-core",
  "ruststack-sns-http",
  "ruststack-sqs-core",
@@ -2773,6 +2801,61 @@ dependencies = [
  "tokio-test",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "ruststack-ses-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "parking_lot",
+ "regex",
+ "ruststack-auth",
+ "ruststack-core",
+ "ruststack-ses-http",
+ "ruststack-ses-model",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ruststack-ses-http"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "form_urlencoded",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "ruststack-auth",
+ "ruststack-ses-model",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ruststack-ses-model"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

@@ -60,6 +60,9 @@ ruststack-kinesis-core = { path = "crates/ruststack-kinesis-core" }
 ruststack-secretsmanager-model = { path = "crates/ruststack-secretsmanager-model" }
 ruststack-secretsmanager-http = { path = "crates/ruststack-secretsmanager-http" }
 ruststack-secretsmanager-core = { path = "crates/ruststack-secretsmanager-core" }
+ruststack-ses-model = { path = "crates/ruststack-ses-model" }
+ruststack-ses-http = { path = "crates/ruststack-ses-http" }
+ruststack-ses-core = { path = "crates/ruststack-ses-core" }
 
 # Async runtime
 tokio = { version = "1.49", features = [
@@ -149,5 +152,6 @@ aws-sdk-eventbridge = "1.96"
 aws-sdk-kms = "1"
 aws-sdk-kinesis = "1"
 aws-sdk-secretsmanager = "1"
+aws-sdk-ses = "1"
 aws-credential-types = "1.2"
 aws-smithy-runtime-api = "1.11"
