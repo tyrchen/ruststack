@@ -5,6 +5,7 @@
 //! API compatibility only.
 
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use parking_lot::RwLock;
 use ruststack_ses_model::error::{SesError, SesErrorCode};
 use ruststack_ses_model::types::{ReceiptRule, ReceiptRuleSetMetadata};
@@ -52,21 +53,20 @@ impl ReceiptRuleSetStore {
     ///
     /// Returns `AlreadyExistsException` if a rule set with the same name exists.
     pub fn create_rule_set(&self, name: &str) -> Result<(), SesError> {
-        if self.rule_sets.contains_key(name) {
-            return Err(SesError::with_message(
+        match self.rule_sets.entry(name.to_owned()) {
+            Entry::Occupied(_) => Err(SesError::with_message(
                 SesErrorCode::AlreadyExistsException,
                 format!("Receipt rule set <{name}> already exists."),
-            ));
+            )),
+            Entry::Vacant(e) => {
+                e.insert(ReceiptRuleSetRecord {
+                    name: name.to_owned(),
+                    rules: Vec::new(),
+                    created_timestamp: chrono::Utc::now(),
+                });
+                Ok(())
+            }
         }
-        self.rule_sets.insert(
-            name.to_owned(),
-            ReceiptRuleSetRecord {
-                name: name.to_owned(),
-                rules: Vec::new(),
-                created_timestamp: chrono::Utc::now(),
-            },
-        );
-        Ok(())
     }
 
     /// Delete a receipt rule set.
@@ -161,21 +161,20 @@ impl ReceiptRuleSetStore {
     /// Returns `AlreadyExistsException` if the destination already exists.
     pub fn clone_rule_set(&self, source_name: &str, dest_name: &str) -> Result<(), SesError> {
         let source = self.describe_rule_set(source_name)?;
-        if self.rule_sets.contains_key(dest_name) {
-            return Err(SesError::with_message(
+        match self.rule_sets.entry(dest_name.to_owned()) {
+            Entry::Occupied(_) => Err(SesError::with_message(
                 SesErrorCode::AlreadyExistsException,
                 format!("Receipt rule set <{dest_name}> already exists."),
-            ));
+            )),
+            Entry::Vacant(e) => {
+                e.insert(ReceiptRuleSetRecord {
+                    name: dest_name.to_owned(),
+                    rules: source.rules.clone(),
+                    created_timestamp: chrono::Utc::now(),
+                });
+                Ok(())
+            }
         }
-        self.rule_sets.insert(
-            dest_name.to_owned(),
-            ReceiptRuleSetRecord {
-                name: dest_name.to_owned(),
-                rules: source.rules.clone(),
-                created_timestamp: chrono::Utc::now(),
-            },
-        );
-        Ok(())
     }
 
     /// Get the active receipt rule set name and metadata.

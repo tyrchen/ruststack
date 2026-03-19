@@ -4,6 +4,7 @@
 //! using `DashMap` for concurrent access.
 
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use ruststack_ses_model::error::{SesError, SesErrorCode};
 use ruststack_ses_model::types::EventDestination;
 
@@ -44,20 +45,19 @@ impl ConfigurationSetStore {
     ///
     /// Returns `ConfigurationSetAlreadyExistsException` if the name is taken.
     pub fn create(&self, name: &str) -> Result<(), SesError> {
-        if self.config_sets.contains_key(name) {
-            return Err(SesError::with_message(
+        match self.config_sets.entry(name.to_owned()) {
+            Entry::Occupied(_) => Err(SesError::with_message(
                 SesErrorCode::ConfigurationSetAlreadyExistsException,
                 format!("Configuration set <{name}> already exists."),
-            ));
+            )),
+            Entry::Vacant(e) => {
+                e.insert(ConfigSetRecord {
+                    name: name.to_owned(),
+                    event_destinations: Vec::new(),
+                });
+                Ok(())
+            }
         }
-        self.config_sets.insert(
-            name.to_owned(),
-            ConfigSetRecord {
-                name: name.to_owned(),
-                event_destinations: Vec::new(),
-            },
-        );
-        Ok(())
     }
 
     /// Delete a configuration set.

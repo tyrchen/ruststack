@@ -4,6 +4,7 @@
 //! with values from a JSON data object during rendering.
 
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use ruststack_ses_model::error::{SesError, SesErrorCode};
 use ruststack_ses_model::types::{Template, TemplateMetadata};
 
@@ -46,21 +47,20 @@ impl TemplateStore {
     ///
     /// Returns `AlreadyExistsException` if a template with the same name already exists.
     pub fn create(&self, template: Template) -> Result<(), SesError> {
-        if self.templates.contains_key(&template.template_name) {
-            return Err(SesError::with_message(
+        let name = template.template_name.clone();
+        match self.templates.entry(name) {
+            Entry::Occupied(_) => Err(SesError::with_message(
                 SesErrorCode::AlreadyExistsException,
                 format!("Template {} already exists.", template.template_name),
-            ));
+            )),
+            Entry::Vacant(e) => {
+                e.insert(StoredTemplate {
+                    template,
+                    created_timestamp: chrono::Utc::now(),
+                });
+                Ok(())
+            }
         }
-        let name = template.template_name.clone();
-        self.templates.insert(
-            name,
-            StoredTemplate {
-                template,
-                created_timestamp: chrono::Utc::now(),
-            },
-        );
-        Ok(())
     }
 
     /// Get a template by name.

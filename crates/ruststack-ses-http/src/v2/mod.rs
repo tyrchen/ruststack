@@ -95,7 +95,7 @@ fn handle_retrospection<H: SesHandler>(
     match *method {
         http::Method::GET => {
             let filter_id = query_params.get("id").map(String::as_str);
-            let filter_source = query_params.get("source").map(String::as_str);
+            let filter_source = query_params.get("email").map(String::as_str);
             let json = handler.query_emails(filter_id, filter_source);
             json_response(json, http::StatusCode::OK)
         }

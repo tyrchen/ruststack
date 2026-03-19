@@ -52,6 +52,8 @@ use ruststack_ses_model::types::{
     ConfigurationSet, IdentityType, ReceiptRuleSetMetadata, SendDataPoint,
 };
 
+use ruststack_ses_model::types::MessageTag;
+
 use crate::config::SesConfig;
 use crate::config_set::ConfigurationSetStore;
 use crate::identity::IdentityStore;
@@ -62,6 +64,29 @@ use crate::retrospection::{
 use crate::statistics::SendStatistics;
 use crate::template::{TemplateStore, render_template};
 use crate::validation::validate_tags;
+
+/// Validate a slice of `MessageTag` values.
+///
+/// # Errors
+///
+/// Returns the first validation error encountered for any tag name or value.
+fn validate_message_tags(tags: &[MessageTag]) -> Result<(), SesError> {
+    let pairs: Vec<(String, String)> = tags
+        .iter()
+        .map(|t| (t.name.clone(), t.value.clone()))
+        .collect();
+    validate_tags(&pairs)
+}
+
+/// Convert a slice of `MessageTag` into `SentEmailTag` for retrospection storage.
+fn convert_tags(tags: &[MessageTag]) -> Vec<SentEmailTag> {
+    tags.iter()
+        .map(|t| SentEmailTag {
+            name: t.name.clone(),
+            value: t.value.clone(),
+        })
+        .collect()
+}
 
 /// Main SES provider implementing all operations.
 #[derive(Debug)]
@@ -199,13 +224,7 @@ impl RustStackSes {
 
     /// Send an email.
     pub fn send_email(&self, input: SendEmailInput) -> Result<SendEmailResponse, SesError> {
-        // Validate tags
-        let tag_pairs: Vec<(String, String)> = input
-            .tags
-            .iter()
-            .map(|t| (t.name.clone(), t.value.clone()))
-            .collect();
-        validate_tags(&tag_pairs)?;
+        validate_message_tags(&input.tags)?;
 
         // Optionally validate source is verified
         if self.config.require_verified_identity && !self.identities.is_verified(&input.source) {
@@ -238,14 +257,7 @@ impl RustStackSes {
             raw_data: None,
             template: None,
             template_data: None,
-            tags: input
-                .tags
-                .iter()
-                .map(|t| SentEmailTag {
-                    name: t.name.clone(),
-                    value: t.value.clone(),
-                })
-                .collect(),
+            tags: convert_tags(&input.tags),
         };
         self.emails.capture(sent);
         self.statistics.record_send();
@@ -258,12 +270,7 @@ impl RustStackSes {
         &self,
         input: SendRawEmailInput,
     ) -> Result<SendRawEmailResponse, SesError> {
-        let tag_pairs: Vec<(String, String)> = input
-            .tags
-            .iter()
-            .map(|t| (t.name.clone(), t.value.clone()))
-            .collect();
-        validate_tags(&tag_pairs)?;
+        validate_message_tags(&input.tags)?;
 
         let source = input
             .source
@@ -305,14 +312,7 @@ impl RustStackSes {
             raw_data: Some(raw_str),
             template: None,
             template_data: None,
-            tags: input
-                .tags
-                .iter()
-                .map(|t| SentEmailTag {
-                    name: t.name.clone(),
-                    value: t.value.clone(),
-                })
-                .collect(),
+            tags: convert_tags(&input.tags),
         };
         self.emails.capture(sent);
         self.statistics.record_send();
@@ -405,12 +405,7 @@ impl RustStackSes {
         &self,
         input: SendTemplatedEmailInput,
     ) -> Result<SendTemplatedEmailResponse, SesError> {
-        let tag_pairs: Vec<(String, String)> = input
-            .tags
-            .iter()
-            .map(|t| (t.name.clone(), t.value.clone()))
-            .collect();
-        validate_tags(&tag_pairs)?;
+        validate_message_tags(&input.tags)?;
 
         if self.config.require_verified_identity && !self.identities.is_verified(&input.source) {
             return Err(SesError::with_message(
@@ -459,14 +454,7 @@ impl RustStackSes {
             raw_data: None,
             template: Some(input.template),
             template_data: Some(input.template_data),
-            tags: input
-                .tags
-                .iter()
-                .map(|t| SentEmailTag {
-                    name: t.name.clone(),
-                    value: t.value.clone(),
-                })
-                .collect(),
+            tags: convert_tags(&input.tags),
         };
         self.emails.capture(sent);
         self.statistics.record_send();
@@ -779,11 +767,13 @@ impl RustStackSes {
 }
 
 /// Extract the `From:` address from raw MIME data.
+///
+/// Uses case-insensitive matching for the header name per RFC 2822.
 fn extract_from_raw(data: &[u8]) -> String {
     let text = String::from_utf8_lossy(data);
     for line in text.lines() {
-        if let Some(rest) = line.strip_prefix("From:") {
-            let addr = rest.trim();
+        if line.len() >= 5 && line[..5].eq_ignore_ascii_case("from:") {
+            let addr = line[5..].trim();
             // Handle "Name <email>" format
             if let Some(start) = addr.find('<') {
                 if let Some(end) = addr.find('>') {
@@ -933,5 +923,21 @@ mod tests {
             "john@example.com"
         );
         assert_eq!(extract_from_raw(b"Subject: No From"), "");
+    }
+
+    #[test]
+    fn test_should_extract_from_raw_case_insensitive() {
+        assert_eq!(
+            extract_from_raw(b"from: lower@example.com\r\nSubject: Test"),
+            "lower@example.com"
+        );
+        assert_eq!(
+            extract_from_raw(b"FROM: UPPER@example.com\r\nSubject: Test"),
+            "UPPER@example.com"
+        );
+        assert_eq!(
+            extract_from_raw(b"fRoM: mixed@example.com\r\nSubject: Test"),
+            "mixed@example.com"
+        );
     }
 }

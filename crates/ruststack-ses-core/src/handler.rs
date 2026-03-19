@@ -905,7 +905,9 @@ fn deserialize_send_raw_email(params: &[(String, String)]) -> Result<SendRawEmai
     let raw_data = get_required_param(params, "RawMessage.Data")?.to_owned();
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(raw_data.as_bytes())
-        .unwrap_or_else(|_| raw_data.into_bytes());
+        .map_err(|e| {
+            SesError::invalid_parameter_value(format!("RawMessage.Data is not valid base64: {e}"))
+        })?;
     let tags = parse_tag_list(params, "Tags");
     Ok(SendRawEmailInput {
         raw_message: RawMessage { data: decoded },
