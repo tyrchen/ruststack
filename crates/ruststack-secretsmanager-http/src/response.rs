@@ -25,7 +25,10 @@ pub fn error_to_json(error: &SecretsManagerError) -> Vec<u8> {
         "__type": error.error_type(),
         "Message": error.message,
     });
-    serde_json::to_vec(&obj).expect("JSON serialization of error cannot fail")
+    serde_json::to_vec(&obj).unwrap_or_else(|_| {
+        br#"{"__type":"InternalServiceError","Message":"Failed to serialize error response"}"#
+            .to_vec()
+    })
 }
 
 /// Convert a `SecretsManagerError` into a complete HTTP error response.
@@ -43,7 +46,12 @@ pub fn error_to_response(
         .header("content-type", CONTENT_TYPE)
         .header("x-amzn-requestid", request_id)
         .body(body)
-        .expect("valid error response");
+        .unwrap_or_else(|_| {
+            http::Response::new(SecretsManagerResponseBody::from_json(
+                br#"{"__type":"InternalServiceError","Message":"Failed to build error response"}"#
+                    .to_vec(),
+            ))
+        });
 
     if let Ok(hv) = http::HeaderValue::from_str(&crc.to_string()) {
         response.headers_mut().insert("x-amz-crc32", hv);
@@ -66,7 +74,12 @@ pub fn json_response(
         .header("content-type", CONTENT_TYPE)
         .header("x-amzn-requestid", request_id)
         .body(body)
-        .expect("valid JSON response");
+        .unwrap_or_else(|_| {
+            http::Response::new(SecretsManagerResponseBody::from_json(
+                br#"{"__type":"InternalServiceError","Message":"Failed to build response"}"#
+                    .to_vec(),
+            ))
+        });
 
     if let Ok(hv) = http::HeaderValue::from_str(&crc.to_string()) {
         response.headers_mut().insert("x-amz-crc32", hv);

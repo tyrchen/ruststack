@@ -1,6 +1,6 @@
 //! ListSecrets filter evaluation.
 
-use ruststack_secretsmanager_model::types::{Filter, FilterNameStringType, Tag};
+use ruststack_secretsmanager_model::types::{Filter, FilterNameStringType};
 
 use crate::storage::SecretRecord;
 
@@ -63,14 +63,5 @@ fn matches_filter_value(record: &SecretRecord, key: &FilterNameStringType, value
                 .any(|t| t.value.as_deref().is_some_and(|tv| tv.contains(value)));
             name_match || desc_match || tag_match
         }
-    }
-}
-
-/// Build a default empty tag for internal use.
-#[must_use]
-pub fn empty_tag() -> Tag {
-    Tag {
-        key: None,
-        value: None,
     }
 }

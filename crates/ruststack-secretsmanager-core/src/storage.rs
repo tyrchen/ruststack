@@ -261,12 +261,15 @@ impl SecretRecord {
     }
 
     /// Schedule this secret for deletion.
+    ///
+    /// The `deleted_date` is set to `now + recovery_window_days * 86400` seconds,
+    /// representing the future date when the secret will be permanently deleted.
     pub fn schedule_deletion(
         &mut self,
         recovery_window_days: i64,
         now: chrono::DateTime<chrono::Utc>,
     ) {
-        self.deleted_date = Some(now);
+        self.deleted_date = Some(now + chrono::Duration::days(recovery_window_days));
         self.recovery_window_in_days = Some(recovery_window_days);
     }
 

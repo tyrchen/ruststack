@@ -80,6 +80,16 @@ impl RustStackSecretsManager {
         }
         validate_tags(&input.tags)?;
 
+        // Validate secret value if provided.
+        if input.secret_string.is_some() || input.secret_binary.is_some() {
+            validate_secret_value(input.secret_string.as_deref(), input.secret_binary.as_ref())?;
+        }
+
+        // Validate client request token if provided.
+        if let Some(ref token) = input.client_request_token {
+            validate_client_request_token(token)?;
+        }
+
         // Check if secret with same name exists (including pending deletion).
         if self.store.contains_key(&input.name) {
             return Err(SecretsManagerError::with_message(
@@ -290,6 +300,16 @@ impl RustStackSecretsManager {
         let force = input.force_delete_without_recovery.unwrap_or(false);
         let recovery_days = input.recovery_window_in_days;
 
+        // If already pending deletion and not force-deleting, reject.
+        if let Some(record) = self.store.get(&name) {
+            if record.is_pending_deletion() && !force {
+                return Err(SecretsManagerError::with_message(
+                    SecretsManagerErrorCode::InvalidRequestException,
+                    "You can't perform this operation on the secret because it was already marked for deletion.",
+                ));
+            }
+        }
+
         // Cannot specify both force and recovery window.
         if force && recovery_days.is_some() {
             return Err(SecretsManagerError::with_message(
@@ -326,12 +346,10 @@ impl RustStackSecretsManager {
             let now = Utc::now();
             record.schedule_deletion(days, now);
 
-            let deletion_date = now + chrono::Duration::days(days);
-
             Ok(DeleteSecretResponse {
                 arn: Some(record.arn.clone()),
                 name: Some(record.name.clone()),
-                deletion_date: Some(deletion_date),
+                deletion_date: record.deleted_date,
             })
         }
     }
@@ -386,6 +404,11 @@ impl RustStackSecretsManager {
         }
         if let Some(kms) = input.kms_key_id {
             record.kms_key_id = Some(kms);
+        }
+
+        // Validate secret value if provided.
+        if input.secret_string.is_some() || input.secret_binary.is_some() {
+            validate_secret_value(input.secret_string.as_deref(), input.secret_binary.as_ref())?;
         }
 
         // If a new value is provided, create a new version.
@@ -589,6 +612,13 @@ impl RustStackSecretsManager {
             )
         })?;
 
+        if record.is_pending_deletion() {
+            return Err(SecretsManagerError::with_message(
+                SecretsManagerErrorCode::InvalidRequestException,
+                "You can't perform this operation on the secret because it was marked for deletion.",
+            ));
+        }
+
         // Count new keys (not already present).
         let new_key_count = input
             .tags
@@ -641,6 +671,13 @@ impl RustStackSecretsManager {
                 "Secrets Manager can't find the specified secret.",
             )
         })?;
+
+        if record.is_pending_deletion() {
+            return Err(SecretsManagerError::with_message(
+                SecretsManagerErrorCode::InvalidRequestException,
+                "You can't perform this operation on the secret because it was marked for deletion.",
+            ));
+        }
 
         record.tags.retain(|t| {
             !input
@@ -750,7 +787,6 @@ impl RustStackSecretsManager {
 
         // Remove AWSPENDING label if it exists.
         record.staging_labels.remove("AWSPENDING");
-        record.rotation_enabled = false;
         record.rebuild_version_stages();
 
         Ok(CancelRotateSecretResponse {
@@ -784,21 +820,28 @@ impl RustStackSecretsManager {
             }
         } else if !input.filters.is_empty() {
             // Filter-based batch retrieval.
-            for entry in self.store.secrets() {
-                let record = entry.value();
-                if record.is_pending_deletion() {
-                    continue;
-                }
-                if matches_filters(record, &input.filters) {
-                    match self.get_secret_value_for_batch(&record.name) {
-                        Ok(sv) => secret_values.push(sv),
-                        Err(err) => {
-                            errors.push(APIErrorType {
-                                secret_id: Some(record.name.clone()),
-                                error_code: Some(err.code.as_str().to_owned()),
-                                message: Some(err.message.clone()),
-                            });
-                        }
+            // Collect matching names first to avoid holding DashMap iterator locks
+            // during nested lookups (which would deadlock).
+            let matching_names: Vec<String> = self
+                .store
+                .secrets()
+                .iter()
+                .filter(|entry| {
+                    let record = entry.value();
+                    !record.is_pending_deletion() && matches_filters(record, &input.filters)
+                })
+                .map(|entry| entry.value().name.clone())
+                .collect();
+
+            for name in &matching_names {
+                match self.get_secret_value_for_batch(name) {
+                    Ok(sv) => secret_values.push(sv),
+                    Err(err) => {
+                        errors.push(APIErrorType {
+                            secret_id: Some(name.clone()),
+                            error_code: Some(err.code.as_str().to_owned()),
+                            message: Some(err.message.clone()),
+                        });
                     }
                 }
             }
@@ -850,6 +893,13 @@ impl RustStackSecretsManager {
             )
         })?;
 
+        if record.is_pending_deletion() {
+            return Err(SecretsManagerError::with_message(
+                SecretsManagerErrorCode::InvalidRequestException,
+                "You can't perform this operation on the secret because it was marked for deletion.",
+            ));
+        }
+
         record.resource_policy = Some(input.resource_policy.clone());
 
         Ok(PutResourcePolicyResponse {
@@ -871,6 +921,13 @@ impl RustStackSecretsManager {
                 "Secrets Manager can't find the specified secret.",
             )
         })?;
+
+        if record.is_pending_deletion() {
+            return Err(SecretsManagerError::with_message(
+                SecretsManagerErrorCode::InvalidRequestException,
+                "You can't perform this operation on the secret because it was marked for deletion.",
+            ));
+        }
 
         record.resource_policy = None;
 
@@ -1006,14 +1063,28 @@ fn resolve_version_from_record<'a>(
 ) -> Result<&'a SecretVersion, SecretsManagerError> {
     if let Some(vid) = version_id {
         // Look up by version ID.
-        return record.versions.get(vid).ok_or_else(|| {
+        let version = record.versions.get(vid).ok_or_else(|| {
             SecretsManagerError::with_message(
                 SecretsManagerErrorCode::ResourceNotFoundException,
                 format!(
                     "Secrets Manager can't find the specified secret value for VersionId: {vid}"
                 ),
             )
-        });
+        })?;
+
+        // If version_stage is also provided, verify the version has that stage label.
+        if let Some(stage) = version_stage {
+            if !version.version_stages.contains(stage) {
+                return Err(SecretsManagerError::with_message(
+                    SecretsManagerErrorCode::ResourceNotFoundException,
+                    format!(
+                        "Secrets Manager can't find the secret value for VersionId: {vid} and staging label: {stage}"
+                    ),
+                ));
+            }
+        }
+
+        return Ok(version);
     }
 
     // Look up by stage (default to AWSCURRENT).
