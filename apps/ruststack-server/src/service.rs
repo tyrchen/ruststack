@@ -852,8 +852,10 @@ mod ses_router {
                 return false;
             }
 
-            // Check SigV4 Credential for service=email.
-            extract_sigv4_service(req.headers()).is_some_and(|svc| svc == "email")
+            // Check SigV4 Credential for service=ses (or email).
+            // The AWS SDK and CLI sign SES v1 with service name "ses".
+            // Some older SDKs may use "email" as the signing name.
+            extract_sigv4_service(req.headers()).is_some_and(|svc| svc == "ses" || svc == "email")
         }
 
         fn call(
@@ -884,6 +886,18 @@ mod ses_router {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn test_should_extract_sigv4_service_ses() {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(
+                "authorization",
+                http::HeaderValue::from_static(
+                    "AWS4-HMAC-SHA256 Credential=test/20260319/us-east-1/ses/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=abc123",
+                ),
+            );
+            assert_eq!(extract_sigv4_service(&headers), Some("ses"));
+        }
 
         #[test]
         fn test_should_extract_sigv4_service_email() {
