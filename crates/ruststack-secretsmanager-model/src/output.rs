@@ -67,7 +67,11 @@ pub struct DeleteSecretResponse {
     #[serde(rename = "ARN")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arn: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::epoch_seconds::option::serialize",
+        deserialize_with = "crate::epoch_seconds::option::deserialize"
+    )]
     pub deletion_date: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -80,9 +84,17 @@ pub struct DescribeSecretResponse {
     #[serde(rename = "ARN")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arn: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::epoch_seconds::option::serialize",
+        deserialize_with = "crate::epoch_seconds::option::deserialize"
+    )]
     pub created_date: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::epoch_seconds::option::serialize",
+        deserialize_with = "crate::epoch_seconds::option::deserialize"
+    )]
     pub deleted_date: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -92,15 +104,31 @@ pub struct DescribeSecretResponse {
     pub external_secret_rotation_role_arn: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kms_key_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::epoch_seconds::option::serialize",
+        deserialize_with = "crate::epoch_seconds::option::deserialize"
+    )]
     pub last_accessed_date: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::epoch_seconds::option::serialize",
+        deserialize_with = "crate::epoch_seconds::option::deserialize"
+    )]
     pub last_changed_date: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::epoch_seconds::option::serialize",
+        deserialize_with = "crate::epoch_seconds::option::deserialize"
+    )]
     pub last_rotated_date: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::epoch_seconds::option::serialize",
+        deserialize_with = "crate::epoch_seconds::option::deserialize"
+    )]
     pub next_rotation_date: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owning_service: Option<String>,
@@ -151,7 +179,11 @@ pub struct GetSecretValueResponse {
     #[serde(rename = "ARN")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arn: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::epoch_seconds::option::serialize",
+        deserialize_with = "crate::epoch_seconds::option::deserialize"
+    )]
     pub created_date: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
