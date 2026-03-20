@@ -1254,8 +1254,9 @@ mod cloudwatch_router {
 
     /// Routes requests to the CloudWatch Metrics service.
     ///
-    /// Matches `POST /` requests with `Content-Type: application/x-www-form-urlencoded`
-    /// where the SigV4 signing service is `monitoring`.
+    /// Matches awsQuery requests (`POST /` with form-urlencoded body signed
+    /// with `monitoring` SigV4 service) and rpcv2Cbor requests (POST to
+    /// `/service/GraniteServiceVersion20100801/operation/{Op}`).
     pub struct CloudWatchServiceRouter<H: CloudWatchHandler> {
         inner: CloudWatchHttpService<H>,
     }
@@ -1272,12 +1273,24 @@ mod cloudwatch_router {
             "cloudwatch"
         }
 
-        /// CloudWatch Metrics matches form-urlencoded POST requests signed
-        /// with the `monitoring` SigV4 service name.
+        /// CloudWatch Metrics matches in two ways:
+        /// 1. awsQuery: form-urlencoded POST signed with `monitoring` SigV4 service.
+        /// 2. rpcv2Cbor: POST to `/service/GraniteServiceVersion20100801/...`.
         fn matches(&self, req: &http::Request<Incoming>) -> bool {
             if *req.method() != http::Method::POST {
                 return false;
             }
+
+            // rpcv2Cbor path-based routing.
+            if req
+                .uri()
+                .path()
+                .starts_with("/service/GraniteServiceVersion20100801/")
+            {
+                return true;
+            }
+
+            // awsQuery form-urlencoded routing.
             let is_form_encoded = req
                 .headers()
                 .get("content-type")

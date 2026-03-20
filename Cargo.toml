@@ -99,11 +99,13 @@ hyper-util = { version = "0.1", features = [
   "server-graceful",
 ] }
 http = "1.4"
+http-body = "1.0"
 http-body-util = "0.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+ciborium = "0.2"
 quick-xml = "0.39"
 
 # Error handling
@@ -163,7 +165,7 @@ aws-sdk-sqs = "1.97"
 aws-sdk-ssm = "1.108"
 aws-sdk-sns = "1.98"
 aws-sdk-lambda = "1.119"
-aws-sdk-cloudwatch = "~1.60"
+aws-sdk-cloudwatch = "1"
 aws-sdk-cloudwatchlogs = "1.121"
 aws-sdk-eventbridge = "1.104"
 aws-sdk-kms = "1"

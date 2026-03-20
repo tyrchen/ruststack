@@ -14,12 +14,17 @@
 //! </{Operation}Response>
 //! ```
 
+use std::collections::BTreeMap;
+
 use ruststack_cloudwatch_model::error::CloudWatchError;
 
 use crate::body::CloudWatchResponseBody;
 
 /// Content type for CloudWatch XML responses.
 pub const CONTENT_TYPE: &str = "text/xml";
+
+/// Content type for CBOR responses.
+pub const CBOR_CONTENT_TYPE: &str = "application/cbor";
 
 /// The CloudWatch Metrics XML namespace.
 const XML_NS: &str = "http://monitoring.amazonaws.com/doc/2010-08-01/";
@@ -94,6 +99,38 @@ pub fn xml_escape(s: &str) -> String {
         }
     }
     result
+}
+
+/// Build a CBOR success response.
+#[must_use]
+pub fn cbor_response(body: Vec<u8>, request_id: &str) -> http::Response<CloudWatchResponseBody> {
+    http::Response::builder()
+        .status(http::StatusCode::OK)
+        .header("content-type", CBOR_CONTENT_TYPE)
+        .header("smithy-protocol", "rpc-v2-cbor")
+        .header("x-amzn-requestid", request_id)
+        .body(CloudWatchResponseBody::from_bytes(body))
+        .expect("valid CBOR response")
+}
+
+/// Build a CBOR error response.
+#[must_use]
+pub fn cbor_error_response(
+    error: &CloudWatchError,
+    request_id: &str,
+) -> http::Response<CloudWatchResponseBody> {
+    let mut error_map: BTreeMap<&str, &str> = BTreeMap::new();
+    error_map.insert("__type", error.code.as_str());
+    error_map.insert("message", &error.message);
+    let mut buf = Vec::new();
+    ciborium::into_writer(&error_map, &mut buf).unwrap_or_default();
+    http::Response::builder()
+        .status(error.status_code)
+        .header("content-type", CBOR_CONTENT_TYPE)
+        .header("smithy-protocol", "rpc-v2-cbor")
+        .header("x-amzn-requestid", request_id)
+        .body(CloudWatchResponseBody::from_bytes(buf))
+        .expect("valid CBOR error response")
 }
 
 /// Simple XML writer for building CloudWatch response XML.
