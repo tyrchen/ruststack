@@ -435,7 +435,7 @@ impl RustStackCloudWatch {
         input: DescribeAlarmsInput,
     ) -> Result<DescribeAlarmsOutput, CloudWatchError> {
         #[allow(clippy::cast_sign_loss)]
-        let max_records = input.max_records.unwrap_or(100) as usize;
+        let max_records = input.max_records.unwrap_or(100).clamp(1, 100) as usize;
         let include_metric =
             input.alarm_types.is_empty() || input.alarm_types.contains(&AlarmType::MetricAlarm);
         let include_composite =
@@ -662,7 +662,7 @@ impl RustStackCloudWatch {
         input: DescribeAlarmHistoryInput,
     ) -> Result<DescribeAlarmHistoryOutput, CloudWatchError> {
         #[allow(clippy::cast_sign_loss)]
-        let max_records = input.max_records.unwrap_or(100) as usize;
+        let max_records = input.max_records.unwrap_or(100).clamp(1, 100) as usize;
 
         let mut items = self.alarm_store.get_history(input.alarm_name.as_deref());
 

@@ -53,7 +53,7 @@ pub fn error_to_xml(error: &CloudWatchError, request_id: &str) -> String {
          </Error>\
          <RequestId>{}</RequestId>\
          </ErrorResponse>",
-        error.code,
+        xml_escape(&error.code.to_string()),
         xml_escape(&error.message),
         xml_escape(request_id),
     )

@@ -1157,8 +1157,8 @@ fn parse_metric_datum_list(
 
         let statistic_values = parse_statistic_set(sub_params)?;
 
-        let values = parse_f64_list(sub_params, "Values");
-        let counts = parse_f64_list(sub_params, "Counts");
+        let values = parse_f64_list(sub_params, "Values")?;
+        let counts = parse_f64_list(sub_params, "Counts")?;
 
         data.push(MetricDatum {
             metric_name,
@@ -1199,11 +1199,18 @@ fn parse_statistic_set(
     }
 }
 
-fn parse_f64_list(params: &[(String, String)], prefix: &str) -> Vec<f64> {
+fn parse_f64_list(params: &[(String, String)], prefix: &str) -> Result<Vec<f64>, CloudWatchError> {
     let strings = parse_string_list(params, prefix);
     strings
         .iter()
-        .filter_map(|s| s.parse::<f64>().ok())
+        .map(|s| {
+            s.parse::<f64>().map_err(|_| {
+                CloudWatchError::with_message(
+                    CloudWatchErrorCode::InvalidParameterValueException,
+                    format!("Invalid numeric value '{s}' in {prefix}"),
+                )
+            })
+        })
         .collect()
 }
 

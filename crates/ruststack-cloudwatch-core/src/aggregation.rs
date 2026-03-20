@@ -120,11 +120,19 @@ fn compute_bucket_statistics(
         }
     }
 
-    let average = if sample_count > 0.0 {
-        sum / sample_count
-    } else {
-        0.0
-    };
+    if sample_count == 0.0 {
+        return AggregatedDatapoint {
+            timestamp,
+            sum: None,
+            average: None,
+            minimum: None,
+            maximum: None,
+            sample_count: None,
+            unit: points.first().and_then(|p| p.unit.clone()),
+        };
+    }
+
+    let average = sum / sample_count;
 
     AggregatedDatapoint {
         timestamp,
