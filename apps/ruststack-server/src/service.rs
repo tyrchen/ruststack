@@ -1282,3 +1282,93 @@ mod cloudwatch_router {
 
 #[cfg(feature = "cloudwatch")]
 pub use cloudwatch_router::CloudWatchServiceRouter;
+
+// ---------------------------------------------------------------------------
+// IAM
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "iam")]
+mod iam_router {
+    use std::convert::Infallible;
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use http_body_util::BodyExt;
+    use hyper::body::Incoming;
+    use hyper::service::Service;
+    use ruststack_iam_http::dispatch::IamHandler;
+    use ruststack_iam_http::service::IamHttpService;
+
+    use super::{GatewayBody, ServiceRouter};
+
+    /// Extract the SigV4 service name from the Authorization header.
+    fn extract_sigv4_service(headers: &http::HeaderMap) -> Option<&str> {
+        let auth = headers.get("authorization")?.to_str().ok()?;
+        let credential_start = auth.find("Credential=")? + "Credential=".len();
+        let credential_end = auth[credential_start..]
+            .find(',')
+            .map_or(auth.len(), |i| credential_start + i);
+        let credential = &auth[credential_start..credential_end];
+        // Format: AKID/date/region/service/aws4_request
+        let parts: Vec<&str> = credential.split('/').collect();
+        if parts.len() >= 4 {
+            Some(parts[3])
+        } else {
+            None
+        }
+    }
+
+    /// Routes requests to the IAM service.
+    ///
+    /// Matches `POST /` requests with `Content-Type: application/x-www-form-urlencoded`
+    /// where the SigV4 signing service is `iam`.
+    pub struct IamServiceRouter<H: IamHandler> {
+        inner: IamHttpService<H>,
+    }
+
+    impl<H: IamHandler> IamServiceRouter<H> {
+        /// Wrap an [`IamHttpService`] in a router.
+        pub fn new(inner: IamHttpService<H>) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl<H: IamHandler> ServiceRouter for IamServiceRouter<H> {
+        fn name(&self) -> &'static str {
+            "iam"
+        }
+
+        /// IAM matches form-urlencoded POST requests signed
+        /// with the `iam` SigV4 service name.
+        fn matches(&self, req: &http::Request<Incoming>) -> bool {
+            if *req.method() != http::Method::POST {
+                return false;
+            }
+            let is_form_encoded = req
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|ct| ct.contains("x-www-form-urlencoded"));
+            if !is_form_encoded {
+                return false;
+            }
+            // Check SigV4 signing service name.
+            extract_sigv4_service(req.headers()).is_some_and(|svc| svc == "iam")
+        }
+
+        fn call(
+            &self,
+            req: http::Request<Incoming>,
+        ) -> Pin<Box<dyn Future<Output = Result<http::Response<GatewayBody>, Infallible>> + Send>>
+        {
+            let svc = self.inner.clone();
+            Box::pin(async move {
+                let resp = svc.call(req).await;
+                Ok(resp.unwrap_or_else(|e| match e {}).map(BodyExt::boxed))
+            })
+        }
+    }
+}
+
+#[cfg(feature = "iam")]
+pub use iam_router::IamServiceRouter;

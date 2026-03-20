@@ -1,0 +1,357 @@
+name: iam-test
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  iam-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup toolchain install stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and start RustStack
+        id: ruststack
+        run: |
+          cargo build --release -p ruststack-server
+
+          IAM_SKIP_SIGNATURE_VALIDATION=true \
+          SNS_SKIP_SIGNATURE_VALIDATION=true \
+          SQS_SKIP_SIGNATURE_VALIDATION=true \
+          GATEWAY_LISTEN=0.0.0.0:4566 \
+          LOG_LEVEL=warn \
+          cargo run --release -p ruststack-server &
+
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then
+              echo "Server is ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Server did not start within 30s"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "endpoint=http://localhost:4566" >> "$GITHUB_OUTPUT"
+
+          echo "AWS_ENDPOINT_URL=http://localhost:4566" >> "$GITHUB_ENV"
+          echo "AWS_DEFAULT_REGION=us-east-1" >> "$GITHUB_ENV"
+          echo "AWS_ACCESS_KEY_ID=test" >> "$GITHUB_ENV"
+          echo "AWS_SECRET_ACCESS_KEY=test" >> "$GITHUB_ENV"
+
+      # ── Phase 0: User + Role + Policy CRUD ──────────────────────────
+      - name: "CreateUser + GetUser + DeleteUser"
+        run: |
+          set -euo pipefail
+
+          USER_ID=$(aws iam create-user \
+            --user-name test-user \
+            --query "User.UserId" --output text)
+          echo "Created user with ID: $USER_ID"
+          [ -n "$USER_ID" ]
+
+          USER_NAME=$(aws iam get-user \
+            --user-name test-user \
+            --query "User.UserName" --output text)
+          [ "$USER_NAME" = "test-user" ]
+
+          aws iam delete-user --user-name test-user
+
+      - name: "CreateRole + GetRole + ListRoles"
+        run: |
+          set -euo pipefail
+
+          TRUST='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+
+          ROLE_ARN=$(aws iam create-role \
+            --role-name test-lambda-role \
+            --assume-role-policy-document "$TRUST" \
+            --query "Role.Arn" --output text)
+          echo "Created role: $ROLE_ARN"
+          [ -n "$ROLE_ARN" ]
+
+          ROLE_NAME=$(aws iam get-role \
+            --role-name test-lambda-role \
+            --query "Role.RoleName" --output text)
+          [ "$ROLE_NAME" = "test-lambda-role" ]
+
+          ROLE_COUNT=$(aws iam list-roles \
+            --query "Roles | length(@)" --output text)
+          [ "$ROLE_COUNT" -ge 1 ]
+
+          aws iam delete-role --role-name test-lambda-role
+
+      - name: "CreatePolicy + AttachRolePolicy + DetachRolePolicy"
+        run: |
+          set -euo pipefail
+
+          TRUST='{"Version":"2012-10-17","Statement":[]}'
+          POLICY_DOC='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:*","Resource":"*"}]}'
+
+          aws iam create-role \
+            --role-name attach-test-role \
+            --assume-role-policy-document "$TRUST" > /dev/null
+
+          POLICY_ARN=$(aws iam create-policy \
+            --policy-name attach-test-policy \
+            --policy-document "$POLICY_DOC" \
+            --query "Policy.Arn" --output text)
+          echo "Created policy: $POLICY_ARN"
+
+          aws iam attach-role-policy \
+            --role-name attach-test-role \
+            --policy-arn "$POLICY_ARN"
+
+          ATTACHED=$(aws iam list-attached-role-policies \
+            --role-name attach-test-role \
+            --query "AttachedPolicies | length(@)" --output text)
+          [ "$ATTACHED" = "1" ]
+
+          aws iam detach-role-policy \
+            --role-name attach-test-role \
+            --policy-arn "$POLICY_ARN"
+
+          aws iam delete-policy --policy-arn "$POLICY_ARN"
+          aws iam delete-role --role-name attach-test-role
+
+      # ── Phase 0: Access Keys ──────────────────────────────────────────
+      - name: "CreateAccessKey + ListAccessKeys + DeleteAccessKey"
+        run: |
+          set -euo pipefail
+
+          aws iam create-user --user-name ak-user > /dev/null
+
+          AK_ID=$(aws iam create-access-key \
+            --user-name ak-user \
+            --query "AccessKey.AccessKeyId" --output text)
+          echo "Created access key: $AK_ID"
+          [ -n "$AK_ID" ]
+
+          AK_COUNT=$(aws iam list-access-keys \
+            --user-name ak-user \
+            --query "AccessKeyMetadata | length(@)" --output text)
+          [ "$AK_COUNT" = "1" ]
+
+          aws iam delete-access-key --user-name ak-user --access-key-id "$AK_ID"
+          aws iam delete-user --user-name ak-user
+
+      # ── Phase 0: Delete conflict enforcement ─────────────────────────
+      - name: "DeleteConflict: role with attached policy"
+        run: |
+          set -euo pipefail
+
+          TRUST='{"Version":"2012-10-17","Statement":[]}'
+          POLICY_DOC='{"Version":"2012-10-17","Statement":[]}'
+
+          aws iam create-role --role-name conflict-role --assume-role-policy-document "$TRUST" > /dev/null
+          POLICY_ARN=$(aws iam create-policy --policy-name conflict-policy --policy-document "$POLICY_DOC" --query "Policy.Arn" --output text)
+          aws iam attach-role-policy --role-name conflict-role --policy-arn "$POLICY_ARN"
+
+          # Should fail (DeleteConflict)
+          if aws iam delete-role --role-name conflict-role 2>/dev/null; then
+            echo "::error::delete-role should have failed with attached policy"
+            exit 1
+          fi
+
+          aws iam detach-role-policy --role-name conflict-role --policy-arn "$POLICY_ARN"
+          aws iam delete-role --role-name conflict-role
+          aws iam delete-policy --policy-arn "$POLICY_ARN"
+
+      # ── Phase 1: Groups + Instance Profiles ──────────────────────────
+      - name: "Groups: create, add user, list, remove, delete"
+        run: |
+          set -euo pipefail
+
+          aws iam create-group --group-name test-group > /dev/null
+          aws iam create-user --user-name group-user > /dev/null
+
+          aws iam add-user-to-group --group-name test-group --user-name group-user
+
+          GROUP_COUNT=$(aws iam list-groups-for-user \
+            --user-name group-user \
+            --query "Groups | length(@)" --output text)
+          [ "$GROUP_COUNT" = "1" ]
+
+          MEMBER_COUNT=$(aws iam get-group \
+            --group-name test-group \
+            --query "Users | length(@)" --output text)
+          [ "$MEMBER_COUNT" = "1" ]
+
+          aws iam remove-user-from-group --group-name test-group --user-name group-user
+          aws iam delete-group --group-name test-group
+          aws iam delete-user --user-name group-user
+
+      - name: "InstanceProfiles: create, add role, get, remove, delete"
+        run: |
+          set -euo pipefail
+
+          TRUST='{"Version":"2012-10-17","Statement":[]}'
+
+          aws iam create-instance-profile --instance-profile-name test-profile > /dev/null
+          aws iam create-role --role-name profile-role --assume-role-policy-document "$TRUST" > /dev/null
+
+          aws iam add-role-to-instance-profile \
+            --instance-profile-name test-profile \
+            --role-name profile-role
+
+          ROLE_COUNT=$(aws iam get-instance-profile \
+            --instance-profile-name test-profile \
+            --query "InstanceProfile.Roles | length(@)" --output text)
+          [ "$ROLE_COUNT" = "1" ]
+
+          aws iam remove-role-from-instance-profile \
+            --instance-profile-name test-profile \
+            --role-name profile-role
+
+          aws iam delete-instance-profile --instance-profile-name test-profile
+          aws iam delete-role --role-name profile-role
+
+      # ── Phase 2: Inline Policies + Policy Versions ───────────────────
+      - name: "InlinePolicies: put, get, list, delete"
+        run: |
+          set -euo pipefail
+
+          TRUST='{"Version":"2012-10-17","Statement":[]}'
+          INLINE_DOC='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"logs:*","Resource":"*"}]}'
+
+          aws iam create-role --role-name inline-role --assume-role-policy-document "$TRUST" > /dev/null
+
+          aws iam put-role-policy \
+            --role-name inline-role \
+            --policy-name InlinePolicy \
+            --policy-document "$INLINE_DOC"
+
+          POLICY_NAME=$(aws iam get-role-policy \
+            --role-name inline-role \
+            --policy-name InlinePolicy \
+            --query "PolicyName" --output text)
+          [ "$POLICY_NAME" = "InlinePolicy" ]
+
+          POLICY_COUNT=$(aws iam list-role-policies \
+            --role-name inline-role \
+            --query "PolicyNames | length(@)" --output text)
+          [ "$POLICY_COUNT" = "1" ]
+
+          aws iam delete-role-policy --role-name inline-role --policy-name InlinePolicy
+          aws iam delete-role --role-name inline-role
+
+      - name: "PolicyVersions: create, list, set default, delete"
+        run: |
+          set -euo pipefail
+
+          DOC_V1='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"*"}]}'
+          DOC_V2='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:*","Resource":"*"}]}'
+
+          POLICY_ARN=$(aws iam create-policy \
+            --policy-name version-policy \
+            --policy-document "$DOC_V1" \
+            --query "Policy.Arn" --output text)
+
+          V2_ID=$(aws iam create-policy-version \
+            --policy-arn "$POLICY_ARN" \
+            --policy-document "$DOC_V2" \
+            --set-as-default \
+            --query "PolicyVersion.VersionId" --output text)
+          echo "Created version: $V2_ID"
+
+          VERSION_COUNT=$(aws iam list-policy-versions \
+            --policy-arn "$POLICY_ARN" \
+            --query "Versions | length(@)" --output text)
+          [ "$VERSION_COUNT" = "2" ]
+
+          aws iam delete-policy-version --policy-arn "$POLICY_ARN" --version-id v1
+          aws iam delete-policy --policy-arn "$POLICY_ARN"
+
+      # ── Phase 3: Tags + Service-Linked Roles ─────────────────────────
+      - name: "Tags: tag-role, list-role-tags, untag-role"
+        run: |
+          set -euo pipefail
+
+          TRUST='{"Version":"2012-10-17","Statement":[]}'
+
+          aws iam create-role --role-name tag-role --assume-role-policy-document "$TRUST" > /dev/null
+
+          aws iam tag-role \
+            --role-name tag-role \
+            --tags Key=Environment,Value=production Key=Team,Value=platform
+
+          TAG_COUNT=$(aws iam list-role-tags \
+            --role-name tag-role \
+            --query "Tags | length(@)" --output text)
+          [ "$TAG_COUNT" = "2" ]
+
+          aws iam untag-role --role-name tag-role --tag-keys Team
+
+          TAG_COUNT=$(aws iam list-role-tags \
+            --role-name tag-role \
+            --query "Tags | length(@)" --output text)
+          [ "$TAG_COUNT" = "1" ]
+
+          aws iam delete-role --role-name tag-role
+
+      - name: "UpdateAssumeRolePolicy"
+        run: |
+          set -euo pipefail
+
+          TRUST='{"Version":"2012-10-17","Statement":[]}'
+          NEW_TRUST='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+
+          aws iam create-role --role-name trust-role --assume-role-policy-document "$TRUST" > /dev/null
+          aws iam update-assume-role-policy --role-name trust-role --policy-document "$NEW_TRUST"
+          aws iam delete-role --role-name trust-role
+
+      - name: "ServiceLinkedRole: create, delete, status"
+        run: |
+          set -euo pipefail
+
+          ROLE_NAME=$(aws iam create-service-linked-role \
+            --aws-service-name elasticmapreduce.amazonaws.com \
+            --query "Role.RoleName" --output text)
+          echo "Created SLR: $ROLE_NAME"
+          [ -n "$ROLE_NAME" ]
+
+          TASK_ID=$(aws iam delete-service-linked-role \
+            --role-name "$ROLE_NAME" \
+            --query "DeletionTaskId" --output text)
+          echo "Deletion task: $TASK_ID"
+
+          STATUS=$(aws iam get-service-linked-role-deletion-status \
+            --deletion-task-id "$TASK_ID" \
+            --query "Status" --output text)
+          [ "$STATUS" = "SUCCEEDED" ]
+
+      # ── Rust Integration Tests ───────────────────────────────────────
+      - name: "Rust integration tests"
+        run: |
+          cargo test -p ruststack-integration test_iam -- --ignored
+
+      # ── Cleanup ──────────────────────────────────────────────────────
+      - name: "Cleanup"
+        if: always()
+        run: |
+          set -uo pipefail
+          for USER in test-user ak-user group-user auth-details-user access-key-user; do
+            aws iam delete-user --user-name "$USER" 2>/dev/null || true
+          done
+          for ROLE in test-lambda-role attach-test-role conflict-role inline-role tag-role trust-role profile-role; do
+            aws iam delete-role --role-name "$ROLE" 2>/dev/null || true
+          done
+          for GROUP in test-group; do
+            aws iam delete-group --group-name "$GROUP" 2>/dev/null || true
+          done
+          for PROFILE in test-profile; do
+            aws iam delete-instance-profile --instance-profile-name "$PROFILE" 2>/dev/null || true
+          done
+          echo "Cleanup complete."

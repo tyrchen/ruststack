@@ -302,6 +302,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-iam"
+version = "1.105.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40c899b661942ca188b45e61a26e68eb464e108e088e4b0a48165b835b566ff8"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http 0.63.6",
+ "aws-smithy-json 0.62.5",
+ "aws-smithy-observability",
+ "aws-smithy-query",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-smithy-xml",
+ "aws-types",
+ "fastrand",
+ "http 0.2.12",
+ "http 1.4.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-kinesis"
 version = "1.102.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2918,6 +2943,58 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruststack-iam-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "percent-encoding",
+ "rand",
+ "ruststack-auth",
+ "ruststack-core",
+ "ruststack-iam-http",
+ "ruststack-iam-model",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ruststack-iam-http"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "form_urlencoded",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "ruststack-auth",
+ "ruststack-iam-model",
+ "serde",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ruststack-iam-model"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "ruststack-integration"
 version = "0.1.0"
 dependencies = [
@@ -2930,6 +3007,7 @@ dependencies = [
  "aws-sdk-dynamodb",
  "aws-sdk-dynamodbstreams",
  "aws-sdk-eventbridge",
+ "aws-sdk-iam",
  "aws-sdk-kinesis",
  "aws-sdk-kms",
  "aws-sdk-lambda",
@@ -3339,6 +3417,8 @@ dependencies = [
  "ruststack-dynamodbstreams-http",
  "ruststack-events-core",
  "ruststack-events-http",
+ "ruststack-iam-core",
+ "ruststack-iam-http",
  "ruststack-kinesis-core",
  "ruststack-kinesis-http",
  "ruststack-kms-core",

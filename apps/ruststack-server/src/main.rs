@@ -22,6 +22,7 @@
 //! | `SSM_SKIP_SIGNATURE_VALIDATION` | `true` | Skip SSM SigV4 verification |
 //! | `SNS_SKIP_SIGNATURE_VALIDATION` | `true` | Skip SNS SigV4 verification |
 //! | `SECRETSMANAGER_SKIP_SIGNATURE_VALIDATION` | `true` | Skip Secrets Manager SigV4 verification |
+//! | `IAM_SKIP_SIGNATURE_VALIDATION` | `true` | Skip IAM SigV4 verification |
 //! | `S3_DOMAIN` | `s3.localhost.localstack.cloud` | Virtual hosting domain |
 //! | `LOG_LEVEL` | `info` | Log level filter |
 //! | `RUST_LOG` | *(unset)* | Fine-grained tracing filter (overrides `LOG_LEVEL`) |
@@ -184,6 +185,17 @@ use ruststack_cloudwatch_core::handler::RustStackCloudWatchHandler;
 use ruststack_cloudwatch_core::provider::RustStackCloudWatch;
 #[cfg(feature = "cloudwatch")]
 use ruststack_cloudwatch_http::service::{CloudWatchHttpConfig, CloudWatchHttpService};
+
+#[cfg(feature = "iam")]
+use ruststack_iam_core::config::IamConfig;
+#[cfg(feature = "iam")]
+use ruststack_iam_core::handler::RustStackIamHandler;
+#[cfg(feature = "iam")]
+use ruststack_iam_core::provider::RustStackIam;
+#[cfg(feature = "iam")]
+use ruststack_iam_core::store::IamStore;
+#[cfg(feature = "iam")]
+use ruststack_iam_http::service::{IamHttpConfig, IamHttpService};
 
 #[cfg(feature = "s3")]
 use ruststack_s3_core::{RustStackS3, S3Config};
@@ -397,6 +409,20 @@ fn build_cloudwatch_http_config(config: &CloudWatchConfig) -> CloudWatchHttpConf
     }
 }
 
+/// Build the [`IamHttpConfig`] from the [`IamConfig`].
+///
+/// IAM is a global service so we default the region to `us-east-1`.
+#[cfg(feature = "iam")]
+fn build_iam_http_config(config: &IamConfig) -> IamHttpConfig {
+    let credential_provider = build_credential_provider();
+
+    IamHttpConfig {
+        skip_signature_validation: config.skip_signature_validation,
+        region: "us-east-1".to_owned(),
+        credential_provider,
+    }
+}
+
 /// Build a credential provider from `ACCESS_KEY` / `SECRET_KEY` environment
 /// variables (used by MinIO Mint and other test harnesses).
 #[cfg(any(
@@ -414,7 +440,8 @@ fn build_cloudwatch_http_config(config: &CloudWatchConfig) -> CloudWatchHttpConf
     feature = "ses",
     feature = "apigatewayv2",
     feature = "cloudwatch",
-    feature = "dynamodbstreams"
+    feature = "dynamodbstreams",
+    feature = "iam"
 ))]
 fn build_credential_provider() -> Option<Arc<dyn ruststack_auth::CredentialProvider>> {
     use ruststack_auth::StaticCredentialProvider;
@@ -501,6 +528,7 @@ fn is_compiled_in(name: &str) -> bool {
         || (name == "apigatewayv2" && cfg!(feature = "apigatewayv2"))
         || (name == "cloudwatch" && cfg!(feature = "cloudwatch"))
         || (name == "dynamodbstreams" && cfg!(feature = "dynamodbstreams"))
+        || (name == "iam" && cfg!(feature = "iam"))
 }
 
 /// Parse the `SERVICES` environment variable into a list of service names.
@@ -563,6 +591,9 @@ fn parse_services_value(raw: &str) -> Vec<String> {
         }
         if cfg!(feature = "dynamodbstreams") {
             all.push("dynamodbstreams".to_string());
+        }
+        if cfg!(feature = "iam") {
+            all.push("iam".to_string());
         }
         all
     } else {
@@ -708,6 +739,23 @@ fn build_services(is_enabled: impl Fn(&str) -> bool) -> Vec<Box<dyn ServiceRoute
         let ssm_http_config = build_ssm_http_config(&ssm_config);
         let ssm_service = SsmHttpService::new(Arc::new(ssm_handler), ssm_http_config);
         services.push(Box::new(service::SsmServiceRouter::new(ssm_service)));
+    }
+
+    // ----- IAM (register BEFORE CloudWatch/SES/SNS: all use form-urlencoded POST) -----
+    // IAM matches on SigV4 service=iam.
+    #[cfg(feature = "iam")]
+    if is_enabled("iam") {
+        let iam_config = IamConfig::from_env();
+        info!(
+            iam_skip_signature_validation = iam_config.skip_signature_validation,
+            "initializing IAM service",
+        );
+        let iam_store = Arc::new(IamStore::new());
+        let iam_provider = RustStackIam::new(iam_store, Arc::new(iam_config.clone()));
+        let iam_handler = RustStackIamHandler::new(Arc::new(iam_provider));
+        let iam_http_config = build_iam_http_config(&iam_config);
+        let iam_service = IamHttpService::new(Arc::new(iam_handler), iam_http_config);
+        services.push(Box::new(service::IamServiceRouter::new(iam_service)));
     }
 
     // ----- CloudWatch Metrics (register BEFORE SES/SNS: all use form-urlencoded POST) -----

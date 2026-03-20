@@ -15,7 +15,7 @@ name = "ruststack-server"
 path = "src/main.rs"
 
 [features]
-default = ["s3", "dynamodb", "dynamodbstreams", "sqs", "ssm", "sns", "lambda", "events", "logs", "kms", "kinesis", "secretsmanager", "ses", "apigatewayv2", "cloudwatch"]
+default = ["s3", "dynamodb", "dynamodbstreams", "sqs", "ssm", "sns", "lambda", "events", "logs", "kms", "kinesis", "secretsmanager", "ses", "apigatewayv2", "cloudwatch", "iam"]
 s3 = ["dep:ruststack-s3-core", "dep:ruststack-s3-http", "dep:ruststack-s3-model"]
 dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
 dynamodbstreams = ["dynamodb", "dep:ruststack-dynamodbstreams-core", "dep:ruststack-dynamodbstreams-http"]
@@ -31,6 +31,7 @@ secretsmanager = ["dep:ruststack-secretsmanager-core", "dep:ruststack-secretsman
 ses = ["dep:ruststack-ses-core", "dep:ruststack-ses-http"]
 apigatewayv2 = ["dep:ruststack-apigatewayv2-core", "dep:ruststack-apigatewayv2-http"]
 cloudwatch = ["dep:ruststack-cloudwatch-core", "dep:ruststack-cloudwatch-http"]
+iam = ["dep:ruststack-iam-core", "dep:ruststack-iam-http"]
 
 [dependencies]
 # Internal crates - shared
@@ -98,6 +99,10 @@ ruststack-dynamodbstreams-http = { workspace = true, optional = true }
 # Internal crates - CloudWatch Metrics (optional, gated by "cloudwatch" feature)
 ruststack-cloudwatch-core = { workspace = true, optional = true }
 ruststack-cloudwatch-http = { workspace = true, optional = true }
+
+# Internal crates - IAM (optional, gated by "iam" feature)
+ruststack-iam-core = { workspace = true, optional = true }
+ruststack-iam-http = { workspace = true, optional = true }
 
 # Async
 tokio = { workspace = true }

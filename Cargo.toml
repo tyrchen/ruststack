@@ -72,6 +72,9 @@ ruststack-cloudwatch-core = { path = "crates/ruststack-cloudwatch-core" }
 ruststack-dynamodbstreams-model = { path = "crates/ruststack-dynamodbstreams-model" }
 ruststack-dynamodbstreams-http = { path = "crates/ruststack-dynamodbstreams-http" }
 ruststack-dynamodbstreams-core = { path = "crates/ruststack-dynamodbstreams-core" }
+ruststack-iam-model = { path = "crates/ruststack-iam-model" }
+ruststack-iam-http = { path = "crates/ruststack-iam-http" }
+ruststack-iam-core = { path = "crates/ruststack-iam-core" }
 
 # Async runtime
 tokio = { version = "1.49", features = [
@@ -165,6 +168,7 @@ aws-sdk-kinesis = "1"
 aws-sdk-secretsmanager = "1"
 aws-sdk-ses = "1"
 aws-sdk-apigatewayv2 = "1"
+aws-sdk-iam = "1"
 reqwest = { version = "0.12", features = ["json"] }
 aws-credential-types = "1.2"
 aws-smithy-runtime-api = "1.11"

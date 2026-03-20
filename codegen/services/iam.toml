@@ -1,0 +1,80 @@
+[service]
+name = "iam"
+display_name = "IAM"
+rust_prefix = "Iam"
+namespace = "com.amazonaws.iam"
+protocol = "awsQuery"
+
+[protocol]
+serde_rename = "PascalCase"
+emit_serde_derives = true
+
+[operations]
+phase0 = [
+    # User management
+    "CreateUser", "GetUser", "DeleteUser", "ListUsers", "UpdateUser",
+    # Role management
+    "CreateRole", "GetRole", "DeleteRole", "ListRoles", "UpdateRole",
+    # Managed policy management
+    "CreatePolicy", "GetPolicy", "DeletePolicy", "ListPolicies",
+    # Policy attachment - users
+    "AttachUserPolicy", "DetachUserPolicy", "ListAttachedUserPolicies",
+    # Policy attachment - roles
+    "AttachRolePolicy", "DetachRolePolicy", "ListAttachedRolePolicies",
+    # Access key management
+    "CreateAccessKey", "DeleteAccessKey", "ListAccessKeys", "UpdateAccessKey",
+    "GetAccessKeyLastUsed",
+]
+phase1 = [
+    # Group management
+    "CreateGroup", "GetGroup", "DeleteGroup", "ListGroups", "UpdateGroup",
+    # Group membership
+    "AddUserToGroup", "RemoveUserFromGroup", "ListGroupsForUser",
+    # Policy attachment - groups
+    "AttachGroupPolicy", "DetachGroupPolicy", "ListAttachedGroupPolicies",
+    # Instance profile management
+    "CreateInstanceProfile", "GetInstanceProfile", "DeleteInstanceProfile",
+    "ListInstanceProfiles", "ListInstanceProfilesForRole",
+    "AddRoleToInstanceProfile", "RemoveRoleFromInstanceProfile",
+]
+phase2 = [
+    # Policy versions
+    "CreatePolicyVersion", "GetPolicyVersion", "DeletePolicyVersion",
+    "ListPolicyVersions", "SetDefaultPolicyVersion",
+    # Inline policies - users
+    "PutUserPolicy", "GetUserPolicy", "DeleteUserPolicy", "ListUserPolicies",
+    # Inline policies - roles
+    "PutRolePolicy", "GetRolePolicy", "DeleteRolePolicy", "ListRolePolicies",
+    # Inline policies - groups
+    "PutGroupPolicy", "GetGroupPolicy", "DeleteGroupPolicy", "ListGroupPolicies",
+]
+phase3 = [
+    # Tagging - users
+    "TagUser", "UntagUser", "ListUserTags",
+    # Tagging - roles
+    "TagRole", "UntagRole", "ListRoleTags",
+    # Service-linked roles
+    "CreateServiceLinkedRole", "DeleteServiceLinkedRole",
+    "GetServiceLinkedRoleDeletionStatus",
+    # Trust policy
+    "UpdateAssumeRolePolicy",
+    # Policy simulation (stubs)
+    "SimulatePrincipalPolicy", "SimulateCustomPolicy",
+    # Entity details
+    "ListEntitiesForPolicy",
+    "GetAccountAuthorizationDetails",
+]
+
+[errors.custom]
+NoSuchEntity = { status = 404, message = "The specified entity cannot be found" }
+EntityAlreadyExists = { status = 409, message = "The entity already exists" }
+LimitExceeded = { status = 409, message = "The request was rejected because it attempted to create resources beyond the current account limits" }
+DeleteConflict = { status = 409, message = "The request was rejected because it attempted to delete a resource that has attached subordinate entities" }
+MalformedPolicyDocument = { status = 400, message = "The policy document is malformed" }
+InvalidInput = { status = 400, message = "The request was rejected because an invalid or out-of-range value was supplied for an input parameter" }
+MissingAction = { status = 400, message = "Missing action parameter" }
+InvalidAction = { status = 400, message = "The action is not valid for this endpoint" }
+ServiceFailure = { status = 500, message = "The request processing has failed because of an unknown error, exception or failure" }
+
+[output]
+file_layout = "flat"
