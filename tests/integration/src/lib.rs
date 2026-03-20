@@ -402,6 +402,23 @@ pub fn apigatewayv2_client() -> aws_sdk_apigatewayv2::Client {
     aws_sdk_apigatewayv2::Client::from_conf(config)
 }
 
+/// Create a configured IAM client pointing at the local server.
+#[must_use]
+pub fn iam_client() -> aws_sdk_iam::Client {
+    init_tracing();
+
+    let creds = Credentials::new("test", "test", None, None, "integration-test");
+
+    let config = aws_sdk_iam::config::Builder::new()
+        .behavior_version(BehaviorVersion::latest())
+        .region(Region::new("us-east-1"))
+        .credentials_provider(creds)
+        .endpoint_url(endpoint_url())
+        .build();
+
+    aws_sdk_iam::Client::from_conf(config)
+}
+
 mod test_apigatewayv2;
 mod test_bucket;
 mod test_cloudwatch;
@@ -411,6 +428,7 @@ mod test_dynamodbstreams;
 mod test_error;
 mod test_events;
 mod test_health;
+mod test_iam;
 mod test_kinesis;
 mod test_kms;
 mod test_lambda;
