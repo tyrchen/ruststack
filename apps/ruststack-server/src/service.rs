@@ -756,3 +756,190 @@ mod secretsmanager_router {
 
 #[cfg(feature = "secretsmanager")]
 pub use secretsmanager_router::SecretsManagerServiceRouter;
+
+// ---------------------------------------------------------------------------
+// SES
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "ses")]
+mod ses_router {
+    use std::convert::Infallible;
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use http_body_util::BodyExt;
+    use hyper::body::Incoming;
+    use hyper::service::Service;
+    use ruststack_ses_http::dispatch::SesHandler;
+    use ruststack_ses_http::service::SesHttpService;
+    use ruststack_ses_http::v2::SesV2HttpService;
+
+    use super::{GatewayBody, ServiceRouter};
+
+    /// Extract the SigV4 service name from the Authorization header.
+    ///
+    /// Parses `Credential=AKID/date/region/SERVICE/aws4_request` and returns SERVICE.
+    fn extract_sigv4_service(headers: &http::HeaderMap) -> Option<&str> {
+        let auth = headers.get("authorization")?.to_str().ok()?;
+        let credential_start = auth.find("Credential=")? + "Credential=".len();
+        let credential_end = auth[credential_start..]
+            .find(',')
+            .map_or(auth.len(), |i| credential_start + i);
+        let credential = &auth[credential_start..credential_end];
+        // Format: AKID/date/region/service/aws4_request
+        let parts: Vec<&str> = credential.split('/').collect();
+        if parts.len() >= 4 {
+            Some(parts[3])
+        } else {
+            None
+        }
+    }
+
+    /// Routes requests to the SES service.
+    ///
+    /// Matches SES v1 (`awsQuery` via SigV4 service=`email`) and SES v2
+    /// (`restJson1` via `/v2/email/` path prefix). Also handles the
+    /// `/_aws/ses` retrospection endpoint.
+    pub struct SesServiceRouter<H: SesHandler> {
+        inner_v1: SesHttpService<H>,
+        inner_v2: SesV2HttpService<H>,
+    }
+
+    impl<H: SesHandler> SesServiceRouter<H> {
+        /// Create a new SES service router.
+        pub fn new(v1: SesHttpService<H>, v2: SesV2HttpService<H>) -> Self {
+            Self {
+                inner_v1: v1,
+                inner_v2: v2,
+            }
+        }
+    }
+
+    impl<H: SesHandler> ServiceRouter for SesServiceRouter<H> {
+        fn name(&self) -> &'static str {
+            "ses"
+        }
+
+        /// SES matches in three ways:
+        /// 1. SES v2: path starts with `/v2/email/`
+        /// 2. SES retrospection: path starts with `/_aws/ses`
+        /// 3. SES v1: form-urlencoded POST with SigV4 service=`email`
+        fn matches(&self, req: &http::Request<Incoming>) -> bool {
+            let path = req.uri().path();
+
+            // SES v2: path-based routing.
+            if path.starts_with("/v2/email/") || path == "/v2/email" {
+                return true;
+            }
+
+            // SES retrospection endpoint.
+            if path == "/_aws/ses" {
+                return true;
+            }
+
+            // SES v1: form-urlencoded POST with SigV4 service=email.
+            if *req.method() != http::Method::POST {
+                return false;
+            }
+
+            let is_form = req
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|ct| ct.contains("x-www-form-urlencoded"));
+
+            if !is_form {
+                return false;
+            }
+
+            // Check SigV4 Credential for service=ses (or email).
+            // The AWS SDK and CLI sign SES v1 with service name "ses".
+            // Some older SDKs may use "email" as the signing name.
+            extract_sigv4_service(req.headers()).is_some_and(|svc| svc == "ses" || svc == "email")
+        }
+
+        fn call(
+            &self,
+            req: http::Request<Incoming>,
+        ) -> Pin<Box<dyn Future<Output = Result<http::Response<GatewayBody>, Infallible>> + Send>>
+        {
+            let path = req.uri().path().to_owned();
+
+            if path.starts_with("/v2/email") || path == "/_aws/ses" {
+                // Route to SES v2 / retrospection handler.
+                let svc = self.inner_v2.clone();
+                return Box::pin(async move {
+                    let resp = svc.call(req).await;
+                    Ok(resp.unwrap_or_else(|e| match e {}).map(BodyExt::boxed))
+                });
+            }
+
+            // Route to SES v1 handler.
+            let svc = self.inner_v1.clone();
+            Box::pin(async move {
+                let resp = svc.call(req).await;
+                Ok(resp.unwrap_or_else(|e| match e {}).map(BodyExt::boxed))
+            })
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_should_extract_sigv4_service_ses() {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(
+                "authorization",
+                http::HeaderValue::from_static(
+                    "AWS4-HMAC-SHA256 Credential=test/20260319/us-east-1/ses/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=abc123",
+                ),
+            );
+            assert_eq!(extract_sigv4_service(&headers), Some("ses"));
+        }
+
+        #[test]
+        fn test_should_extract_sigv4_service_email() {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(
+                "authorization",
+                http::HeaderValue::from_static(
+                    "AWS4-HMAC-SHA256 Credential=AKID/20260319/us-east-1/email/aws4_request, SignedHeaders=host, Signature=abc123",
+                ),
+            );
+            assert_eq!(extract_sigv4_service(&headers), Some("email"));
+        }
+
+        #[test]
+        fn test_should_extract_sigv4_service_sns() {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(
+                "authorization",
+                http::HeaderValue::from_static(
+                    "AWS4-HMAC-SHA256 Credential=AKID/20260319/us-east-1/sns/aws4_request, SignedHeaders=host, Signature=abc123",
+                ),
+            );
+            assert_eq!(extract_sigv4_service(&headers), Some("sns"));
+        }
+
+        #[test]
+        fn test_should_return_none_for_missing_auth_header() {
+            let headers = http::HeaderMap::new();
+            assert_eq!(extract_sigv4_service(&headers), None);
+        }
+
+        #[test]
+        fn test_should_return_none_for_malformed_credential() {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(
+                "authorization",
+                http::HeaderValue::from_static("AWS4-HMAC-SHA256 Credential=AKID, Signature=abc"),
+            );
+            assert_eq!(extract_sigv4_service(&headers), None);
+        }
+    }
+}
+
+#[cfg(feature = "ses")]
+pub use ses_router::SesServiceRouter;
