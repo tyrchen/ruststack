@@ -159,6 +159,15 @@ use ruststack_apigatewayv2_core::provider::RustStackApiGatewayV2;
 #[cfg(feature = "apigatewayv2")]
 use ruststack_apigatewayv2_http::service::{ApiGatewayV2HttpConfig, ApiGatewayV2HttpService};
 
+#[cfg(feature = "cloudwatch")]
+use ruststack_cloudwatch_core::config::CloudWatchConfig;
+#[cfg(feature = "cloudwatch")]
+use ruststack_cloudwatch_core::handler::RustStackCloudWatchHandler;
+#[cfg(feature = "cloudwatch")]
+use ruststack_cloudwatch_core::provider::RustStackCloudWatch;
+#[cfg(feature = "cloudwatch")]
+use ruststack_cloudwatch_http::service::{CloudWatchHttpConfig, CloudWatchHttpService};
+
 #[cfg(feature = "s3")]
 use ruststack_s3_core::{RustStackS3, S3Config};
 #[cfg(feature = "s3")]
@@ -347,6 +356,18 @@ fn build_apigatewayv2_http_config(config: &ApiGatewayV2Config) -> ApiGatewayV2Ht
     }
 }
 
+/// Build the [`CloudWatchHttpConfig`] from the [`CloudWatchConfig`].
+#[cfg(feature = "cloudwatch")]
+fn build_cloudwatch_http_config(config: &CloudWatchConfig) -> CloudWatchHttpConfig {
+    let credential_provider = build_credential_provider();
+
+    CloudWatchHttpConfig {
+        skip_signature_validation: config.skip_signature_validation,
+        region: config.default_region.clone(),
+        credential_provider,
+    }
+}
+
 /// Build a credential provider from `ACCESS_KEY` / `SECRET_KEY` environment
 /// variables (used by MinIO Mint and other test harnesses).
 #[cfg(any(
@@ -362,7 +383,8 @@ fn build_apigatewayv2_http_config(config: &ApiGatewayV2Config) -> ApiGatewayV2Ht
     feature = "kinesis",
     feature = "secretsmanager",
     feature = "ses",
-    feature = "apigatewayv2"
+    feature = "apigatewayv2",
+    feature = "cloudwatch"
 ))]
 fn build_credential_provider() -> Option<Arc<dyn ruststack_auth::CredentialProvider>> {
     use ruststack_auth::StaticCredentialProvider;
@@ -612,6 +634,22 @@ fn build_services(is_enabled: impl Fn(&str) -> bool) -> Vec<Box<dyn ServiceRoute
         let ssm_http_config = build_ssm_http_config(&ssm_config);
         let ssm_service = SsmHttpService::new(Arc::new(ssm_handler), ssm_http_config);
         services.push(Box::new(service::SsmServiceRouter::new(ssm_service)));
+    }
+
+    // ----- CloudWatch Metrics (register BEFORE SES/SNS: all use form-urlencoded POST) -----
+    // CloudWatch matches on SigV4 service=monitoring.
+    #[cfg(feature = "cloudwatch")]
+    if is_enabled("cloudwatch") {
+        let cw_config = CloudWatchConfig::from_env();
+        info!(
+            cloudwatch_skip_signature_validation = cw_config.skip_signature_validation,
+            "initializing CloudWatch Metrics service",
+        );
+        let cw_provider = RustStackCloudWatch::new(Arc::new(cw_config.clone()));
+        let cw_handler = RustStackCloudWatchHandler::new(Arc::new(cw_provider));
+        let cw_http_config = build_cloudwatch_http_config(&cw_config);
+        let cw_service = CloudWatchHttpService::new(Arc::new(cw_handler), cw_http_config);
+        services.push(Box::new(service::CloudWatchServiceRouter::new(cw_service)));
     }
 
     // ----- SES (register BEFORE SNS: both use form-urlencoded POST) -----

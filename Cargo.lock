@@ -2563,6 +2563,59 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruststack-cloudwatch-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "parking_lot",
+ "ruststack-auth",
+ "ruststack-cloudwatch-http",
+ "ruststack-cloudwatch-model",
+ "ruststack-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ruststack-cloudwatch-http"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "form_urlencoded",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "ruststack-auth",
+ "ruststack-cloudwatch-model",
+ "serde",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ruststack-cloudwatch-model"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "ruststack-core"
 version = "0.1.0"
 dependencies = [
@@ -3097,6 +3150,8 @@ dependencies = [
  "ruststack-apigatewayv2-core",
  "ruststack-apigatewayv2-http",
  "ruststack-auth",
+ "ruststack-cloudwatch-core",
+ "ruststack-cloudwatch-http",
  "ruststack-core",
  "ruststack-dynamodb-core",
  "ruststack-dynamodb-http",
