@@ -1294,7 +1294,16 @@ mod cloudwatch_router {
 
             let headers = req.headers();
 
-            // rpcv2Cbor header-based routing (AWS SDK v1.108+).
+            // awsJson_1.0: X-Amz-Target starts with GraniteServiceVersion20100801.
+            if headers
+                .get("x-amz-target")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|t| t.starts_with("GraniteServiceVersion20100801."))
+            {
+                return true;
+            }
+
+            // rpcv2Cbor header-based routing.
             let is_rpcv2_cbor = headers
                 .get("smithy-protocol")
                 .and_then(|v| v.to_str().ok())

@@ -118,15 +118,28 @@ fn detect_protocol(parts: &http::request::Parts) -> Protocol {
     {
         return Protocol::RpcV2Cbor;
     }
-    if parts
+    let content_type = parts
         .headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|ct| ct.contains("application/cbor"))
-    {
+        .unwrap_or("");
+    if content_type.contains("application/cbor") {
         return Protocol::RpcV2Cbor;
     }
+    // awsJson_1.0: AWS CLI v2.27+ sends X-Amz-Target with JSON body.
+    if content_type.contains("application/x-amz-json") && parts.headers.contains_key("x-amz-target")
+    {
+        return Protocol::AwsJson;
+    }
     Protocol::AwsQuery
+}
+
+/// Extract the operation name from an `X-Amz-Target` header.
+///
+/// Format: `GraniteServiceVersion20100801.OperationName`
+fn extract_json_operation(headers: &http::HeaderMap) -> Option<&str> {
+    let target = headers.get("x-amz-target")?.to_str().ok()?;
+    target.split('.').nth(1)
 }
 
 /// Extract the operation name from an rpcv2Cbor URL path.
@@ -178,6 +191,25 @@ async fn process_request<H: CloudWatchHandler>(
                 Err(err) => return make_error_response(&err, request_id, protocol),
             }
         }
+        Protocol::AwsJson => match extract_json_operation(&parts.headers) {
+            Some(name) => match CloudWatchOperation::from_name(name) {
+                Some(op) => op,
+                None => {
+                    return make_error_response(
+                        &CloudWatchError::unknown_operation(name),
+                        request_id,
+                        protocol,
+                    );
+                }
+            },
+            None => {
+                return make_error_response(
+                    &CloudWatchError::missing_action(),
+                    request_id,
+                    protocol,
+                );
+            }
+        },
         Protocol::RpcV2Cbor => {
             let path = parts.uri.path();
             match extract_cbor_operation(path) {
@@ -233,8 +265,28 @@ fn make_error_response(
 ) -> http::Response<CloudWatchResponseBody> {
     match protocol {
         Protocol::AwsQuery => error_to_response(err, request_id),
+        Protocol::AwsJson => json_error_response(err, request_id),
         Protocol::RpcV2Cbor => cbor_error_response(err, request_id),
     }
+}
+
+/// Build a JSON error response for awsJson_1.0 protocol.
+fn json_error_response(
+    err: &CloudWatchError,
+    request_id: &str,
+) -> http::Response<CloudWatchResponseBody> {
+    let body = serde_json::json!({
+        "__type": err.code.as_str(),
+        "message": err.message,
+    });
+    http::Response::builder()
+        .status(err.status_code)
+        .header("content-type", "application/x-amz-json-1.0")
+        .header("x-amzn-requestid", request_id)
+        .body(CloudWatchResponseBody::from_bytes(
+            serde_json::to_vec(&body).unwrap_or_default(),
+        ))
+        .expect("valid JSON error response")
 }
 
 /// Collect the incoming body into a single `Bytes` buffer.

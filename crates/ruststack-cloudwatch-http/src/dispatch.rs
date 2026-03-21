@@ -15,6 +15,8 @@ use crate::body::CloudWatchResponseBody;
 pub enum Protocol {
     /// awsQuery: form-urlencoded request, XML response.
     AwsQuery,
+    /// awsJson_1.0: JSON request/response with `X-Amz-Target` header.
+    AwsJson,
     /// Smithy rpcv2Cbor: CBOR request, CBOR response.
     RpcV2Cbor,
 }

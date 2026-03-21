@@ -76,6 +76,7 @@ impl CloudWatchHandler for RustStackCloudWatchHandler {
         Box::pin(async move {
             match protocol {
                 Protocol::AwsQuery => dispatch(provider.as_ref(), op, &body),
+                Protocol::AwsJson => json_dispatch(provider.as_ref(), op, &body),
                 Protocol::RpcV2Cbor => cbor_dispatch(provider.as_ref(), op, &body),
             }
         })
@@ -736,6 +737,226 @@ fn dispatch(
             w.write_response_metadata(&request_id);
             w.end_element("GetMetricStreamResponse");
             Ok(xml_response(w.into_string(), &request_id))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// awsJson dispatch
+// ---------------------------------------------------------------------------
+
+/// Deserialize a JSON body into an input type.
+fn json_decode<T: serde::de::DeserializeOwned>(body: &[u8]) -> Result<T, CloudWatchError> {
+    if body.is_empty() {
+        return serde_json::from_value(serde_json::Value::Object(serde_json::Map::default()))
+            .map_err(|e| {
+                CloudWatchError::with_message(
+                    CloudWatchErrorCode::InvalidParameterValueException,
+                    format!("Failed to build default input: {e}"),
+                )
+            });
+    }
+    serde_json::from_slice(body).map_err(|e| {
+        CloudWatchError::with_message(
+            CloudWatchErrorCode::InvalidParameterValueException,
+            format!("JSON decode: {e}"),
+        )
+    })
+}
+
+/// Build a JSON response for an awsJson_1.0 operation.
+fn json_response<T: Serialize>(
+    output: &T,
+    request_id: &str,
+) -> Result<http::Response<CloudWatchResponseBody>, CloudWatchError> {
+    let buf = serde_json::to_vec(output)
+        .map_err(|e| CloudWatchError::internal_error(format!("JSON encode: {e}")))?;
+    Ok(http::Response::builder()
+        .status(http::StatusCode::OK)
+        .header("content-type", "application/x-amz-json-1.0")
+        .header("x-amzn-requestid", request_id)
+        .body(CloudWatchResponseBody::from_bytes(buf))
+        .expect("valid JSON response"))
+}
+
+/// Build an empty JSON response `{}` for void operations.
+fn json_empty_response(
+    request_id: &str,
+) -> Result<http::Response<CloudWatchResponseBody>, CloudWatchError> {
+    let buf = serde_json::to_vec(&serde_json::Value::Object(serde_json::Map::new()))
+        .map_err(|e| CloudWatchError::internal_error(format!("JSON encode: {e}")))?;
+    Ok(http::Response::builder()
+        .status(http::StatusCode::OK)
+        .header("content-type", "application/x-amz-json-1.0")
+        .header("x-amzn-requestid", request_id)
+        .body(CloudWatchResponseBody::from_bytes(buf))
+        .expect("valid JSON response"))
+}
+
+/// Dispatch a CloudWatch operation using the awsJson_1.0 protocol.
+#[allow(clippy::too_many_lines)]
+fn json_dispatch(
+    provider: &RustStackCloudWatch,
+    op: CloudWatchOperation,
+    body: &[u8],
+) -> Result<http::Response<CloudWatchResponseBody>, CloudWatchError> {
+    let request_id = uuid::Uuid::new_v4().to_string();
+
+    match op {
+        CloudWatchOperation::PutMetricData => {
+            let input: PutMetricDataInput = json_decode(body)?;
+            provider.put_metric_data(input)?;
+            json_empty_response(&request_id)
+        }
+        CloudWatchOperation::GetMetricStatistics => {
+            let input: GetMetricStatisticsInput = json_decode(body)?;
+            let output = provider.get_metric_statistics(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::GetMetricData => {
+            let input: GetMetricDataInput = json_decode(body)?;
+            let output = provider.get_metric_data(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::ListMetrics => {
+            let input: ListMetricsInput = json_decode(body)?;
+            let output = provider.list_metrics(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::PutMetricAlarm => {
+            let input: PutMetricAlarmInput = json_decode(body)?;
+            provider.put_metric_alarm(input)?;
+            json_empty_response(&request_id)
+        }
+        CloudWatchOperation::DescribeAlarms => {
+            let input: DescribeAlarmsInput = json_decode(body)?;
+            let output = provider.describe_alarms(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::DescribeAlarmsForMetric => {
+            let input: DescribeAlarmsForMetricInput = json_decode(body)?;
+            let output = provider.describe_alarms_for_metric(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::DeleteAlarms => {
+            let input: DeleteAlarmsInput = json_decode(body)?;
+            provider.delete_alarms(input)?;
+            json_empty_response(&request_id)
+        }
+        CloudWatchOperation::SetAlarmState => {
+            let input: SetAlarmStateInput = json_decode(body)?;
+            provider.set_alarm_state(input)?;
+            json_empty_response(&request_id)
+        }
+        CloudWatchOperation::EnableAlarmActions => {
+            let input: EnableAlarmActionsInput = json_decode(body)?;
+            provider.enable_alarm_actions(input)?;
+            json_empty_response(&request_id)
+        }
+        CloudWatchOperation::DisableAlarmActions => {
+            let input: DisableAlarmActionsInput = json_decode(body)?;
+            provider.disable_alarm_actions(input)?;
+            json_empty_response(&request_id)
+        }
+        CloudWatchOperation::DescribeAlarmHistory => {
+            let input: DescribeAlarmHistoryInput = json_decode(body)?;
+            let output = provider.describe_alarm_history(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::PutCompositeAlarm => {
+            let input: PutCompositeAlarmInput = json_decode(body)?;
+            provider.put_composite_alarm(input)?;
+            json_empty_response(&request_id)
+        }
+        CloudWatchOperation::TagResource => {
+            let input: TagResourceInput = json_decode(body)?;
+            let output = provider.tag_resource(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::UntagResource => {
+            let input: UntagResourceInput = json_decode(body)?;
+            let output = provider.untag_resource(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::ListTagsForResource => {
+            let input: ListTagsForResourceInput = json_decode(body)?;
+            let output = provider.list_tags_for_resource(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::PutDashboard => {
+            let input: PutDashboardInput = json_decode(body)?;
+            let output = provider.put_dashboard(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::GetDashboard => {
+            let input: GetDashboardInput = json_decode(body)?;
+            let output = provider.get_dashboard(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::DeleteDashboards => {
+            let input: DeleteDashboardsInput = json_decode(body)?;
+            let output = provider.delete_dashboards(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::ListDashboards => {
+            let input: ListDashboardsInput = json_decode(body)?;
+            let output = provider.list_dashboards(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::PutInsightRule => {
+            let input: PutInsightRuleInput = json_decode(body)?;
+            let output = provider.put_insight_rule(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::DeleteInsightRules => {
+            let input: DeleteInsightRulesInput = json_decode(body)?;
+            let output = provider.delete_insight_rules(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::DescribeInsightRules => {
+            let input: DescribeInsightRulesInput = json_decode(body)?;
+            let output = provider.describe_insight_rules(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::PutAnomalyDetector => {
+            let input: PutAnomalyDetectorInput = json_decode(body)?;
+            let output = provider.put_anomaly_detector(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::DescribeAnomalyDetectors => {
+            let input: DescribeAnomalyDetectorsInput = json_decode(body)?;
+            let output = provider.describe_anomaly_detectors(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::DeleteAnomalyDetector => {
+            let input: DeleteAnomalyDetectorInput = json_decode(body)?;
+            let output = provider.delete_anomaly_detector(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::PutManagedInsightRules => {
+            let input: PutManagedInsightRulesInput = json_decode(body)?;
+            let output = provider.put_managed_insight_rules(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::PutMetricStream => {
+            let input: PutMetricStreamInput = json_decode(body)?;
+            let output = provider.put_metric_stream(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::DeleteMetricStream => {
+            let input: DeleteMetricStreamInput = json_decode(body)?;
+            let output = provider.delete_metric_stream(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::ListMetricStreams => {
+            let input: ListMetricStreamsInput = json_decode(body)?;
+            let output = provider.list_metric_streams(input)?;
+            json_response(&output, &request_id)
+        }
+        CloudWatchOperation::GetMetricStream => {
+            let input: GetMetricStreamInput = json_decode(body)?;
+            let output = provider.get_metric_stream(input)?;
+            json_response(&output, &request_id)
         }
     }
 }
