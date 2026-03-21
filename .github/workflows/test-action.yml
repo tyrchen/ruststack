@@ -28,7 +28,7 @@ jobs:
     name: "Action: default config + all-service smoke tests"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Start RustStack via action (defaults)
         id: ruststack
@@ -425,7 +425,7 @@ jobs:
     name: "Action: custom port (5566)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Start RustStack on port 5566
         id: ruststack
@@ -474,7 +474,7 @@ jobs:
     name: "Action: custom region (eu-west-1)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Start RustStack with eu-west-1
         id: ruststack
@@ -514,7 +514,7 @@ jobs:
     name: "Action: custom credentials"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Start RustStack with custom credentials
         id: ruststack
@@ -550,7 +550,7 @@ jobs:
     name: "Action: services filter (s3,sqs,sts)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Start RustStack with limited services
         id: ruststack
@@ -622,7 +622,7 @@ jobs:
     name: "Action: log level (debug)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Start RustStack with debug logging
         id: ruststack
@@ -660,7 +660,7 @@ jobs:
     name: "Action: wait timeout"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Start RustStack with short timeout (succeeds)
         id: ruststack
@@ -686,7 +686,7 @@ jobs:
     name: "Action: cross-service integration"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Start RustStack
         id: ruststack
