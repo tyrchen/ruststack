@@ -212,7 +212,7 @@ jobs:
           echo "Lambda OK"
 
       # ── CloudWatch smoke test ─────────────────────────────────────────
-      - name: "CloudWatch: put metric + describe alarms"
+      - name: "CloudWatch: put metric + list metrics"
         run: |
           set -euo pipefail
 
@@ -222,9 +222,24 @@ jobs:
           aws cloudwatch list-metrics --namespace ActionTest \
             | jq -e '.Metrics | length >= 1'
 
-          # MetricAlarms may be null when no alarms exist — handle gracefully
-          aws cloudwatch describe-alarms \
-            | jq -e '(.MetricAlarms // []) | type == "array"'
+          # Put an alarm so describe-alarms has data to return
+          aws cloudwatch put-metric-alarm \
+            --alarm-name action-test-alarm \
+            --namespace ActionTest \
+            --metric-name TestMetric \
+            --statistic Average \
+            --period 60 \
+            --evaluation-periods 1 \
+            --threshold 100 \
+            --comparison-operator GreaterThanThreshold
+
+          FOUND=$(aws cloudwatch describe-alarms \
+            --alarm-names action-test-alarm \
+            --query "length(MetricAlarms || \`[]\`)" --output text)
+          echo "Alarm count: $FOUND"
+          [ "$FOUND" -ge 1 ]
+
+          aws cloudwatch delete-alarms --alarm-names action-test-alarm
           echo "CloudWatch OK"
 
       # ── Events (EventBridge) smoke test ───────────────────────────────
