@@ -53,3 +53,59 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           body: ${{ steps.git-cliff.outputs.content }}
+
+  build-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ruststack:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify Docker image starts and passes health check
+        run: |
+          docker run -d --name ruststack-ci \
+            -p 4566:4566 \
+            ruststack:ci
+
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then
+              echo "Health check passed"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Docker container did not become healthy within 30s"
+              docker logs ruststack-ci
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # Verify all services are reported as running.
+          # 18 services + apigatewayv2-execution router = 19 entries.
+          HEALTH=$(curl -sf http://127.0.0.1:4566/_localstack/health)
+          echo "$HEALTH" | jq .
+
+          RUNNING_COUNT=$(echo "$HEALTH" | jq '[.services | to_entries[] | select(.value == "running")] | length')
+          echo "Running services: $RUNNING_COUNT"
+          if [ "$RUNNING_COUNT" -lt 19 ]; then
+            echo "::error::Expected 19 running services, got $RUNNING_COUNT"
+            exit 1
+          fi
+
+      - name: Print Docker image size
+        run: docker images ruststack:ci --format '{{.Size}}'
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f ruststack-ci 2>/dev/null || true

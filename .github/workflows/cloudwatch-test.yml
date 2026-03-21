@@ -1,0 +1,226 @@
+name: cloudwatch-test
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  cloudwatch-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup toolchain install stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and start RustStack
+        id: ruststack
+        run: |
+          cargo build --release -p ruststack-server
+
+          GATEWAY_LISTEN=0.0.0.0:4566 \
+          LOG_LEVEL=warn \
+          cargo run --release -p ruststack-server &
+
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then
+              echo "Server is ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Server did not start within 30s"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "endpoint=http://localhost:4566" >> "$GITHUB_OUTPUT"
+
+          echo "AWS_ENDPOINT_URL=http://localhost:4566" >> "$GITHUB_ENV"
+          echo "AWS_DEFAULT_REGION=us-east-1" >> "$GITHUB_ENV"
+          echo "AWS_ACCESS_KEY_ID=test" >> "$GITHUB_ENV"
+          echo "AWS_SECRET_ACCESS_KEY=test" >> "$GITHUB_ENV"
+
+      # ── PutMetricData + ListMetrics ─────────────────────────────
+      - name: "PutMetricData + ListMetrics"
+        run: |
+          set -euo pipefail
+
+          aws cloudwatch put-metric-data \
+            --namespace "CI/Test" \
+            --metric-name "RequestCount" \
+            --value 42 \
+            --unit Count
+
+          aws cloudwatch put-metric-data \
+            --namespace "CI/Test" \
+            --metric-name "Latency" \
+            --value 123.5 \
+            --unit Milliseconds
+
+          COUNT=$(aws cloudwatch list-metrics \
+            --namespace "CI/Test" \
+            --query "Metrics | length(@)" --output text)
+          [ "$COUNT" -ge 2 ]
+
+      # ── GetMetricStatistics ─────────────────────────────────────
+      - name: "GetMetricStatistics"
+        run: |
+          set -euo pipefail
+
+          START=$(date -u -d '1 hour ago' '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || date -u -v-1H '+%Y-%m-%dT%H:%M:%S')
+          END=$(date -u '+%Y-%m-%dT%H:%M:%S')
+
+          RESULT=$(aws cloudwatch get-metric-statistics \
+            --namespace "CI/Test" \
+            --metric-name "RequestCount" \
+            --start-time "$START" \
+            --end-time "$END" \
+            --period 3600 \
+            --statistics Sum Average)
+          echo "$RESULT" | jq -e '.Datapoints | length >= 0'
+
+      # ── PutMetricAlarm + DescribeAlarms ─────────────────────────
+      - name: "PutMetricAlarm + DescribeAlarms"
+        run: |
+          set -euo pipefail
+
+          aws cloudwatch put-metric-alarm \
+            --alarm-name "ci-high-latency" \
+            --namespace "CI/Test" \
+            --metric-name "Latency" \
+            --statistic Average \
+            --period 300 \
+            --evaluation-periods 1 \
+            --threshold 100 \
+            --comparison-operator GreaterThanThreshold
+
+          FOUND=$(aws cloudwatch describe-alarms \
+            --alarm-names "ci-high-latency" \
+            --query "MetricAlarms[?AlarmName=='ci-high-latency'].AlarmName | [0]" \
+            --output text)
+          [ "$FOUND" = "ci-high-latency" ]
+
+      # ── SetAlarmState ───────────────────────────────────────────
+      - name: "SetAlarmState"
+        run: |
+          set -euo pipefail
+
+          aws cloudwatch set-alarm-state \
+            --alarm-name "ci-high-latency" \
+            --state-value ALARM \
+            --state-reason "CI test trigger"
+
+          STATE=$(aws cloudwatch describe-alarms \
+            --alarm-names "ci-high-latency" \
+            --query "MetricAlarms[0].StateValue" --output text)
+          [ "$STATE" = "ALARM" ]
+
+      # ── EnableAlarmActions + DisableAlarmActions ─────────────────
+      - name: "EnableAlarmActions + DisableAlarmActions"
+        run: |
+          set -euo pipefail
+
+          aws cloudwatch disable-alarm-actions \
+            --alarm-names "ci-high-latency"
+
+          ENABLED=$(aws cloudwatch describe-alarms \
+            --alarm-names "ci-high-latency" \
+            --query "MetricAlarms[0].ActionsEnabled" --output text)
+          [ "$ENABLED" = "False" ]
+
+          aws cloudwatch enable-alarm-actions \
+            --alarm-names "ci-high-latency"
+
+          ENABLED=$(aws cloudwatch describe-alarms \
+            --alarm-names "ci-high-latency" \
+            --query "MetricAlarms[0].ActionsEnabled" --output text)
+          [ "$ENABLED" = "True" ]
+
+      # ── DescribeAlarmHistory ────────────────────────────────────
+      - name: "DescribeAlarmHistory"
+        run: |
+          set -euo pipefail
+
+          RESULT=$(aws cloudwatch describe-alarm-history \
+            --alarm-name "ci-high-latency")
+          echo "$RESULT" | jq -e '.AlarmHistoryItems != null'
+
+      # ── Tags: tag, list, untag ──────────────────────────────────
+      - name: "Tags: tag, list, untag"
+        run: |
+          set -euo pipefail
+
+          ALARM_ARN=$(aws cloudwatch describe-alarms \
+            --alarm-names "ci-high-latency" \
+            --query "MetricAlarms[0].AlarmArn" --output text)
+
+          aws cloudwatch tag-resource \
+            --resource-arn "$ALARM_ARN" \
+            --tags Key=env,Value=ci Key=team,Value=platform
+
+          TAG_COUNT=$(aws cloudwatch list-tags-for-resource \
+            --resource-arn "$ALARM_ARN" \
+            --query "Tags | length(@)" --output text)
+          [ "$TAG_COUNT" = "2" ]
+
+          aws cloudwatch untag-resource \
+            --resource-arn "$ALARM_ARN" \
+            --tag-keys "team"
+
+          TAG_COUNT=$(aws cloudwatch list-tags-for-resource \
+            --resource-arn "$ALARM_ARN" \
+            --query "Tags | length(@)" --output text)
+          [ "$TAG_COUNT" = "1" ]
+
+      # ── Dashboards: put, get, list, delete ──────────────────────
+      - name: "Dashboards: CRUD"
+        run: |
+          set -euo pipefail
+
+          BODY='{"widgets":[{"type":"metric","properties":{"metrics":[["CI/Test","RequestCount"]],"period":300}}]}'
+
+          aws cloudwatch put-dashboard \
+            --dashboard-name "ci-dashboard" \
+            --dashboard-body "$BODY"
+
+          GOT=$(aws cloudwatch get-dashboard \
+            --dashboard-name "ci-dashboard" \
+            --query "DashboardName" --output text)
+          [ "$GOT" = "ci-dashboard" ]
+
+          COUNT=$(aws cloudwatch list-dashboards \
+            --query "DashboardEntries | length(@)" --output text)
+          [ "$COUNT" -ge 1 ]
+
+          aws cloudwatch delete-dashboards \
+            --dashboard-names "ci-dashboard"
+
+      # ── DeleteAlarms ────────────────────────────────────────────
+      - name: "DeleteAlarms"
+        run: |
+          set -euo pipefail
+
+          aws cloudwatch delete-alarms \
+            --alarm-names "ci-high-latency"
+
+          COUNT=$(aws cloudwatch describe-alarms \
+            --alarm-names "ci-high-latency" \
+            --query "MetricAlarms | length(@)" --output text)
+          [ "$COUNT" = "0" ]
+
+      # ── Cleanup ─────────────────────────────────────────────────
+      - name: "Cleanup"
+        if: always()
+        run: |
+          set -uo pipefail
+          aws cloudwatch delete-alarms --alarm-names "ci-high-latency" 2>/dev/null || true
+          aws cloudwatch delete-dashboards --dashboard-names "ci-dashboard" 2>/dev/null || true
+          echo "Cleanup complete."

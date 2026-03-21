@@ -1,0 +1,241 @@
+name: kms-test
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  kms-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup toolchain install stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and start RustStack
+        id: ruststack
+        run: |
+          cargo build --release -p ruststack-server
+
+          GATEWAY_LISTEN=0.0.0.0:4566 \
+          LOG_LEVEL=warn \
+          cargo run --release -p ruststack-server &
+
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then
+              echo "Server is ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Server did not start within 30s"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "endpoint=http://localhost:4566" >> "$GITHUB_OUTPUT"
+
+          echo "AWS_ENDPOINT_URL=http://localhost:4566" >> "$GITHUB_ENV"
+          echo "AWS_DEFAULT_REGION=us-east-1" >> "$GITHUB_ENV"
+          echo "AWS_ACCESS_KEY_ID=test" >> "$GITHUB_ENV"
+          echo "AWS_SECRET_ACCESS_KEY=test" >> "$GITHUB_ENV"
+
+      # ── CreateKey + DescribeKey ──────────────────────────────────
+      - name: "CreateKey + DescribeKey"
+        run: |
+          set -euo pipefail
+
+          KEY_ID=$(aws kms create-key \
+            --description "CI test key" \
+            --query "KeyMetadata.KeyId" --output text)
+          [ -n "$KEY_ID" ]
+
+          DESC=$(aws kms describe-key \
+            --key-id "$KEY_ID" \
+            --query "KeyMetadata.Description" --output text)
+          [ "$DESC" = "CI test key" ]
+
+          echo "KEY_ID=$KEY_ID" >> "$GITHUB_ENV"
+
+      # ── Encrypt + Decrypt ───────────────────────────────────────
+      - name: "Encrypt + Decrypt"
+        run: |
+          set -euo pipefail
+
+          CIPHERTEXT=$(aws kms encrypt \
+            --key-id "$KEY_ID" \
+            --plaintext "SGVsbG8gV29ybGQ=" \
+            --query "CiphertextBlob" --output text)
+          [ -n "$CIPHERTEXT" ]
+
+          PLAINTEXT=$(aws kms decrypt \
+            --ciphertext-blob "$CIPHERTEXT" \
+            --query "Plaintext" --output text)
+          [ "$PLAINTEXT" = "SGVsbG8gV29ybGQ=" ]
+
+      # ── GenerateDataKey ─────────────────────────────────────────
+      - name: "GenerateDataKey"
+        run: |
+          set -euo pipefail
+
+          RESULT=$(aws kms generate-data-key \
+            --key-id "$KEY_ID" \
+            --key-spec AES_256)
+          echo "$RESULT" | jq -e '.Plaintext != null'
+          echo "$RESULT" | jq -e '.CiphertextBlob != null'
+
+      # ── ListKeys ────────────────────────────────────────────────
+      - name: "ListKeys"
+        run: |
+          set -euo pipefail
+
+          COUNT=$(aws kms list-keys \
+            --query "Keys | length(@)" --output text)
+          [ "$COUNT" -ge 1 ]
+
+      # ── Aliases: create, list, update, delete ───────────────────
+      - name: "Aliases: CRUD"
+        run: |
+          set -euo pipefail
+
+          aws kms create-alias \
+            --alias-name "alias/ci-test" \
+            --target-key-id "$KEY_ID"
+
+          FOUND=$(aws kms list-aliases \
+            --key-id "$KEY_ID" \
+            --query "Aliases[?AliasName=='alias/ci-test'].AliasName | [0]" \
+            --output text)
+          [ "$FOUND" = "alias/ci-test" ]
+
+          # Create a second key and update alias target
+          KEY_ID2=$(aws kms create-key --query "KeyMetadata.KeyId" --output text)
+          aws kms update-alias \
+            --alias-name "alias/ci-test" \
+            --target-key-id "$KEY_ID2"
+
+          UPDATED=$(aws kms list-aliases \
+            --key-id "$KEY_ID2" \
+            --query "Aliases[?AliasName=='alias/ci-test'].AliasName | [0]" \
+            --output text)
+          [ "$UPDATED" = "alias/ci-test" ]
+
+          aws kms delete-alias --alias-name "alias/ci-test"
+
+      # ── Tags: tag, list, untag ──────────────────────────────────
+      - name: "Tags: tag, list, untag"
+        run: |
+          set -euo pipefail
+
+          aws kms tag-resource \
+            --key-id "$KEY_ID" \
+            --tags TagKey=env,TagValue=ci TagKey=team,TagValue=platform
+
+          TAG_COUNT=$(aws kms list-resource-tags \
+            --key-id "$KEY_ID" \
+            --query "Tags | length(@)" --output text)
+          [ "$TAG_COUNT" = "2" ]
+
+          aws kms untag-resource \
+            --key-id "$KEY_ID" \
+            --tag-keys "team"
+
+          TAG_COUNT=$(aws kms list-resource-tags \
+            --key-id "$KEY_ID" \
+            --query "Tags | length(@)" --output text)
+          [ "$TAG_COUNT" = "1" ]
+
+      # ── Enable/Disable key ─────────────────────────────────────
+      - name: "EnableKey + DisableKey"
+        run: |
+          set -euo pipefail
+
+          aws kms disable-key --key-id "$KEY_ID"
+
+          STATE=$(aws kms describe-key \
+            --key-id "$KEY_ID" \
+            --query "KeyMetadata.KeyState" --output text)
+          [ "$STATE" = "Disabled" ]
+
+          aws kms enable-key --key-id "$KEY_ID"
+
+          STATE=$(aws kms describe-key \
+            --key-id "$KEY_ID" \
+            --query "KeyMetadata.KeyState" --output text)
+          [ "$STATE" = "Enabled" ]
+
+      # ── Key rotation ────────────────────────────────────────────
+      - name: "EnableKeyRotation + GetKeyRotationStatus"
+        run: |
+          set -euo pipefail
+
+          aws kms enable-key-rotation --key-id "$KEY_ID"
+
+          ROTATION=$(aws kms get-key-rotation-status \
+            --key-id "$KEY_ID" \
+            --query "KeyRotationEnabled" --output text)
+          [ "$ROTATION" = "True" ]
+
+          aws kms disable-key-rotation --key-id "$KEY_ID"
+
+      # ── GenerateRandom ──────────────────────────────────────────
+      - name: "GenerateRandom"
+        run: |
+          set -euo pipefail
+
+          RANDOM_BYTES=$(aws kms generate-random \
+            --number-of-bytes 32 \
+            --query "Plaintext" --output text)
+          [ -n "$RANDOM_BYTES" ]
+
+      # ── ScheduleKeyDeletion + CancelKeyDeletion ─────────────────
+      - name: "ScheduleKeyDeletion + CancelKeyDeletion"
+        run: |
+          set -euo pipefail
+
+          aws kms schedule-key-deletion \
+            --key-id "$KEY_ID" \
+            --pending-window-in-days 7
+
+          STATE=$(aws kms describe-key \
+            --key-id "$KEY_ID" \
+            --query "KeyMetadata.KeyState" --output text)
+          [ "$STATE" = "PendingDeletion" ]
+
+          aws kms cancel-key-deletion --key-id "$KEY_ID"
+
+          STATE=$(aws kms describe-key \
+            --key-id "$KEY_ID" \
+            --query "KeyMetadata.KeyState" --output text)
+          [ "$STATE" = "Disabled" ] || [ "$STATE" = "Enabled" ]
+
+      # ── Key policy ──────────────────────────────────────────────
+      - name: "GetKeyPolicy + PutKeyPolicy"
+        run: |
+          set -euo pipefail
+
+          POLICY=$(aws kms get-key-policy \
+            --key-id "$KEY_ID" \
+            --policy-name default \
+            --query "Policy" --output text)
+          [ -n "$POLICY" ]
+
+          aws kms put-key-policy \
+            --key-id "$KEY_ID" \
+            --policy-name default \
+            --policy '{"Version":"2012-10-17","Statement":[{"Sid":"Enable Root","Effect":"Allow","Principal":"*","Action":"kms:*","Resource":"*"}]}'
+
+      # ── Cleanup ─────────────────────────────────────────────────
+      - name: "Cleanup"
+        if: always()
+        run: |
+          set -uo pipefail
+          echo "Cleanup complete."
