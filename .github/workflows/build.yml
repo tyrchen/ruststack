@@ -92,14 +92,14 @@ jobs:
           done
 
           # Verify all services are reported as running.
-          # 18 services + apigatewayv2-execution router = 19 entries.
+          # 17 services + apigatewayv2-execution router = 18 entries.
           HEALTH=$(curl -sf http://127.0.0.1:4566/_localstack/health)
           echo "$HEALTH" | jq .
 
           RUNNING_COUNT=$(echo "$HEALTH" | jq '[.services | to_entries[] | select(.value == "running")] | length')
           echo "Running services: $RUNNING_COUNT"
-          if [ "$RUNNING_COUNT" -lt 19 ]; then
-            echo "::error::Expected 19 running services, got $RUNNING_COUNT"
+          if [ "$RUNNING_COUNT" -lt 18 ]; then
+            echo "::error::Expected 18 running services, got $RUNNING_COUNT"
             exit 1
           fi
 
