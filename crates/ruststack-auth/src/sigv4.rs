@@ -2,13 +2,13 @@
 //!
 //! This module implements the core SigV4 signature verification flow:
 //!
-//! 1. Parse the `Authorization` header to extract the algorithm, credential scope, signed headers,
-//!    and provided signature.
+//! 1. Parse the `Authorization` header to extract the algorithm, credential scope,
+//!    signed headers, and provided signature.
 //! 2. Reconstruct the canonical request from the HTTP request parts.
 //! 3. Build the string to sign from the timestamp, credential scope, and canonical request hash.
 //! 4. Derive the signing key using HMAC-SHA256 from the secret key and credential scope components.
-//! 5. Compute the expected signature and compare it to the provided signature using constant-time
-//!    comparison.
+//! 5. Compute the expected signature and compare it to the provided signature using
+//!    constant-time comparison.
 //!
 //! The main entry point is [`verify_sigv4`].
 
@@ -17,9 +17,9 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tracing::debug;
 
-use crate::{
-    canonical::build_canonical_request, credentials::CredentialProvider, error::AuthError,
-};
+use crate::canonical::build_canonical_request;
+use crate::credentials::CredentialProvider;
+use crate::error::AuthError;
 
 /// The only algorithm supported by this implementation.
 const SUPPORTED_ALGORITHM: &str = "AWS4-HMAC-SHA256";
@@ -72,8 +72,7 @@ pub struct ParsedAuth {
 /// Returns [`AuthError::InvalidAuthHeader`] if the header format is invalid,
 /// or [`AuthError::UnsupportedAlgorithm`] if the algorithm is not `AWS4-HMAC-SHA256`.
 pub fn parse_authorization_header(header: &str) -> Result<ParsedAuth, AuthError> {
-    // Split algorithm from the rest: "AWS4-HMAC-SHA256
-    // Credential=...,SignedHeaders=...,Signature=..."
+    // Split algorithm from the rest: "AWS4-HMAC-SHA256 Credential=...,SignedHeaders=...,Signature=..."
     let (algorithm, rest) = header.split_once(' ').ok_or(AuthError::InvalidAuthHeader)?;
 
     if algorithm != SUPPORTED_ALGORITHM {
@@ -362,7 +361,8 @@ pub fn hash_payload(payload: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{canonical::build_signed_headers_string, credentials::StaticCredentialProvider};
+    use crate::canonical::build_signed_headers_string;
+    use crate::credentials::StaticCredentialProvider;
 
     const TEST_ACCESS_KEY: &str = "AKIAIOSFODNN7EXAMPLE";
     const TEST_SECRET_KEY: &str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
@@ -388,9 +388,9 @@ mod tests {
     #[test]
     fn test_should_parse_authorization_header() {
         let header = "AWS4-HMAC-SHA256 \
-                      Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,\
-                      SignedHeaders=host;range;x-amz-content-sha256;x-amz-date,\
-                      Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41";
+            Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,\
+            SignedHeaders=host;range;x-amz-content-sha256;x-amz-date,\
+            Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41";
 
         let parsed = parse_authorization_header(header).unwrap();
         assert_eq!(parsed.algorithm, "AWS4-HMAC-SHA256");
@@ -410,17 +410,16 @@ mod tests {
 
     #[test]
     fn test_should_reject_unsupported_algorithm() {
-        let header = "AWS4-HMAC-SHA512 \
-                      Credential=AKID/20130524/us-east-1/s3/aws4_request,SignedHeaders=host,\
-                      Signature=abc";
+        let header = "AWS4-HMAC-SHA512 Credential=AKID/20130524/us-east-1/s3/aws4_request,\
+            SignedHeaders=host,Signature=abc";
         let result = parse_authorization_header(header);
         assert!(matches!(result, Err(AuthError::UnsupportedAlgorithm(_))));
     }
 
     #[test]
     fn test_should_reject_invalid_credential_format() {
-        let header =
-            "AWS4-HMAC-SHA256 Credential=AKID/20130524/us-east-1,SignedHeaders=host,Signature=abc";
+        let header = "AWS4-HMAC-SHA256 Credential=AKID/20130524/us-east-1,\
+            SignedHeaders=host,Signature=abc";
         let result = parse_authorization_header(header);
         assert!(matches!(result, Err(AuthError::InvalidCredential)));
     }
@@ -433,8 +432,10 @@ mod tests {
             "20130524/us-east-1/s3/aws4_request",
             canonical_hash,
         );
-        let expected = "AWS4-HMAC-SHA256\n20130524T000000Z\n20130524/us-east-1/s3/aws4_request\\
-                        n7344ae5b7ee6c3e7e6b0fe0640412a37625d1fbfff95c48bbb2dc43964946972";
+        let expected = "AWS4-HMAC-SHA256\n\
+                        20130524T000000Z\n\
+                        20130524/us-east-1/s3/aws4_request\n\
+                        7344ae5b7ee6c3e7e6b0fe0640412a37625d1fbfff95c48bbb2dc43964946972";
         assert_eq!(sts, expected);
     }
 
@@ -443,9 +444,10 @@ mod tests {
         // Full end-to-end test using the AWS GET Object example.
         let signing_key = derive_signing_key(TEST_SECRET_KEY, TEST_DATE, TEST_REGION, TEST_SERVICE);
 
-        let string_to_sign = "AWS4-HMAC-SHA256\n20130524T000000Z\n20130524/us-east-1/s3/\
-                              aws4_request\\
-                              n7344ae5b7ee6c3e7e6b0fe0640412a37625d1fbfff95c48bbb2dc43964946972";
+        let string_to_sign = "AWS4-HMAC-SHA256\n\
+                              20130524T000000Z\n\
+                              20130524/us-east-1/s3/aws4_request\n\
+                              7344ae5b7ee6c3e7e6b0fe0640412a37625d1fbfff95c48bbb2dc43964946972";
 
         let signature = compute_signature(&signing_key, string_to_sign);
         assert_eq!(
@@ -470,9 +472,8 @@ mod tests {
 
         // Compute the expected signature to build the auth header.
         let auth_value = format!(
-            "AWS4-HMAC-SHA256 \
-             Credential={TEST_ACCESS_KEY}/20130524/us-east-1/s3/aws4_request,SignedHeaders=host;\
-             range;x-amz-content-sha256;x-amz-date,\
+            "AWS4-HMAC-SHA256 Credential={TEST_ACCESS_KEY}/20130524/us-east-1/s3/aws4_request,\
+             SignedHeaders=host;range;x-amz-content-sha256;x-amz-date,\
              Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41"
         );
         builder = builder.header(http::header::AUTHORIZATION, &auth_value);
@@ -496,9 +497,8 @@ mod tests {
         let empty_hash = hash_payload(b"");
 
         let auth_value = format!(
-            "AWS4-HMAC-SHA256 \
-             Credential={TEST_ACCESS_KEY}/20130524/us-east-1/s3/aws4_request,SignedHeaders=host;\
-             range;x-amz-content-sha256;x-amz-date,\
+            "AWS4-HMAC-SHA256 Credential={TEST_ACCESS_KEY}/20130524/us-east-1/s3/aws4_request,\
+             SignedHeaders=host;range;x-amz-content-sha256;x-amz-date,\
              Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41"
         );
 
@@ -540,10 +540,11 @@ mod tests {
         let provider = StaticCredentialProvider::new(vec![]);
         let empty_hash = hash_payload(b"");
 
-        let auth_value = "AWS4-HMAC-SHA256 \
-                          Credential=UNKNOWN_KEY/20130524/us-east-1/s3/aws4_request,\
-                          SignedHeaders=host;x-amz-date,Signature=abc123"
-            .to_owned();
+        let auth_value =
+            "AWS4-HMAC-SHA256 Credential=UNKNOWN_KEY/20130524/us-east-1/s3/aws4_request,\
+             SignedHeaders=host;x-amz-date,\
+             Signature=abc123"
+                .to_owned();
 
         let (parts, _body) = http::Request::builder()
             .method("GET")

@@ -2066,21 +2066,24 @@ impl RustStackDynamoDB {
 
         let mut tags = table.tags.write();
 
-        // Merge: update existing keys, add new ones.
+        // Clone, merge, validate count, then commit — avoids TOCTOU where
+        // over-limit tags persist if validation fails after mutation.
+        let mut merged = tags.clone();
         for new_tag in &input.tags {
-            if let Some(existing) = tags.iter_mut().find(|t| t.key == new_tag.key) {
+            if let Some(existing) = merged.iter_mut().find(|t| t.key == new_tag.key) {
                 existing.value.clone_from(&new_tag.value);
             } else {
-                tags.push(new_tag.clone());
+                merged.push(new_tag.clone());
             }
         }
 
-        // Validate total count.
-        if tags.len() > MAX_TAGS_PER_RESOURCE {
+        if merged.len() > MAX_TAGS_PER_RESOURCE {
             return Err(DynamoDBError::validation(format!(
                 "The number of tags exceeds the limit of {MAX_TAGS_PER_RESOURCE}"
             )));
         }
+
+        *tags = merged;
 
         Ok(TagResourceOutput {})
     }
