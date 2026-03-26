@@ -68,9 +68,11 @@ pub fn build_canonical_request(
     let canonical_headers = build_canonical_headers(headers, signed_headers);
     let signed_headers_str = build_signed_headers_string(signed_headers);
 
-    format!(
+    #[rustfmt::skip]
+    let result = format!(
         "{method}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n\n{signed_headers_str}\n{payload_hash}"
-    )
+    );
+    result
 }
 
 /// Build the canonical URI by URI-encoding each path segment individually.
@@ -300,6 +302,7 @@ mod tests {
             &headers.iter().map(|(k, v)| (*k, *v)).collect::<Vec<_>>(),
             &signed,
         );
+        #[rustfmt::skip]
         let expected = "host:examplebucket.s3.amazonaws.com\n\
                         range:bytes=0-9\n\
                         x-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n\
@@ -351,6 +354,7 @@ mod tests {
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         );
 
+        #[rustfmt::skip]
         let expected = "GET\n\
                         /test.txt\n\
                         \n\
@@ -373,11 +377,9 @@ mod tests {
 
     #[test]
     fn test_should_handle_presigned_url_query_string() {
-        let query = "X-Amz-Algorithm=AWS4-HMAC-SHA256\
-            &X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request\
-            &X-Amz-Date=20130524T000000Z\
-            &X-Amz-Expires=86400\
-            &X-Amz-SignedHeaders=host";
+        let query = "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%\
+                     2F20130524%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&\
+                     X-Amz-Expires=86400&X-Amz-SignedHeaders=host";
         let result = build_canonical_query_string(query);
         // Should be sorted, raw values preserved
         assert!(result.contains("X-Amz-Algorithm=AWS4-HMAC-SHA256"));
