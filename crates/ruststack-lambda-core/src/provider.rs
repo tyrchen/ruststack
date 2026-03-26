@@ -18,19 +18,23 @@ const MAX_SYNC_PAYLOAD: usize = 6 * 1024 * 1024;
 
 use ruststack_lambda_model::{
     input::{
-        AddPermissionInput, CreateAliasInput, CreateFunctionInput, CreateFunctionUrlConfigInput,
-        PublishVersionInput, TagResourceInput, UpdateAliasInput, UpdateFunctionCodeInput,
+        AddLayerVersionPermissionInput, AddPermissionInput, CreateAliasInput, CreateFunctionInput,
+        CreateFunctionUrlConfigInput, PublishLayerVersionInput, PublishVersionInput,
+        TagResourceInput, UpdateAliasInput, UpdateFunctionCodeInput,
         UpdateFunctionConfigurationInput, UpdateFunctionUrlConfigInput,
     },
     output::{
-        AccountLimit, AccountUsage, AddPermissionOutput, GetAccountSettingsOutput,
-        GetFunctionOutput, GetPolicyOutput, ListAliasesOutput, ListFunctionUrlConfigsOutput,
-        ListFunctionsOutput, ListTagsOutput, ListVersionsOutput,
+        AccountLimit, AccountUsage, AddLayerVersionPermissionOutput, AddPermissionOutput,
+        GetAccountSettingsOutput, GetFunctionOutput, GetLayerVersionPolicyOutput, GetPolicyOutput,
+        ListAliasesOutput, ListFunctionUrlConfigsOutput, ListFunctionsOutput,
+        ListLayerVersionsOutput, ListLayersOutput, ListTagsOutput, ListVersionsOutput,
+        PublishLayerVersionOutput,
     },
     types::{
         AliasConfiguration, AliasRoutingConfiguration, EnvironmentResponse, EphemeralStorage,
         FunctionCodeLocation, FunctionConfiguration, FunctionUrlConfig, ImageConfigResponse, Layer,
-        SnapStartResponse, TracingConfigResponse, VpcConfigResponse,
+        LayerVersionContentOutput, LayerVersionsListItem, LayersListItem, SnapStartResponse,
+        TracingConfigResponse, VpcConfigResponse,
     },
 };
 
@@ -38,21 +42,23 @@ use crate::{
     config::LambdaConfig,
     error::LambdaServiceError,
     resolver::{
-        alias_arn, function_arn, function_version_arn, resolve_function_ref, resolve_version,
+        alias_arn, function_arn, function_version_arn, layer_arn, layer_version_arn,
+        parse_layer_version_arn, resolve_function_ref, resolve_version,
     },
     storage::{
-        AliasRecord, FunctionRecord, FunctionStore, FunctionUrlConfigRecord, PolicyDocument,
-        PolicyStatement, VersionRecord, compute_sha256,
+        AliasRecord, FunctionRecord, FunctionStore, FunctionUrlConfigRecord, LayerStore,
+        LayerVersionRecord, PolicyDocument, PolicyStatement, VersionRecord, compute_sha256,
     },
 };
 
 /// Lambda business logic provider.
 ///
-/// Holds the function store and service configuration. All operations
-/// are implemented as async methods that return domain types or errors.
+/// Holds the function store, layer store, and service configuration.
+/// All operations are implemented as methods that return domain types or errors.
 #[derive(Debug)]
 pub struct RustStackLambda {
     store: FunctionStore,
+    layer_store: LayerStore,
     config: LambdaConfig,
 }
 
@@ -60,7 +66,11 @@ impl RustStackLambda {
     /// Create a new Lambda provider with the given store and config.
     #[must_use]
     pub fn with_store(store: FunctionStore, config: LambdaConfig) -> Self {
-        Self { store, config }
+        Self {
+            store,
+            layer_store: LayerStore::new(),
+            config,
+        }
     }
 
     /// Create a new Lambda provider from config, using a temp directory for code.
@@ -68,13 +78,23 @@ impl RustStackLambda {
     pub fn new(config: LambdaConfig) -> Self {
         let code_dir = std::env::temp_dir().join("ruststack-lambda-code");
         let store = FunctionStore::new(code_dir);
-        Self { store, config }
+        Self {
+            store,
+            layer_store: LayerStore::new(),
+            config,
+        }
     }
 
     /// Returns a reference to the underlying function store.
     #[must_use]
     pub fn store(&self) -> &FunctionStore {
         &self.store
+    }
+
+    /// Returns a reference to the layer store.
+    #[must_use]
+    pub fn layer_store(&self) -> &LayerStore {
+        &self.layer_store
     }
 
     /// Returns a reference to the service configuration.
@@ -1408,8 +1428,445 @@ impl RustStackLambda {
     }
 
     // ---------------------------------------------------------------
+    // Phase 2b: Lambda Layers
+    // ---------------------------------------------------------------
+
+    /// Publish a new layer version.
+    pub fn publish_layer_version(
+        &self,
+        layer_name: &str,
+        input: &PublishLayerVersionInput,
+    ) -> Result<PublishLayerVersionOutput, LambdaServiceError> {
+        if layer_name.is_empty() || layer_name.len() > 140 {
+            return Err(LambdaServiceError::InvalidParameter {
+                message: "Layer name must be between 1 and 140 characters".to_owned(),
+            });
+        }
+
+        if let Some(ref license) = input.license_info {
+            if license.len() > 512 {
+                return Err(LambdaServiceError::InvalidParameter {
+                    message: "License info must be at most 512 characters".to_owned(),
+                });
+            }
+        }
+
+        // Process layer code.
+        let (code_sha256, code_size) = if let Some(ref content) = input.content {
+            if let Some(ref b64) = content.zip_file {
+                use base64::Engine;
+                let zip_bytes = base64::engine::general_purpose::STANDARD
+                    .decode(b64)
+                    .map_err(|e| LambdaServiceError::InvalidZipFile {
+                        message: format!("Invalid base64 encoding: {e}"),
+                    })?;
+                let sha256 = compute_sha256(&zip_bytes);
+                let size = zip_bytes.len() as u64;
+                (sha256, size)
+            } else {
+                // S3 source accepted but not functional; use empty hash.
+                (compute_sha256(b""), 0)
+            }
+        } else {
+            (compute_sha256(b""), 0)
+        };
+
+        let now = now_iso8601();
+        let la = layer_arn(
+            &self.config.default_region,
+            &self.config.account_id,
+            layer_name,
+        );
+
+        // Create a temporary version record; the store will assign the actual version number.
+        let version_record = LayerVersionRecord {
+            version: 0, // will be overwritten
+            description: input.description.clone().unwrap_or_default(),
+            compatible_runtimes: input.compatible_runtimes.clone().unwrap_or_default(),
+            compatible_architectures: input.compatible_architectures.clone().unwrap_or_default(),
+            license_info: input.license_info.clone(),
+            code_sha256: code_sha256.clone(),
+            code_size,
+            created_date: now.clone(),
+            layer_arn: la.clone(),
+            layer_version_arn: String::new(), // will be overwritten
+            policy: PolicyDocument::default(),
+        };
+
+        let version_num = self
+            .layer_store
+            .publish_version(layer_name, &la, version_record);
+
+        // Update the version number and ARN in the stored record.
+        let lva = layer_version_arn(
+            &self.config.default_region,
+            &self.config.account_id,
+            layer_name,
+            version_num,
+        );
+        self.layer_store
+            .update_version(layer_name, version_num, |ver| {
+                ver.version = version_num;
+                ver.layer_version_arn.clone_from(&lva);
+            })?;
+
+        info!(layer_name = %layer_name, version = %version_num, "published layer version");
+
+        #[allow(clippy::cast_possible_wrap)]
+        Ok(PublishLayerVersionOutput {
+            content: Some(LayerVersionContentOutput {
+                code_sha256: Some(code_sha256),
+                code_size: Some(code_size as i64),
+                ..Default::default()
+            }),
+            layer_arn: Some(la),
+            layer_version_arn: Some(lva),
+            description: input.description.clone(),
+            created_date: Some(now),
+            version: Some(version_num as i64),
+            compatible_runtimes: input.compatible_runtimes.clone(),
+            license_info: input.license_info.clone(),
+            compatible_architectures: input.compatible_architectures.clone(),
+        })
+    }
+
+    /// Get a specific layer version.
+    pub fn get_layer_version(
+        &self,
+        layer_name: &str,
+        version_number: u64,
+    ) -> Result<PublishLayerVersionOutput, LambdaServiceError> {
+        let ver = self
+            .layer_store
+            .get_version(layer_name, version_number)
+            .ok_or(LambdaServiceError::InvalidParameter {
+                message: format!("Layer version not found: {layer_name}:{version_number}"),
+            })?;
+
+        Ok(Self::build_layer_version_output(&ver))
+    }
+
+    /// Get a layer version by its full ARN.
+    pub fn get_layer_version_by_arn(
+        &self,
+        arn: &str,
+    ) -> Result<PublishLayerVersionOutput, LambdaServiceError> {
+        let (name, version) = parse_layer_version_arn(arn)?;
+        self.get_layer_version(&name, version)
+    }
+
+    /// List versions of a layer.
+    pub fn list_layer_versions(
+        &self,
+        layer_name: &str,
+        marker: Option<&str>,
+        max_items: Option<usize>,
+    ) -> Result<ListLayerVersionsOutput, LambdaServiceError> {
+        let versions = self.layer_store.list_versions(layer_name);
+        let max = max_items.unwrap_or(50).min(10_000);
+
+        let start = marker
+            .and_then(|m| m.parse::<u64>().ok())
+            .and_then(|marker_ver| versions.iter().position(|v| v.version > marker_ver))
+            .unwrap_or(0);
+
+        #[allow(clippy::cast_possible_wrap)]
+        let page: Vec<LayerVersionsListItem> = versions
+            .iter()
+            .skip(start)
+            .take(max)
+            .map(|v| LayerVersionsListItem {
+                layer_version_arn: Some(v.layer_version_arn.clone()),
+                version: Some(v.version as i64),
+                description: if v.description.is_empty() {
+                    None
+                } else {
+                    Some(v.description.clone())
+                },
+                created_date: Some(v.created_date.clone()),
+                compatible_runtimes: if v.compatible_runtimes.is_empty() {
+                    None
+                } else {
+                    Some(v.compatible_runtimes.clone())
+                },
+                license_info: v.license_info.clone(),
+                compatible_architectures: if v.compatible_architectures.is_empty() {
+                    None
+                } else {
+                    Some(v.compatible_architectures.clone())
+                },
+            })
+            .collect();
+
+        let next_marker = if start + max < versions.len() {
+            page.last()
+                .and_then(|v| v.version.map(|ver| ver.to_string()))
+        } else {
+            None
+        };
+
+        Ok(ListLayerVersionsOutput {
+            layer_versions: Some(page),
+            next_marker,
+        })
+    }
+
+    /// List all layers.
+    #[must_use]
+    pub fn list_layers(&self, marker: Option<&str>, max_items: Option<usize>) -> ListLayersOutput {
+        let all = self.layer_store.list_layers();
+        let max = max_items.unwrap_or(50).min(10_000);
+
+        let start = marker
+            .and_then(|m| all.iter().position(|r| r.name.as_str() > m))
+            .unwrap_or(0);
+
+        #[allow(clippy::cast_possible_wrap)]
+        let page: Vec<LayersListItem> = all
+            .iter()
+            .skip(start)
+            .take(max)
+            .map(|r| {
+                let latest = r
+                    .versions
+                    .values()
+                    .next_back()
+                    .map(|v| LayerVersionsListItem {
+                        layer_version_arn: Some(v.layer_version_arn.clone()),
+                        version: Some(v.version as i64),
+                        description: if v.description.is_empty() {
+                            None
+                        } else {
+                            Some(v.description.clone())
+                        },
+                        created_date: Some(v.created_date.clone()),
+                        compatible_runtimes: if v.compatible_runtimes.is_empty() {
+                            None
+                        } else {
+                            Some(v.compatible_runtimes.clone())
+                        },
+                        license_info: v.license_info.clone(),
+                        compatible_architectures: if v.compatible_architectures.is_empty() {
+                            None
+                        } else {
+                            Some(v.compatible_architectures.clone())
+                        },
+                    });
+                LayersListItem {
+                    layer_name: Some(r.name.clone()),
+                    layer_arn: Some(r.layer_arn.clone()),
+                    latest_matching_version: latest,
+                }
+            })
+            .collect();
+
+        let next_marker = if start + max < all.len() {
+            page.last().and_then(|l| l.layer_name.clone())
+        } else {
+            None
+        };
+
+        ListLayersOutput {
+            layers: Some(page),
+            next_marker,
+        }
+    }
+
+    /// Delete a layer version.
+    pub fn delete_layer_version(
+        &self,
+        layer_name: &str,
+        version_number: u64,
+    ) -> Result<(), LambdaServiceError> {
+        // AWS silently succeeds even if the version doesn't exist.
+        let _ = self.layer_store.delete_version(layer_name, version_number);
+        info!(layer_name = %layer_name, version = %version_number, "deleted layer version");
+        Ok(())
+    }
+
+    /// Add a permission to a layer version's resource policy.
+    pub fn add_layer_version_permission(
+        &self,
+        layer_name: &str,
+        version_number: u64,
+        input: &AddLayerVersionPermissionInput,
+    ) -> Result<AddLayerVersionPermissionOutput, LambdaServiceError> {
+        // Validate required fields.
+        let sid = match &input.statement_id {
+            Some(s) if !s.is_empty() => s.clone(),
+            _ => {
+                return Err(LambdaServiceError::InvalidParameter {
+                    message: "StatementId is required".to_owned(),
+                });
+            }
+        };
+        let action = match &input.action {
+            Some(a) if !a.is_empty() => a.clone(),
+            _ => {
+                return Err(LambdaServiceError::InvalidParameter {
+                    message: "Action is required".to_owned(),
+                });
+            }
+        };
+        let principal = match &input.principal {
+            Some(p) if !p.is_empty() => p.clone(),
+            _ => {
+                return Err(LambdaServiceError::InvalidParameter {
+                    message: "Principal is required".to_owned(),
+                });
+            }
+        };
+
+        let lva = layer_version_arn(
+            &self.config.default_region,
+            &self.config.account_id,
+            layer_name,
+            version_number,
+        );
+
+        let statement = PolicyStatement {
+            sid: sid.clone(),
+            effect: "Allow".to_owned(),
+            principal: principal.clone(),
+            action: action.clone(),
+            resource: lva,
+            condition: None,
+        };
+
+        let statement_json = serde_json::json!({
+            "Sid": sid,
+            "Effect": "Allow",
+            "Principal": { "Service": principal },
+            "Action": action,
+            "Resource": statement.resource,
+        });
+
+        let revision_id = self.layer_store.update_version(
+            layer_name,
+            version_number,
+            |ver| -> Result<String, LambdaServiceError> {
+                if ver.policy.statements.iter().any(|s| s.sid == sid) {
+                    return Err(LambdaServiceError::ResourceConflict {
+                        message: format!("The statement id ({sid}) provided already exists."),
+                    });
+                }
+                ver.policy.statements.push(statement);
+                Ok(uuid::Uuid::new_v4().to_string())
+            },
+        )??;
+
+        Ok(AddLayerVersionPermissionOutput {
+            statement: Some(statement_json.to_string()),
+            revision_id: Some(revision_id),
+        })
+    }
+
+    /// Get the resource policy for a layer version.
+    pub fn get_layer_version_policy(
+        &self,
+        layer_name: &str,
+        version_number: u64,
+    ) -> Result<GetLayerVersionPolicyOutput, LambdaServiceError> {
+        let ver = self
+            .layer_store
+            .get_version(layer_name, version_number)
+            .ok_or(LambdaServiceError::InvalidParameter {
+                message: format!("Layer version not found: {layer_name}:{version_number}"),
+            })?;
+
+        if ver.policy.statements.is_empty() {
+            return Err(LambdaServiceError::PolicyNotFound {
+                sid: format!("{layer_name}:{version_number}"),
+            });
+        }
+
+        let statements: Vec<serde_json::Value> = ver
+            .policy
+            .statements
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "Sid": s.sid,
+                    "Effect": s.effect,
+                    "Principal": { "Service": s.principal },
+                    "Action": s.action,
+                    "Resource": s.resource,
+                })
+            })
+            .collect();
+
+        let policy = serde_json::json!({
+            "Version": "2012-10-17",
+            "Id": "default",
+            "Statement": statements,
+        });
+
+        Ok(GetLayerVersionPolicyOutput {
+            policy: Some(policy.to_string()),
+            revision_id: Some(uuid::Uuid::new_v4().to_string()),
+        })
+    }
+
+    /// Remove a permission from a layer version's resource policy.
+    pub fn remove_layer_version_permission(
+        &self,
+        layer_name: &str,
+        version_number: u64,
+        statement_id: &str,
+    ) -> Result<(), LambdaServiceError> {
+        self.layer_store.update_version(
+            layer_name,
+            version_number,
+            |ver| -> Result<(), LambdaServiceError> {
+                let initial_len = ver.policy.statements.len();
+                ver.policy.statements.retain(|s| s.sid != statement_id);
+                if ver.policy.statements.len() == initial_len {
+                    return Err(LambdaServiceError::PolicyNotFound {
+                        sid: statement_id.to_owned(),
+                    });
+                }
+                Ok(())
+            },
+        )??;
+
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------
     // Internal helpers
     // ---------------------------------------------------------------
+
+    /// Build a `PublishLayerVersionOutput` from a `LayerVersionRecord`.
+    #[allow(clippy::cast_possible_wrap)]
+    fn build_layer_version_output(ver: &LayerVersionRecord) -> PublishLayerVersionOutput {
+        PublishLayerVersionOutput {
+            content: Some(LayerVersionContentOutput {
+                code_sha256: Some(ver.code_sha256.clone()),
+                code_size: Some(ver.code_size as i64),
+                ..Default::default()
+            }),
+            layer_arn: Some(ver.layer_arn.clone()),
+            layer_version_arn: Some(ver.layer_version_arn.clone()),
+            description: if ver.description.is_empty() {
+                None
+            } else {
+                Some(ver.description.clone())
+            },
+            created_date: Some(ver.created_date.clone()),
+            version: Some(ver.version as i64),
+            compatible_runtimes: if ver.compatible_runtimes.is_empty() {
+                None
+            } else {
+                Some(ver.compatible_runtimes.clone())
+            },
+            license_info: ver.license_info.clone(),
+            compatible_architectures: if ver.compatible_architectures.is_empty() {
+                None
+            } else {
+                Some(ver.compatible_architectures.clone())
+            },
+        }
+    }
 
     /// Get a function record by name, returning `FunctionNotFound` if absent.
     fn get_record(&self, name: &str) -> Result<FunctionRecord, LambdaServiceError> {
@@ -1889,6 +2346,207 @@ mod tests {
             .add_permission("my-func", None, &input)
             .unwrap_err();
         assert!(matches!(err, LambdaServiceError::ResourceConflict { .. }));
+    }
+
+    // ---- Layer operation tests ----
+
+    #[test]
+    fn test_should_publish_and_get_layer_version() {
+        let provider = test_provider();
+
+        use base64::Engine;
+        let zip_data = base64::engine::general_purpose::STANDARD.encode(b"PK\x03\x04layer");
+        let input = PublishLayerVersionInput {
+            description: Some("Test layer".to_owned()),
+            content: Some(ruststack_lambda_model::types::LayerVersionContentInput {
+                zip_file: Some(zip_data),
+                ..Default::default()
+            }),
+            compatible_runtimes: Some(vec!["python3.12".to_owned()]),
+            ..Default::default()
+        };
+
+        let output = provider.publish_layer_version("my-layer", &input).unwrap();
+        assert_eq!(output.version, Some(1));
+        assert_eq!(output.description, Some("Test layer".to_owned()));
+        assert!(
+            output
+                .layer_arn
+                .as_ref()
+                .unwrap()
+                .contains("layer:my-layer")
+        );
+        assert!(
+            output
+                .layer_version_arn
+                .as_ref()
+                .unwrap()
+                .contains("layer:my-layer:1")
+        );
+
+        // Get the layer version.
+        let get_output = provider.get_layer_version("my-layer", 1).unwrap();
+        assert_eq!(get_output.version, Some(1));
+        assert_eq!(get_output.description, Some("Test layer".to_owned()));
+    }
+
+    #[test]
+    fn test_should_publish_multiple_layer_versions() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+
+        let v1 = provider.publish_layer_version("my-layer", &input).unwrap();
+        let v2 = provider.publish_layer_version("my-layer", &input).unwrap();
+
+        assert_eq!(v1.version, Some(1));
+        assert_eq!(v2.version, Some(2));
+    }
+
+    #[test]
+    fn test_should_list_layer_versions() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+
+        provider.publish_layer_version("my-layer", &input).unwrap();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+
+        let output = provider
+            .list_layer_versions("my-layer", None, None)
+            .unwrap();
+        assert_eq!(output.layer_versions.as_ref().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_should_list_layers() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+
+        provider
+            .publish_layer_version("alpha-layer", &input)
+            .unwrap();
+        provider
+            .publish_layer_version("bravo-layer", &input)
+            .unwrap();
+
+        let output = provider.list_layers(None, None);
+        let layers = output.layers.as_ref().unwrap();
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0].layer_name, Some("alpha-layer".to_owned()),);
+        assert_eq!(layers[1].layer_name, Some("bravo-layer".to_owned()),);
+    }
+
+    #[test]
+    fn test_should_delete_layer_version() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+
+        provider.publish_layer_version("my-layer", &input).unwrap();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+
+        provider.delete_layer_version("my-layer", 1).unwrap();
+
+        // Version 1 should be gone.
+        let err = provider.get_layer_version("my-layer", 1);
+        assert!(err.is_err());
+
+        // Version 2 should still exist.
+        let output = provider.get_layer_version("my-layer", 2).unwrap();
+        assert_eq!(output.version, Some(2));
+    }
+
+    #[test]
+    fn test_should_delete_nonexistent_layer_version_silently() {
+        let provider = test_provider();
+        // Should not error even if layer doesn't exist.
+        provider.delete_layer_version("nonexistent", 99).unwrap();
+    }
+
+    #[test]
+    fn test_should_add_and_get_layer_version_policy() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+
+        let perm_input = AddLayerVersionPermissionInput {
+            statement_id: Some("stmt-1".to_owned()),
+            action: Some("lambda:GetLayerVersion".to_owned()),
+            principal: Some("*".to_owned()),
+            ..Default::default()
+        };
+        let output = provider
+            .add_layer_version_permission("my-layer", 1, &perm_input)
+            .unwrap();
+        assert!(output.statement.is_some());
+
+        let policy = provider.get_layer_version_policy("my-layer", 1).unwrap();
+        assert!(policy.policy.as_ref().unwrap().contains("stmt-1"));
+    }
+
+    #[test]
+    fn test_should_reject_duplicate_layer_permission_sid() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+
+        let perm_input = AddLayerVersionPermissionInput {
+            statement_id: Some("stmt-1".to_owned()),
+            action: Some("lambda:GetLayerVersion".to_owned()),
+            principal: Some("*".to_owned()),
+            ..Default::default()
+        };
+        provider
+            .add_layer_version_permission("my-layer", 1, &perm_input)
+            .unwrap();
+
+        let err = provider
+            .add_layer_version_permission("my-layer", 1, &perm_input)
+            .unwrap_err();
+        assert!(matches!(err, LambdaServiceError::ResourceConflict { .. }));
+    }
+
+    #[test]
+    fn test_should_remove_layer_version_permission() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+
+        let perm_input = AddLayerVersionPermissionInput {
+            statement_id: Some("stmt-1".to_owned()),
+            action: Some("lambda:GetLayerVersion".to_owned()),
+            principal: Some("*".to_owned()),
+            ..Default::default()
+        };
+        provider
+            .add_layer_version_permission("my-layer", 1, &perm_input)
+            .unwrap();
+
+        provider
+            .remove_layer_version_permission("my-layer", 1, "stmt-1")
+            .unwrap();
+
+        // Policy should now be empty.
+        let err = provider.get_layer_version_policy("my-layer", 1);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_should_get_layer_version_by_arn() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+
+        let arn = "arn:aws:lambda:us-east-1:000000000000:layer:my-layer:1";
+        let output = provider.get_layer_version_by_arn(arn).unwrap();
+        assert_eq!(output.version, Some(1));
+    }
+
+    #[test]
+    fn test_should_error_on_empty_layer_name() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+        let err = provider.publish_layer_version("", &input).unwrap_err();
+        assert!(matches!(err, LambdaServiceError::InvalidParameter { .. }));
     }
 
     #[tokio::test]

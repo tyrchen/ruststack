@@ -165,6 +165,182 @@ pub struct FunctionUrlConfigRecord {
     pub last_modified_time: String,
 }
 
+/// Complete record for a Lambda layer.
+#[derive(Debug, Clone)]
+pub struct LayerRecord {
+    /// Layer name.
+    pub name: String,
+    /// Layer ARN (without version).
+    pub layer_arn: String,
+    /// Published layer versions keyed by version number.
+    pub versions: BTreeMap<u64, LayerVersionRecord>,
+    /// Next version number to assign.
+    pub next_version: u64,
+}
+
+/// A snapshot of a layer at a specific version.
+#[derive(Debug, Clone)]
+pub struct LayerVersionRecord {
+    /// Version number.
+    pub version: u64,
+    /// Description.
+    pub description: String,
+    /// Compatible runtimes.
+    pub compatible_runtimes: Vec<String>,
+    /// Compatible architectures.
+    pub compatible_architectures: Vec<String>,
+    /// License info.
+    pub license_info: Option<String>,
+    /// Base64-encoded SHA-256 of the layer code.
+    pub code_sha256: String,
+    /// Code size in bytes.
+    pub code_size: u64,
+    /// ISO 8601 creation date.
+    pub created_date: String,
+    /// Layer ARN (without version).
+    pub layer_arn: String,
+    /// Layer version ARN.
+    pub layer_version_arn: String,
+    /// Resource-based policy document for this layer version.
+    pub policy: PolicyDocument,
+}
+
+/// In-memory store for Lambda layers.
+#[derive(Debug)]
+pub struct LayerStore {
+    /// All layers keyed by layer name.
+    layers: DashMap<String, LayerRecord>,
+}
+
+impl LayerStore {
+    /// Create a new empty layer store.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            layers: DashMap::new(),
+        }
+    }
+
+    /// Get a clone of a layer record by name.
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<LayerRecord> {
+        self.layers.get(name).map(|r| r.value().clone())
+    }
+
+    /// Publish a new version of a layer.
+    ///
+    /// Creates the layer record if it does not exist, then inserts a new version.
+    /// Returns the assigned version number.
+    #[must_use]
+    pub fn publish_version(
+        &self,
+        name: &str,
+        layer_arn: &str,
+        version_record: LayerVersionRecord,
+    ) -> u64 {
+        use dashmap::mapref::entry::Entry;
+        match self.layers.entry(name.to_owned()) {
+            Entry::Occupied(mut entry) => {
+                let record = entry.get_mut();
+                let version_num = record.next_version;
+                record.next_version += 1;
+                record.versions.insert(version_num, version_record);
+                version_num
+            }
+            Entry::Vacant(entry) => {
+                let version_num = 1;
+                let mut versions = BTreeMap::new();
+                versions.insert(version_num, version_record);
+                entry.insert(LayerRecord {
+                    name: name.to_owned(),
+                    layer_arn: layer_arn.to_owned(),
+                    versions,
+                    next_version: 2,
+                });
+                version_num
+            }
+        }
+    }
+
+    /// Get a specific layer version.
+    #[must_use]
+    pub fn get_version(&self, name: &str, version: u64) -> Option<LayerVersionRecord> {
+        self.layers
+            .get(name)
+            .and_then(|r| r.versions.get(&version).cloned())
+    }
+
+    /// List all versions of a layer, sorted by version number.
+    #[must_use]
+    pub fn list_versions(&self, name: &str) -> Vec<LayerVersionRecord> {
+        self.layers
+            .get(name)
+            .map(|r| r.versions.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// List all layers with their latest version.
+    ///
+    /// Returns cloned records sorted by layer name.
+    #[must_use]
+    pub fn list_layers(&self) -> Vec<LayerRecord> {
+        let mut records: Vec<LayerRecord> = self.layers.iter().map(|r| r.value().clone()).collect();
+        records.sort_by(|a, b| a.name.cmp(&b.name));
+        records
+    }
+
+    /// Delete a specific layer version.
+    ///
+    /// Returns `true` if the version existed and was removed.
+    #[must_use]
+    pub fn delete_version(&self, name: &str, version: u64) -> bool {
+        if let Some(mut entry) = self.layers.get_mut(name) {
+            let removed = entry.versions.remove(&version).is_some();
+            // If no versions remain, remove the entire layer record.
+            if entry.versions.is_empty() {
+                drop(entry);
+                self.layers.remove(name);
+            }
+            removed
+        } else {
+            false
+        }
+    }
+
+    /// Mutate a layer version record in place.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer or version does not exist.
+    pub fn update_version<F, R>(
+        &self,
+        name: &str,
+        version: u64,
+        f: F,
+    ) -> Result<R, LambdaServiceError>
+    where
+        F: FnOnce(&mut LayerVersionRecord) -> R,
+    {
+        match self.layers.get_mut(name) {
+            Some(mut entry) => match entry.versions.get_mut(&version) {
+                Some(ver) => Ok(f(ver)),
+                None => Err(LambdaServiceError::InvalidParameter {
+                    message: format!("Layer version not found: {name}:{version}"),
+                }),
+            },
+            None => Err(LambdaServiceError::InvalidParameter {
+                message: format!("Layer not found: {name}"),
+            }),
+        }
+    }
+}
+
+impl Default for LayerStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FunctionStore {
     /// Create a new function store with the given code storage directory.
     pub fn new(code_dir: impl Into<PathBuf>) -> Self {
@@ -454,6 +630,106 @@ mod tests {
         let decoded = base64::engine::general_purpose::STANDARD.decode(&hash);
         assert!(decoded.is_ok());
         assert_eq!(decoded.unwrap().len(), 32);
+    }
+
+    // ---- Layer store tests ----
+
+    #[test]
+    fn test_should_publish_and_get_layer_version() {
+        let store = LayerStore::new();
+        let ver = LayerVersionRecord {
+            version: 0,
+            description: "test".to_owned(),
+            compatible_runtimes: vec!["python3.12".to_owned()],
+            compatible_architectures: Vec::new(),
+            license_info: None,
+            code_sha256: "abc".to_owned(),
+            code_size: 100,
+            created_date: "2024-01-01".to_owned(),
+            layer_arn: "arn:layer".to_owned(),
+            layer_version_arn: "arn:layer:1".to_owned(),
+            policy: PolicyDocument::default(),
+        };
+
+        let num = store.publish_version("my-layer", "arn:layer", ver);
+        assert_eq!(num, 1);
+
+        let retrieved = store.get_version("my-layer", 1);
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().description, "test");
+    }
+
+    #[test]
+    fn test_should_list_layer_versions() {
+        let store = LayerStore::new();
+        for i in 0..3 {
+            let ver = LayerVersionRecord {
+                version: 0,
+                description: format!("v{i}"),
+                compatible_runtimes: Vec::new(),
+                compatible_architectures: Vec::new(),
+                license_info: None,
+                code_sha256: "abc".to_owned(),
+                code_size: 100,
+                created_date: "2024-01-01".to_owned(),
+                layer_arn: "arn:layer".to_owned(),
+                layer_version_arn: format!("arn:layer:{}", i + 1),
+                policy: PolicyDocument::default(),
+            };
+            let _ = store.publish_version("my-layer", "arn:layer", ver);
+        }
+
+        let versions = store.list_versions("my-layer");
+        assert_eq!(versions.len(), 3);
+    }
+
+    #[test]
+    fn test_should_delete_layer_version_and_cleanup() {
+        let store = LayerStore::new();
+        let ver = LayerVersionRecord {
+            version: 0,
+            description: String::new(),
+            compatible_runtimes: Vec::new(),
+            compatible_architectures: Vec::new(),
+            license_info: None,
+            code_sha256: "abc".to_owned(),
+            code_size: 0,
+            created_date: "2024-01-01".to_owned(),
+            layer_arn: "arn:layer".to_owned(),
+            layer_version_arn: "arn:layer:1".to_owned(),
+            policy: PolicyDocument::default(),
+        };
+        let _ = store.publish_version("my-layer", "arn:layer", ver);
+
+        assert!(store.delete_version("my-layer", 1));
+        // Layer record should be removed since no versions remain.
+        assert!(store.get("my-layer").is_none());
+    }
+
+    #[test]
+    fn test_should_list_layers_sorted() {
+        let store = LayerStore::new();
+        let make_ver = || LayerVersionRecord {
+            version: 0,
+            description: String::new(),
+            compatible_runtimes: Vec::new(),
+            compatible_architectures: Vec::new(),
+            license_info: None,
+            code_sha256: "abc".to_owned(),
+            code_size: 0,
+            created_date: "2024-01-01".to_owned(),
+            layer_arn: String::new(),
+            layer_version_arn: String::new(),
+            policy: PolicyDocument::default(),
+        };
+
+        let _ = store.publish_version("charlie", "arn:charlie", make_ver());
+        let _ = store.publish_version("alpha", "arn:alpha", make_ver());
+        let _ = store.publish_version("bravo", "arn:bravo", make_ver());
+
+        let layers = store.list_layers();
+        let names: Vec<&str> = layers.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["alpha", "bravo", "charlie"]);
     }
 
     #[tokio::test]

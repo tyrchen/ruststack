@@ -464,6 +464,90 @@ pub struct Layer {
     pub signing_job_arn: Option<String>,
 }
 
+/// Layer version code input for `PublishLayerVersion`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LayerVersionContentInput {
+    /// S3 bucket containing the layer code.
+    #[serde(rename = "S3Bucket")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub s3_bucket: Option<String>,
+    /// S3 key for the layer code.
+    #[serde(rename = "S3Key")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub s3_key: Option<String>,
+    /// S3 object version.
+    #[serde(rename = "S3ObjectVersion")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub s3_object_version: Option<String>,
+    /// Base64-encoded zip file contents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zip_file: Option<String>,
+}
+
+/// Layer version code output returned in layer version responses.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LayerVersionContentOutput {
+    /// Pre-signed URL to download the layer code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    /// SHA-256 hash of the layer code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_sha256: Option<String>,
+    /// Code size in bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_size: Option<i64>,
+    /// Signing profile version ARN.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signing_profile_version_arn: Option<String>,
+    /// Signing job ARN.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signing_job_arn: Option<String>,
+}
+
+/// Summary of a layer version in list responses.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LayerVersionsListItem {
+    /// Layer version ARN.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_version_arn: Option<String>,
+    /// Version number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<i64>,
+    /// Description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// ISO 8601 creation date.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_date: Option<String>,
+    /// Compatible runtimes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatible_runtimes: Option<Vec<String>>,
+    /// License info.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license_info: Option<String>,
+    /// Compatible architectures.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatible_architectures: Option<Vec<String>>,
+}
+
+/// Summary of a layer in list responses.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LayersListItem {
+    /// Layer name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_name: Option<String>,
+    /// Layer ARN (without version).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_arn: Option<String>,
+    /// Latest matching version summary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_matching_version: Option<LayerVersionsListItem>,
+}
+
 /// Function configuration returned by many operations.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]

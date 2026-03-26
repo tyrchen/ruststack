@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{
     AliasRoutingConfiguration, Cors, DeadLetterConfig, Environment, EphemeralStorage, FunctionCode,
-    ImageConfig, LoggingConfig, SnapStart, TracingConfig, VpcConfig,
+    ImageConfig, LayerVersionContentInput, LoggingConfig, SnapStart, TracingConfig, VpcConfig,
 };
 
 /// Input for `CreateFunction`.
@@ -273,4 +273,49 @@ pub struct UpdateFunctionUrlConfigInput {
     /// Invoke mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invoke_mode: Option<String>,
+}
+
+/// Input for `PublishLayerVersion`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct PublishLayerVersionInput {
+    /// Layer name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_name: Option<String>,
+    /// Description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Layer code content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<LayerVersionContentInput>,
+    /// Compatible runtimes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatible_runtimes: Option<Vec<String>>,
+    /// License info (max 512 characters).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license_info: Option<String>,
+    /// Compatible architectures.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatible_architectures: Option<Vec<String>>,
+}
+
+/// Input for `AddLayerVersionPermission`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AddLayerVersionPermissionInput {
+    /// Statement ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub statement_id: Option<String>,
+    /// Action (e.g., `lambda:GetLayerVersion`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    /// Principal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub principal: Option<String>,
+    /// Organization ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub organization_id: Option<String>,
+    /// Revision ID for optimistic concurrency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision_id: Option<String>,
 }

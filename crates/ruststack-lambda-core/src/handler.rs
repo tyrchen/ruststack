@@ -18,8 +18,9 @@ use ruststack_lambda_http::{
 use ruststack_lambda_model::{
     error::LambdaError,
     input::{
-        AddPermissionInput, CreateAliasInput, CreateFunctionInput, CreateFunctionUrlConfigInput,
-        PublishVersionInput, TagResourceInput, UpdateAliasInput, UpdateFunctionCodeInput,
+        AddLayerVersionPermissionInput, AddPermissionInput, CreateAliasInput, CreateFunctionInput,
+        CreateFunctionUrlConfigInput, PublishLayerVersionInput, PublishVersionInput,
+        TagResourceInput, UpdateAliasInput, UpdateFunctionCodeInput,
         UpdateFunctionConfigurationInput, UpdateFunctionUrlConfigInput,
     },
     operations::LambdaOperation,
@@ -432,6 +433,112 @@ async fn dispatch(
                 .list_function_url_configs(function_name)
                 .map_err(LambdaError::from)?;
             wrap_json_response(200, &output)
+        }
+
+        // ---- Phase 2b: Lambda Layers ----
+        LambdaOperation::PublishLayerVersion => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let input: PublishLayerVersionInput = serde_json::from_slice(body).map_err(|e| {
+                LambdaError::invalid_parameter(format!("Invalid request body: {e}"))
+            })?;
+            let output = provider
+                .publish_layer_version(layer_name, &input)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(201, &output)
+        }
+
+        LambdaOperation::GetLayerVersion => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let version_number = require_path_param(path_params, "VersionNumber")?;
+            let version: u64 = version_number.parse().map_err(|_| {
+                LambdaError::invalid_parameter(format!("Invalid version number: {version_number}"))
+            })?;
+            let output = provider
+                .get_layer_version(layer_name, version)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::GetLayerVersionByArn => {
+            // The ARN is passed as a query parameter.
+            let arn = get_query_param(&query_params, "Arn")
+                .ok_or_else(|| LambdaError::invalid_parameter("Arn query parameter is required"))?;
+            let output = provider
+                .get_layer_version_by_arn(arn)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::ListLayerVersions => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let marker = get_query_param(&query_params, "Marker");
+            let max_items =
+                get_query_param(&query_params, "MaxItems").and_then(|v| v.parse::<usize>().ok());
+            let output = provider
+                .list_layer_versions(layer_name, marker, max_items)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::ListLayers => {
+            let marker = get_query_param(&query_params, "Marker");
+            let max_items =
+                get_query_param(&query_params, "MaxItems").and_then(|v| v.parse::<usize>().ok());
+            let output = provider.list_layers(marker, max_items);
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::DeleteLayerVersion => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let version_number = require_path_param(path_params, "VersionNumber")?;
+            let version: u64 = version_number.parse().map_err(|_| {
+                LambdaError::invalid_parameter(format!("Invalid version number: {version_number}"))
+            })?;
+            provider
+                .delete_layer_version(layer_name, version)
+                .map_err(LambdaError::from)?;
+            wrap_empty_response(204)
+        }
+
+        LambdaOperation::AddLayerVersionPermission => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let version_number = require_path_param(path_params, "VersionNumber")?;
+            let version: u64 = version_number.parse().map_err(|_| {
+                LambdaError::invalid_parameter(format!("Invalid version number: {version_number}"))
+            })?;
+            let input: AddLayerVersionPermissionInput =
+                serde_json::from_slice(body).map_err(|e| {
+                    LambdaError::invalid_parameter(format!("Invalid request body: {e}"))
+                })?;
+            let output = provider
+                .add_layer_version_permission(layer_name, version, &input)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(201, &output)
+        }
+
+        LambdaOperation::GetLayerVersionPolicy => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let version_number = require_path_param(path_params, "VersionNumber")?;
+            let version: u64 = version_number.parse().map_err(|_| {
+                LambdaError::invalid_parameter(format!("Invalid version number: {version_number}"))
+            })?;
+            let output = provider
+                .get_layer_version_policy(layer_name, version)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::RemoveLayerVersionPermission => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let version_number = require_path_param(path_params, "VersionNumber")?;
+            let version: u64 = version_number.parse().map_err(|_| {
+                LambdaError::invalid_parameter(format!("Invalid version number: {version_number}"))
+            })?;
+            let statement_id = require_path_param(path_params, "StatementId")?;
+            provider
+                .remove_layer_version_permission(layer_name, version, statement_id)
+                .map_err(LambdaError::from)?;
+            wrap_empty_response(204)
         }
 
         _ => Err(LambdaError::service_error(format!(

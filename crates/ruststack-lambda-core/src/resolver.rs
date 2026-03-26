@@ -148,6 +148,48 @@ pub fn alias_arn(region: &str, account_id: &str, function_name: &str, alias: &st
     format!("arn:aws:lambda:{region}:{account_id}:function:{function_name}:{alias}")
 }
 
+/// Construct a layer ARN (without version).
+///
+/// Format: `arn:aws:lambda:{region}:{account_id}:layer:{layer_name}`
+#[must_use]
+pub fn layer_arn(region: &str, account_id: &str, layer_name: &str) -> String {
+    format!("arn:aws:lambda:{region}:{account_id}:layer:{layer_name}")
+}
+
+/// Construct a layer version ARN.
+///
+/// Format: `arn:aws:lambda:{region}:{account_id}:layer:{layer_name}:{version}`
+#[must_use]
+pub fn layer_version_arn(region: &str, account_id: &str, layer_name: &str, version: u64) -> String {
+    format!("arn:aws:lambda:{region}:{account_id}:layer:{layer_name}:{version}")
+}
+
+/// Parse a layer version ARN into `(layer_name, version)`.
+///
+/// Format: `arn:aws:lambda:{region}:{account}:layer:{name}:{version}`
+///
+/// # Errors
+///
+/// Returns `InvalidArn` if the ARN cannot be parsed.
+pub fn parse_layer_version_arn(arn: &str) -> Result<(String, u64), LambdaServiceError> {
+    let parts: Vec<&str> = arn.split(':').collect();
+    // Expected: arn:aws:lambda:region:account:layer:name:version = 8 parts
+    if parts.len() < 8 || parts[0] != "arn" || parts[2] != "lambda" || parts[5] != "layer" {
+        return Err(LambdaServiceError::InvalidArn {
+            arn: arn.to_owned(),
+        });
+    }
+
+    let name = parts[6].to_owned();
+    let version: u64 = parts[7]
+        .parse()
+        .map_err(|_| LambdaServiceError::InvalidArn {
+            arn: arn.to_owned(),
+        })?;
+
+    Ok((name, version))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap};
@@ -337,5 +379,46 @@ mod tests {
             alias_arn("us-east-1", "123456789012", "my-func", "prod"),
             "arn:aws:lambda:us-east-1:123456789012:function:my-func:prod"
         );
+    }
+
+    // ---- Layer ARN tests ----
+
+    #[test]
+    fn test_should_build_layer_arn() {
+        assert_eq!(
+            layer_arn("us-east-1", "123456789012", "my-layer"),
+            "arn:aws:lambda:us-east-1:123456789012:layer:my-layer"
+        );
+    }
+
+    #[test]
+    fn test_should_build_layer_version_arn() {
+        assert_eq!(
+            layer_version_arn("us-east-1", "123456789012", "my-layer", 3),
+            "arn:aws:lambda:us-east-1:123456789012:layer:my-layer:3"
+        );
+    }
+
+    #[test]
+    fn test_should_parse_layer_version_arn_valid() {
+        let (name, version) =
+            parse_layer_version_arn("arn:aws:lambda:us-east-1:123456789012:layer:my-layer:5")
+                .unwrap();
+        assert_eq!(name, "my-layer");
+        assert_eq!(version, 5);
+    }
+
+    #[test]
+    fn test_should_error_on_invalid_layer_arn() {
+        let err = parse_layer_version_arn("arn:invalid:stuff").unwrap_err();
+        assert!(matches!(err, LambdaServiceError::InvalidArn { .. }));
+    }
+
+    #[test]
+    fn test_should_error_on_non_numeric_layer_version() {
+        let err =
+            parse_layer_version_arn("arn:aws:lambda:us-east-1:123456789012:layer:my-layer:abc")
+                .unwrap_err();
+        assert!(matches!(err, LambdaServiceError::InvalidArn { .. }));
     }
 }
