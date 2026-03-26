@@ -1,12 +1,9 @@
 //! CloudWatch Logs handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_logs_model::error::LogsError;
-use ruststack_logs_model::operations::LogsOperation;
+use ruststack_logs_model::{error::LogsError, operations::LogsOperation};
 
 use crate::body::LogsResponseBody;
 

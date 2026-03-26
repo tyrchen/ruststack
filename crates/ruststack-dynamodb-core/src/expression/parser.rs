@@ -4,9 +4,7 @@
 //! projection expressions. Keywords and function names are matched
 //! case-insensitively per DynamoDB specification.
 
-use std::fmt;
-use std::iter::Peekable;
-use std::str::Chars;
+use std::{fmt, iter::Peekable, str::Chars};
 
 use super::ast::{
     AddAction, AttributePath, CompareOp, DeleteAction, Expr, FunctionName, LogicalOp, Operand,
@@ -565,8 +563,8 @@ impl Parser {
             return Err(ExpressionError::InvalidOperand {
                 operation: name.to_owned(),
                 message: format!(
-                    "The function is not allowed to be used this way in an expression; \
-                     function: {name}"
+                    "The function is not allowed to be used this way in an expression; function: \
+                     {name}"
                 ),
             });
         }
@@ -662,16 +660,15 @@ impl Parser {
                     expected: "valid function name".to_owned(),
                     found: format!(
                         "'{func_name}' is not a valid function; valid functions are: \
-                        attribute_exists, attribute_not_exists, attribute_type, begins_with, \
-                        contains, size"
+                         attribute_exists, attribute_not_exists, attribute_type, begins_with, \
+                         contains, size"
                     ),
                 })
             }
             _ => Err(ExpressionError::UnexpectedToken {
                 expected: "comparison operator, BETWEEN, or IN after operand".to_owned(),
                 found: format!(
-                    "Syntax error; a standalone value or path is not a valid condition; \
-                     found: {}",
+                    "Syntax error; a standalone value or path is not a valid condition; found: {}",
                     self.peek()
                 ),
             }),
@@ -726,8 +723,8 @@ impl Parser {
                     return Err(ExpressionError::InvalidOperand {
                         operation: "size".to_owned(),
                         message: format!(
-                            "Incorrect number of operands for operator or function; \
-                             operator or function: size, number of operands: {count}"
+                            "Incorrect number of operands for operator or function; operator or \
+                             function: size, number of operands: {count}"
                         ),
                     });
                 }
@@ -830,9 +827,9 @@ impl Parser {
                     if seen_set {
                         return Err(ExpressionError::InvalidOperand {
                             operation: "UpdateExpression".to_owned(),
-                            message:
-                                "The \"SET\" section can only be used once in an update expression"
-                                    .to_owned(),
+                            message: "The \"SET\" section can only be used once in an update \
+                                      expression"
+                                .to_owned(),
                         });
                     }
                     seen_set = true;
@@ -843,7 +840,9 @@ impl Parser {
                     if seen_remove {
                         return Err(ExpressionError::InvalidOperand {
                             operation: "UpdateExpression".to_owned(),
-                            message: "The \"REMOVE\" section can only be used once in an update expression".to_owned(),
+                            message: "The \"REMOVE\" section can only be used once in an update \
+                                      expression"
+                                .to_owned(),
                         });
                     }
                     seen_remove = true;
@@ -854,9 +853,9 @@ impl Parser {
                     if seen_add {
                         return Err(ExpressionError::InvalidOperand {
                             operation: "UpdateExpression".to_owned(),
-                            message:
-                                "The \"ADD\" section can only be used once in an update expression"
-                                    .to_owned(),
+                            message: "The \"ADD\" section can only be used once in an update \
+                                      expression"
+                                .to_owned(),
                         });
                     }
                     seen_add = true;
@@ -867,7 +866,9 @@ impl Parser {
                     if seen_delete {
                         return Err(ExpressionError::InvalidOperand {
                             operation: "UpdateExpression".to_owned(),
-                            message: "The \"DELETE\" section can only be used once in an update expression".to_owned(),
+                            message: "The \"DELETE\" section can only be used once in an update \
+                                      expression"
+                                .to_owned(),
                         });
                     }
                     seen_delete = true;
@@ -1150,8 +1151,8 @@ pub fn parse_projection(input: &str) -> Result<Vec<AttributePath>, ExpressionErr
         if path.elements.len() > 32 {
             return Err(ExpressionError::Validation {
                 message: format!(
-                    "Invalid ProjectionExpression: The document path has too many nesting \
-                     levels; nesting levels: {}",
+                    "Invalid ProjectionExpression: The document path has too many nesting levels; \
+                     nesting levels: {}",
                     path.elements.len()
                 ),
             });
@@ -1166,9 +1167,9 @@ pub fn parse_projection(input: &str) -> Result<Vec<AttributePath>, ExpressionErr
             if seen.contains(&repr) {
                 return Err(ExpressionError::Validation {
                     message: format!(
-                        "Invalid ProjectionExpression: Two document paths overlap with \
-                         each other; must remove or rewrite one of these paths; path one: \
-                         [{repr}], path two: [{repr}]"
+                        "Invalid ProjectionExpression: Two document paths overlap with each \
+                         other; must remove or rewrite one of these paths; path one: [{repr}], \
+                         path two: [{repr}]"
                     ),
                 });
             }
@@ -1205,9 +1206,8 @@ fn path_to_resolved(path: &AttributePath) -> Vec<ResolvedPathElement> {
 /// Validate that no two projection paths overlap or conflict.
 ///
 /// - **Overlap**: One path is a prefix of another, or two paths are identical.
-/// - **Conflict**: At a shared prefix point, one path accesses via dot (map key)
-///   and the other via index (list), meaning the same node would need to be both
-///   a map and a list simultaneously.
+/// - **Conflict**: At a shared prefix point, one path accesses via dot (map key) and the other via
+///   index (list), meaning the same node would need to be both a map and a list simultaneously.
 fn validate_projection_paths(paths: &[AttributePath]) -> Result<(), ExpressionError> {
     let resolved: Vec<Vec<ResolvedPathElement>> = paths.iter().map(path_to_resolved).collect();
 
@@ -1238,9 +1238,9 @@ fn validate_projection_paths(paths: &[AttributePath]) -> Result<(), ExpressionEr
                     _ => {
                         return Err(ExpressionError::Validation {
                             message: format!(
-                                "Invalid ProjectionExpression: Two document paths conflict \
-                                 with each other; must remove or rewrite one of these paths; \
-                                 path one: [{}], path two: [{}]",
+                                "Invalid ProjectionExpression: Two document paths conflict with \
+                                 each other; must remove or rewrite one of these paths; path one: \
+                                 [{}], path two: [{}]",
                                 paths[i], paths[j]
                             ),
                         });
@@ -1253,9 +1253,9 @@ fn validate_projection_paths(paths: &[AttributePath]) -> Result<(), ExpressionEr
             if prefix_matches && (a.len() != b.len()) {
                 return Err(ExpressionError::Validation {
                     message: format!(
-                        "Invalid ProjectionExpression: Two document paths overlap with \
-                         each other; must remove or rewrite one of these paths; \
-                         path one: [{}], path two: [{}]",
+                        "Invalid ProjectionExpression: Two document paths overlap with each \
+                         other; must remove or rewrite one of these paths; path one: [{}], path \
+                         two: [{}]",
                         paths[i], paths[j]
                     ),
                 });

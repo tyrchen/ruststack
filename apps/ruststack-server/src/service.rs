@@ -6,14 +6,10 @@
 //!
 //! [`GatewayBody`] is a type-erased HTTP response body shared by all services.
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::io;
-use std::pin::Pin;
+use std::{convert::Infallible, future::Future, io, pin::Pin};
 
 use bytes::Bytes;
-use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::body::Incoming;
 
 /// Type-erased response body used by the gateway.
@@ -53,15 +49,11 @@ pub trait ServiceRouter: Send + Sync {
 
 #[cfg(feature = "s3")]
 mod s3_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_s3_http::dispatch::S3Handler;
-    use ruststack_s3_http::service::S3HttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_s3_http::{dispatch::S3Handler, service::S3HttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -113,15 +105,11 @@ pub use s3_router::S3ServiceRouter;
 
 #[cfg(feature = "dynamodb")]
 mod dynamodb_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_dynamodb_http::dispatch::DynamoDBHandler;
-    use ruststack_dynamodb_http::service::DynamoDBHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_dynamodb_http::{dispatch::DynamoDBHandler, service::DynamoDBHttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -174,15 +162,13 @@ pub use dynamodb_router::DynamoDBServiceRouter;
 
 #[cfg(feature = "dynamodbstreams")]
 mod dynamodbstreams_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_dynamodbstreams_http::dispatch::DynamoDBStreamsHandler;
-    use ruststack_dynamodbstreams_http::service::DynamoDBStreamsHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_dynamodbstreams_http::{
+        dispatch::DynamoDBStreamsHandler, service::DynamoDBStreamsHttpService,
+    };
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -235,15 +221,11 @@ pub use dynamodbstreams_router::DynamoDBStreamsServiceRouter;
 
 #[cfg(feature = "sqs")]
 mod sqs_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_sqs_http::dispatch::SqsHandler;
-    use ruststack_sqs_http::service::SqsHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_sqs_http::{dispatch::SqsHandler, service::SqsHttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -296,15 +278,11 @@ pub use sqs_router::SqsServiceRouter;
 
 #[cfg(feature = "ssm")]
 mod ssm_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_ssm_http::dispatch::SsmHandler;
-    use ruststack_ssm_http::service::SsmHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_ssm_http::{dispatch::SsmHandler, service::SsmHttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -357,15 +335,11 @@ pub use ssm_router::SsmServiceRouter;
 
 #[cfg(feature = "sns")]
 mod sns_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_sns_http::dispatch::SnsHandler;
-    use ruststack_sns_http::service::SnsHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_sns_http::{dispatch::SnsHandler, service::SnsHttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -448,15 +422,11 @@ pub use sns_router::SnsServiceRouter;
 
 #[cfg(feature = "lambda")]
 mod lambda_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_lambda_http::dispatch::LambdaHandler;
-    use ruststack_lambda_http::service::LambdaHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_lambda_http::{dispatch::LambdaHandler, service::LambdaHttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -543,15 +513,11 @@ pub use lambda_router::LambdaServiceRouter;
 
 #[cfg(feature = "events")]
 mod events_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_events_http::dispatch::EventsHandler;
-    use ruststack_events_http::service::EventsHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_events_http::{dispatch::EventsHandler, service::EventsHttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -604,15 +570,11 @@ pub use events_router::EventsServiceRouter;
 
 #[cfg(feature = "logs")]
 mod logs_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_logs_http::dispatch::LogsHandler;
-    use ruststack_logs_http::service::LogsHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_logs_http::{dispatch::LogsHandler, service::LogsHttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -665,15 +627,11 @@ pub use logs_router::LogsServiceRouter;
 
 #[cfg(feature = "kms")]
 mod kms_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_kms_http::dispatch::KmsHandler;
-    use ruststack_kms_http::service::KmsHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_kms_http::{dispatch::KmsHandler, service::KmsHttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -726,15 +684,11 @@ pub use kms_router::KmsServiceRouter;
 
 #[cfg(feature = "kinesis")]
 mod kinesis_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_kinesis_http::dispatch::KinesisHandler;
-    use ruststack_kinesis_http::service::KinesisHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_kinesis_http::{dispatch::KinesisHandler, service::KinesisHttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -787,15 +741,13 @@ pub use kinesis_router::KinesisServiceRouter;
 
 #[cfg(feature = "secretsmanager")]
 mod secretsmanager_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_secretsmanager_http::dispatch::SecretsManagerHandler;
-    use ruststack_secretsmanager_http::service::SecretsManagerHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_secretsmanager_http::{
+        dispatch::SecretsManagerHandler, service::SecretsManagerHttpService,
+    };
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -848,16 +800,11 @@ pub use secretsmanager_router::SecretsManagerServiceRouter;
 
 #[cfg(feature = "ses")]
 mod ses_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_ses_http::dispatch::SesHandler;
-    use ruststack_ses_http::service::SesHttpService;
-    use ruststack_ses_http::v2::SesV2HttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_ses_http::{dispatch::SesHandler, service::SesHttpService, v2::SesV2HttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -978,7 +925,8 @@ mod ses_router {
             headers.insert(
                 "authorization",
                 http::HeaderValue::from_static(
-                    "AWS4-HMAC-SHA256 Credential=test/20260319/us-east-1/ses/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=abc123",
+                    "AWS4-HMAC-SHA256 Credential=test/20260319/us-east-1/ses/aws4_request, \
+                     SignedHeaders=content-type;host;x-amz-date, Signature=abc123",
                 ),
             );
             assert_eq!(extract_sigv4_service(&headers), Some("ses"));
@@ -990,7 +938,8 @@ mod ses_router {
             headers.insert(
                 "authorization",
                 http::HeaderValue::from_static(
-                    "AWS4-HMAC-SHA256 Credential=AKID/20260319/us-east-1/email/aws4_request, SignedHeaders=host, Signature=abc123",
+                    "AWS4-HMAC-SHA256 Credential=AKID/20260319/us-east-1/email/aws4_request, \
+                     SignedHeaders=host, Signature=abc123",
                 ),
             );
             assert_eq!(extract_sigv4_service(&headers), Some("email"));
@@ -1002,7 +951,8 @@ mod ses_router {
             headers.insert(
                 "authorization",
                 http::HeaderValue::from_static(
-                    "AWS4-HMAC-SHA256 Credential=AKID/20260319/us-east-1/sns/aws4_request, SignedHeaders=host, Signature=abc123",
+                    "AWS4-HMAC-SHA256 Credential=AKID/20260319/us-east-1/sns/aws4_request, \
+                     SignedHeaders=host, Signature=abc123",
                 ),
             );
             assert_eq!(extract_sigv4_service(&headers), Some("sns"));
@@ -1035,19 +985,18 @@ pub use ses_router::SesServiceRouter;
 
 #[cfg(feature = "apigatewayv2")]
 mod apigatewayv2_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
-    use std::sync::Arc;
+    use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
     use bytes::Bytes;
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_apigatewayv2_core::execution::{handle_execution, parse_execution_path};
-    use ruststack_apigatewayv2_core::provider::RustStackApiGatewayV2;
-    use ruststack_apigatewayv2_http::dispatch::ApiGatewayV2Handler;
-    use ruststack_apigatewayv2_http::service::ApiGatewayV2HttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_apigatewayv2_core::{
+        execution::{handle_execution, parse_execution_path},
+        provider::RustStackApiGatewayV2,
+    };
+    use ruststack_apigatewayv2_http::{
+        dispatch::ApiGatewayV2Handler, service::ApiGatewayV2HttpService,
+    };
 
     use super::{GatewayBody, ServiceRouter, gateway_body_from_string};
 
@@ -1223,15 +1172,11 @@ pub use apigatewayv2_router::{ApiGatewayV2ExecutionRouter, ApiGatewayV2Managemen
 
 #[cfg(feature = "cloudwatch")]
 mod cloudwatch_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_cloudwatch_http::dispatch::CloudWatchHandler;
-    use ruststack_cloudwatch_http::service::CloudWatchHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_cloudwatch_http::{dispatch::CloudWatchHandler, service::CloudWatchHttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -1276,8 +1221,8 @@ mod cloudwatch_router {
         /// CloudWatch Metrics matches in three ways:
         /// 1. awsQuery: form-urlencoded POST signed with `monitoring` SigV4 service.
         /// 2. rpcv2Cbor path: POST to `/service/GraniteServiceVersion20100801/...`.
-        /// 3. rpcv2Cbor header: POST with `smithy-protocol: rpc-v2-cbor` signed
-        ///    with `monitoring` SigV4 service (AWS SDK v1.108+).
+        /// 3. rpcv2Cbor header: POST with `smithy-protocol: rpc-v2-cbor` signed with `monitoring`
+        ///    SigV4 service (AWS SDK v1.108+).
         fn matches(&self, req: &http::Request<Incoming>) -> bool {
             if *req.method() != http::Method::POST {
                 return false;
@@ -1347,15 +1292,11 @@ pub use cloudwatch_router::CloudWatchServiceRouter;
 
 #[cfg(feature = "iam")]
 mod iam_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_iam_http::dispatch::IamHandler;
-    use ruststack_iam_http::service::IamHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_iam_http::{dispatch::IamHandler, service::IamHttpService};
 
     use super::{GatewayBody, ServiceRouter};
 
@@ -1437,15 +1378,11 @@ pub use iam_router::IamServiceRouter;
 
 #[cfg(feature = "sts")]
 mod sts_router {
-    use std::convert::Infallible;
-    use std::future::Future;
-    use std::pin::Pin;
+    use std::{convert::Infallible, future::Future, pin::Pin};
 
     use http_body_util::BodyExt;
-    use hyper::body::Incoming;
-    use hyper::service::Service;
-    use ruststack_sts_http::dispatch::StsHandler;
-    use ruststack_sts_http::service::StsHttpService;
+    use hyper::{body::Incoming, service::Service};
+    use ruststack_sts_http::{dispatch::StsHandler, service::StsHttpService};
 
     use super::{GatewayBody, ServiceRouter};
 

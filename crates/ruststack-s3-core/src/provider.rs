@@ -10,10 +10,9 @@
 
 use std::sync::Arc;
 
-use crate::config::S3Config;
-use crate::cors::CorsIndex;
-use crate::state::service::S3ServiceState;
-use crate::storage::InMemoryStorage;
+use crate::{
+    config::S3Config, cors::CorsIndex, state::service::S3ServiceState, storage::InMemoryStorage,
+};
 
 /// The main S3 provider.
 ///

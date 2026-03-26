@@ -3,38 +3,44 @@
 //! Acts as the queue manager that owns all queue actors, creating and
 //! destroying them as queues are created and deleted.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::{
+    collections::HashMap,
+    sync::{Arc, atomic::AtomicBool},
+};
 
-use dashmap::DashMap;
-use dashmap::mapref::multiple::RefMulti;
+use dashmap::{DashMap, mapref::multiple::RefMulti};
+use ruststack_sqs_model::{
+    error::SqsError,
+    input::{
+        AddPermissionInput, CancelMessageMoveTaskInput, ChangeMessageVisibilityBatchInput,
+        ChangeMessageVisibilityInput, CreateQueueInput, DeleteMessageBatchInput,
+        DeleteMessageInput, DeleteQueueInput, GetQueueAttributesInput, GetQueueUrlInput,
+        ListDeadLetterSourceQueuesInput, ListMessageMoveTasksInput, ListQueueTagsInput,
+        ListQueuesInput, PurgeQueueInput, ReceiveMessageInput, RemovePermissionInput,
+        SendMessageBatchInput, SendMessageInput, SetQueueAttributesInput,
+        StartMessageMoveTaskInput, TagQueueInput, UntagQueueInput,
+    },
+    output::{
+        AddPermissionOutput, CancelMessageMoveTaskOutput, ChangeMessageVisibilityBatchOutput,
+        ChangeMessageVisibilityOutput, CreateQueueOutput, DeleteMessageBatchOutput,
+        DeleteMessageOutput, DeleteQueueOutput, GetQueueAttributesOutput, GetQueueUrlOutput,
+        ListDeadLetterSourceQueuesOutput, ListMessageMoveTasksOutput, ListQueueTagsOutput,
+        ListQueuesOutput, PurgeQueueOutput, ReceiveMessageOutput, RemovePermissionOutput,
+        SendMessageBatchOutput, SendMessageOutput, SetQueueAttributesOutput,
+        StartMessageMoveTaskOutput, TagQueueOutput, UntagQueueOutput,
+    },
+};
 use tokio::sync::{Notify, mpsc};
 
-use ruststack_sqs_model::error::SqsError;
-use ruststack_sqs_model::input::{
-    AddPermissionInput, CancelMessageMoveTaskInput, ChangeMessageVisibilityBatchInput,
-    ChangeMessageVisibilityInput, CreateQueueInput, DeleteMessageBatchInput, DeleteMessageInput,
-    DeleteQueueInput, GetQueueAttributesInput, GetQueueUrlInput, ListDeadLetterSourceQueuesInput,
-    ListMessageMoveTasksInput, ListQueueTagsInput, ListQueuesInput, PurgeQueueInput,
-    ReceiveMessageInput, RemovePermissionInput, SendMessageBatchInput, SendMessageInput,
-    SetQueueAttributesInput, StartMessageMoveTaskInput, TagQueueInput, UntagQueueInput,
+use crate::{
+    config::SqsConfig,
+    message::now_epoch_seconds,
+    queue::{
+        actor::{QueueActor, QueueHandle, QueueMetadata},
+        attributes::QueueAttributes,
+        url::{extract_queue_name, queue_arn, queue_url},
+    },
 };
-use ruststack_sqs_model::output::{
-    AddPermissionOutput, CancelMessageMoveTaskOutput, ChangeMessageVisibilityBatchOutput,
-    ChangeMessageVisibilityOutput, CreateQueueOutput, DeleteMessageBatchOutput,
-    DeleteMessageOutput, DeleteQueueOutput, GetQueueAttributesOutput, GetQueueUrlOutput,
-    ListDeadLetterSourceQueuesOutput, ListMessageMoveTasksOutput, ListQueueTagsOutput,
-    ListQueuesOutput, PurgeQueueOutput, ReceiveMessageOutput, RemovePermissionOutput,
-    SendMessageBatchOutput, SendMessageOutput, SetQueueAttributesOutput,
-    StartMessageMoveTaskOutput, TagQueueOutput, UntagQueueOutput,
-};
-
-use crate::config::SqsConfig;
-use crate::message::now_epoch_seconds;
-use crate::queue::actor::{QueueActor, QueueHandle, QueueMetadata};
-use crate::queue::attributes::QueueAttributes;
-use crate::queue::url::{extract_queue_name, queue_arn, queue_url};
 
 /// Main SQS provider. Acts as the queue manager that owns all queue actors.
 #[derive(Debug)]
@@ -61,7 +67,8 @@ impl RustStackSqs {
             .map(String::from)
             .ok_or_else(|| {
                 SqsError::non_existent_queue(format!(
-                    "The specified queue does not exist for this wsdl version. QueueUrl: {queue_url_str}"
+                    "The specified queue does not exist for this wsdl version. QueueUrl: \
+                     {queue_url_str}"
                 ))
             })
     }

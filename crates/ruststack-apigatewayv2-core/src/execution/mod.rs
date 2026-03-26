@@ -13,8 +13,7 @@ pub mod router;
 use bytes::Bytes;
 use ruststack_apigatewayv2_model::types::IntegrationType;
 
-use crate::error::ApiGatewayV2ServiceError;
-use crate::provider::RustStackApiGatewayV2;
+use crate::{error::ApiGatewayV2ServiceError, provider::RustStackApiGatewayV2};
 
 /// Target for an API execution request.
 #[derive(Debug)]

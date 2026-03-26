@@ -4,51 +4,54 @@
 //! alarm management, dashboard CRUD, insight rules, anomaly detectors,
 //! metric streams, and tagging.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::Utc;
+use ruststack_cloudwatch_model::{
+    error::{CloudWatchError, CloudWatchErrorCode},
+    input::{
+        DeleteAlarmsInput, DeleteAnomalyDetectorInput, DeleteDashboardsInput,
+        DeleteInsightRulesInput, DeleteMetricStreamInput, DescribeAlarmHistoryInput,
+        DescribeAlarmsForMetricInput, DescribeAlarmsInput, DescribeAnomalyDetectorsInput,
+        DescribeInsightRulesInput, DisableAlarmActionsInput, EnableAlarmActionsInput,
+        GetDashboardInput, GetMetricDataInput, GetMetricStatisticsInput, GetMetricStreamInput,
+        ListDashboardsInput, ListMetricStreamsInput, ListMetricsInput, ListTagsForResourceInput,
+        PutAnomalyDetectorInput, PutCompositeAlarmInput, PutDashboardInput, PutInsightRuleInput,
+        PutManagedInsightRulesInput, PutMetricAlarmInput, PutMetricDataInput, PutMetricStreamInput,
+        SetAlarmStateInput, TagResourceInput, UntagResourceInput,
+    },
+    output::{
+        DeleteAnomalyDetectorOutput, DeleteDashboardsOutput, DeleteInsightRulesOutput,
+        DeleteMetricStreamOutput, DescribeAlarmHistoryOutput, DescribeAlarmsForMetricOutput,
+        DescribeAlarmsOutput, DescribeAnomalyDetectorsOutput, DescribeInsightRulesOutput,
+        GetDashboardOutput, GetMetricDataOutput, GetMetricStatisticsOutput, GetMetricStreamOutput,
+        ListDashboardsOutput, ListMetricStreamsOutput, ListMetricsOutput,
+        ListTagsForResourceOutput, PutAnomalyDetectorOutput, PutDashboardOutput,
+        PutInsightRuleOutput, PutManagedInsightRulesOutput, PutMetricStreamOutput,
+        TagResourceOutput, UntagResourceOutput,
+    },
+    types::{
+        AlarmHistoryItem, AlarmType, AnomalyDetector, CompositeAlarm, DashboardEntry, Datapoint,
+        HistoryItemType, InsightRule, Metric, MetricAlarm, MetricDataResult, MetricStreamEntry,
+        MetricStreamOutputFormat, StateValue, Statistic, StatusCode,
+    },
+};
 use tracing::instrument;
 
-use ruststack_cloudwatch_model::error::{CloudWatchError, CloudWatchErrorCode};
-use ruststack_cloudwatch_model::input::{
-    DeleteAlarmsInput, DeleteAnomalyDetectorInput, DeleteDashboardsInput, DeleteInsightRulesInput,
-    DeleteMetricStreamInput, DescribeAlarmHistoryInput, DescribeAlarmsForMetricInput,
-    DescribeAlarmsInput, DescribeAnomalyDetectorsInput, DescribeInsightRulesInput,
-    DisableAlarmActionsInput, EnableAlarmActionsInput, GetDashboardInput, GetMetricDataInput,
-    GetMetricStatisticsInput, GetMetricStreamInput, ListDashboardsInput, ListMetricStreamsInput,
-    ListMetricsInput, ListTagsForResourceInput, PutAnomalyDetectorInput, PutCompositeAlarmInput,
-    PutDashboardInput, PutInsightRuleInput, PutManagedInsightRulesInput, PutMetricAlarmInput,
-    PutMetricDataInput, PutMetricStreamInput, SetAlarmStateInput, TagResourceInput,
-    UntagResourceInput,
-};
-use ruststack_cloudwatch_model::output::{
-    DeleteAnomalyDetectorOutput, DeleteDashboardsOutput, DeleteInsightRulesOutput,
-    DeleteMetricStreamOutput, DescribeAlarmHistoryOutput, DescribeAlarmsForMetricOutput,
-    DescribeAlarmsOutput, DescribeAnomalyDetectorsOutput, DescribeInsightRulesOutput,
-    GetDashboardOutput, GetMetricDataOutput, GetMetricStatisticsOutput, GetMetricStreamOutput,
-    ListDashboardsOutput, ListMetricStreamsOutput, ListMetricsOutput, ListTagsForResourceOutput,
-    PutAnomalyDetectorOutput, PutDashboardOutput, PutInsightRuleOutput,
-    PutManagedInsightRulesOutput, PutMetricStreamOutput, TagResourceOutput, UntagResourceOutput,
-};
-use ruststack_cloudwatch_model::types::{
-    AlarmHistoryItem, AlarmType, AnomalyDetector, CompositeAlarm, DashboardEntry, Datapoint,
-    HistoryItemType, InsightRule, Metric, MetricAlarm, MetricDataResult, MetricStreamEntry,
-    MetricStreamOutputFormat, StateValue, Statistic, StatusCode,
-};
-
-use crate::aggregation::aggregate_statistics;
-use crate::alarm_store::AlarmStore;
-use crate::anomaly_store::AnomalyStore;
-use crate::config::CloudWatchConfig;
-use crate::dashboard_store::{DashboardRecord, DashboardStore};
-use crate::dimensions::{dimensions_match, normalize_dimensions};
-use crate::insight_store::InsightStore;
-use crate::metric_store::{DataPoint, MetricKey, MetricStore, StatisticSet};
-use crate::metric_stream_store::{MetricStreamRecord, MetricStreamStore};
-use crate::validation::{
-    validate_alarm_name, validate_dashboard_body, validate_dashboard_name, validate_dimensions,
-    validate_metric_name, validate_namespace,
+use crate::{
+    aggregation::aggregate_statistics,
+    alarm_store::AlarmStore,
+    anomaly_store::AnomalyStore,
+    config::CloudWatchConfig,
+    dashboard_store::{DashboardRecord, DashboardStore},
+    dimensions::{dimensions_match, normalize_dimensions},
+    insight_store::InsightStore,
+    metric_store::{DataPoint, MetricKey, MetricStore, StatisticSet},
+    metric_stream_store::{MetricStreamRecord, MetricStreamStore},
+    validation::{
+        validate_alarm_name, validate_dashboard_body, validate_dashboard_name, validate_dimensions,
+        validate_metric_name, validate_namespace,
+    },
 };
 
 /// CloudWatch service provider implementing all 31 operations.
@@ -1254,12 +1257,15 @@ impl RustStackCloudWatch {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use ruststack_cloudwatch_model::input::{
-        DeleteAlarmsInput, DescribeAlarmsInput, PutMetricAlarmInput, PutMetricDataInput,
-        SetAlarmStateInput,
+    use ruststack_cloudwatch_model::{
+        input::{
+            DeleteAlarmsInput, DescribeAlarmsInput, PutMetricAlarmInput, PutMetricDataInput,
+            SetAlarmStateInput,
+        },
+        types::{ComparisonOperator, MetricDatum, StateValue},
     };
-    use ruststack_cloudwatch_model::types::{ComparisonOperator, MetricDatum, StateValue};
+
+    use super::*;
 
     fn make_provider() -> RustStackCloudWatch {
         RustStackCloudWatch::new(Arc::new(CloudWatchConfig::default()))

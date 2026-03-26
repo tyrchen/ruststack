@@ -106,13 +106,15 @@ impl From<LambdaServiceError> for LambdaError {
                 ref function_name,
                 ref version,
             } => LambdaError::resource_not_found(format!(
-                "Function not found: arn:aws:lambda:us-east-1:000000000000:function:{function_name}:{version}"
+                "Function not found: \
+                 arn:aws:lambda:us-east-1:000000000000:function:{function_name}:{version}"
             )),
             LambdaServiceError::AliasNotFound {
                 ref function_name,
                 ref alias,
             } => LambdaError::resource_not_found(format!(
-                "Function not found: arn:aws:lambda:us-east-1:000000000000:function:{function_name}:{alias}"
+                "Function not found: \
+                 arn:aws:lambda:us-east-1:000000000000:function:{function_name}:{alias}"
             )),
             LambdaServiceError::ResourceConflict { ref message } => {
                 LambdaError::resource_conflict(message)

@@ -4,8 +4,7 @@
 //! `Content-Type: application/x-www-form-urlencoded`. The operation is
 //! specified by the `Action=<OperationName>` form parameter.
 
-use ruststack_ses_model::error::SesError;
-use ruststack_ses_model::operations::SesOperation;
+use ruststack_ses_model::{error::SesError, operations::SesOperation};
 
 /// Resolve an SES v1 action string to an `SesOperation`.
 ///

@@ -3,16 +3,12 @@
 //! Uses manual `Pin<Box<dyn Future>>` return types because `ApiGatewayV2Handler`
 //! requires object safety for dynamic dispatch (`Arc<dyn ApiGatewayV2Handler>`).
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
+use ruststack_apigatewayv2_model::{error::ApiGatewayV2Error, operations::ApiGatewayV2Operation};
 
-use ruststack_apigatewayv2_model::error::ApiGatewayV2Error;
-use ruststack_apigatewayv2_model::operations::ApiGatewayV2Operation;
-
-use crate::body::ApiGatewayV2ResponseBody;
-use crate::router::PathParams;
+use crate::{body::ApiGatewayV2ResponseBody, router::PathParams};
 
 /// The boundary between HTTP and business logic for API Gateway v2.
 ///

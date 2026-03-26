@@ -3,12 +3,13 @@
 //! `AttributeValue` is a tagged union where exactly one variant is present.
 //! The JSON wire format uses single-key objects like `{"S": "hello"}`.
 
-use std::collections::HashMap;
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
-use serde::de::{self, MapAccess, Visitor};
-use serde::ser::SerializeMap;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, MapAccess, Visitor},
+    ser::SerializeMap,
+};
 
 /// DynamoDB attribute value.
 ///

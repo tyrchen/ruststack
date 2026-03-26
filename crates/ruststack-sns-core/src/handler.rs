@@ -7,40 +7,41 @@
 //! tagging, permissions, data protection, platform applications,
 //! platform endpoints, and SMS operations.
 
-use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_sns_http::body::SnsResponseBody;
-use ruststack_sns_http::dispatch::SnsHandler;
-use ruststack_sns_http::request::{
-    get_optional_bool, get_optional_param, get_required_param, parse_attributes_map,
-    parse_form_params, parse_message_attributes, parse_publish_batch_entries, parse_string_list,
-    parse_tag_list,
+use ruststack_sns_http::{
+    body::SnsResponseBody,
+    dispatch::SnsHandler,
+    request::{
+        get_optional_bool, get_optional_param, get_required_param, parse_attributes_map,
+        parse_form_params, parse_message_attributes, parse_publish_batch_entries,
+        parse_string_list, parse_tag_list,
+    },
+    response::{XmlWriter, xml_response},
 };
-use ruststack_sns_http::response::{XmlWriter, xml_response};
-use ruststack_sns_model::error::SnsError;
-use ruststack_sns_model::input::{
-    AddPermissionInput, CheckIfPhoneNumberIsOptedOutInput, ConfirmSubscriptionInput,
-    CreatePlatformApplicationInput, CreatePlatformEndpointInput, CreateSMSSandboxPhoneNumberInput,
-    CreateTopicInput, DeleteEndpointInput, DeletePlatformApplicationInput,
-    DeleteSMSSandboxPhoneNumberInput, DeleteTopicInput, GetDataProtectionPolicyInput,
-    GetEndpointAttributesInput, GetPlatformApplicationAttributesInput, GetSMSAttributesInput,
-    GetSMSSandboxAccountStatusInput, GetSubscriptionAttributesInput, GetTopicAttributesInput,
-    ListEndpointsByPlatformApplicationInput, ListOriginationNumbersInput,
-    ListPhoneNumbersOptedOutInput, ListPlatformApplicationsInput, ListSMSSandboxPhoneNumbersInput,
-    ListSubscriptionsByTopicInput, ListSubscriptionsInput, ListTagsForResourceInput,
-    ListTopicsInput, OptInPhoneNumberInput, PublishBatchInput, PublishInput,
-    PutDataProtectionPolicyInput, RemovePermissionInput, SetEndpointAttributesInput,
-    SetPlatformApplicationAttributesInput, SetSMSAttributesInput, SetSubscriptionAttributesInput,
-    SetTopicAttributesInput, SubscribeInput, TagResourceInput, UnsubscribeInput,
-    UntagResourceInput, VerifySMSSandboxPhoneNumberInput,
+use ruststack_sns_model::{
+    error::SnsError,
+    input::{
+        AddPermissionInput, CheckIfPhoneNumberIsOptedOutInput, ConfirmSubscriptionInput,
+        CreatePlatformApplicationInput, CreatePlatformEndpointInput,
+        CreateSMSSandboxPhoneNumberInput, CreateTopicInput, DeleteEndpointInput,
+        DeletePlatformApplicationInput, DeleteSMSSandboxPhoneNumberInput, DeleteTopicInput,
+        GetDataProtectionPolicyInput, GetEndpointAttributesInput,
+        GetPlatformApplicationAttributesInput, GetSMSAttributesInput,
+        GetSMSSandboxAccountStatusInput, GetSubscriptionAttributesInput, GetTopicAttributesInput,
+        ListEndpointsByPlatformApplicationInput, ListOriginationNumbersInput,
+        ListPhoneNumbersOptedOutInput, ListPlatformApplicationsInput,
+        ListSMSSandboxPhoneNumbersInput, ListSubscriptionsByTopicInput, ListSubscriptionsInput,
+        ListTagsForResourceInput, ListTopicsInput, OptInPhoneNumberInput, PublishBatchInput,
+        PublishInput, PutDataProtectionPolicyInput, RemovePermissionInput,
+        SetEndpointAttributesInput, SetPlatformApplicationAttributesInput, SetSMSAttributesInput,
+        SetSubscriptionAttributesInput, SetTopicAttributesInput, SubscribeInput, TagResourceInput,
+        UnsubscribeInput, UntagResourceInput, VerifySMSSandboxPhoneNumberInput,
+    },
+    operations::SnsOperation,
+    types::Subscription,
 };
-use ruststack_sns_model::operations::SnsOperation;
-use ruststack_sns_model::types::Subscription;
 
 use crate::provider::RustStackSns;
 

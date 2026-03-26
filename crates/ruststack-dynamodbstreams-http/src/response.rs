@@ -77,8 +77,9 @@ pub fn json_response(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ruststack_dynamodbstreams_model::error::DynamoDBStreamsErrorCode;
+
+    use super::*;
 
     #[test]
     fn test_should_format_error_json() {

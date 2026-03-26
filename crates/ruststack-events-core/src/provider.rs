@@ -4,36 +4,31 @@
 //! the design simple without an actor model. Pattern matching is synchronous;
 //! only delivery to targets is asynchronous.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
-
-use ruststack_events_model::error::EventsError;
-use ruststack_events_model::input::{
-    CreateEventBusInput, DeleteEventBusInput, DeleteRuleInput, DescribeEventBusInput,
-    DescribeRuleInput, DisableRuleInput, EnableRuleInput, ListEventBusesInput,
-    ListRuleNamesByTargetInput, ListRulesInput, ListTagsForResourceInput, ListTargetsByRuleInput,
-    PutEventsInput, PutPermissionInput, PutRuleInput, PutTargetsInput, RemovePermissionInput,
-    RemoveTargetsInput, TagResourceInput, TestEventPatternInput, UntagResourceInput,
-    UpdateEventBusInput,
-};
-use ruststack_events_model::output::{
-    CreateEventBusOutput, DeleteEventBusOutput, DeleteRuleOutput, DescribeEventBusOutput,
-    DescribeRuleOutput, DisableRuleOutput, EnableRuleOutput, ListEventBusesOutput,
-    ListRuleNamesByTargetOutput, ListRulesOutput, ListTagsForResourceOutput,
-    ListTargetsByRuleOutput, PutEventsOutput, PutPermissionOutput, PutRuleOutput, PutTargetsOutput,
-    RemovePermissionOutput, RemoveTargetsOutput, TagResourceOutput, TestEventPatternOutput,
-    UntagResourceOutput, UpdateEventBusOutput,
-};
-use ruststack_events_model::types::{
-    EventBus, InputTransformer, PutEventsResultEntry, Rule, Tag, Target,
+use dashmap::{DashMap, mapref::entry::Entry};
+use ruststack_events_model::{
+    error::EventsError,
+    input::{
+        CreateEventBusInput, DeleteEventBusInput, DeleteRuleInput, DescribeEventBusInput,
+        DescribeRuleInput, DisableRuleInput, EnableRuleInput, ListEventBusesInput,
+        ListRuleNamesByTargetInput, ListRulesInput, ListTagsForResourceInput,
+        ListTargetsByRuleInput, PutEventsInput, PutPermissionInput, PutRuleInput, PutTargetsInput,
+        RemovePermissionInput, RemoveTargetsInput, TagResourceInput, TestEventPatternInput,
+        UntagResourceInput, UpdateEventBusInput,
+    },
+    output::{
+        CreateEventBusOutput, DeleteEventBusOutput, DeleteRuleOutput, DescribeEventBusOutput,
+        DescribeRuleOutput, DisableRuleOutput, EnableRuleOutput, ListEventBusesOutput,
+        ListRuleNamesByTargetOutput, ListRulesOutput, ListTagsForResourceOutput,
+        ListTargetsByRuleOutput, PutEventsOutput, PutPermissionOutput, PutRuleOutput,
+        PutTargetsOutput, RemovePermissionOutput, RemoveTargetsOutput, TagResourceOutput,
+        TestEventPatternOutput, UntagResourceOutput, UpdateEventBusOutput,
+    },
+    types::{EventBus, InputTransformer, PutEventsResultEntry, Rule, Tag, Target},
 };
 
-use crate::config::EventsConfig;
-use crate::delivery::TargetDelivery;
-use crate::pattern::EventPattern;
+use crate::{config::EventsConfig, delivery::TargetDelivery, pattern::EventPattern};
 
 /// Maximum number of entries per `PutEvents` call.
 const MAX_PUT_EVENTS_ENTRIES: usize = 10;

@@ -3,8 +3,10 @@
 //! Implements AWS SSM validation constraints for parameter names, values,
 //! descriptions, hierarchy depth, and allowed patterns.
 
-use ruststack_ssm_model::error::{SsmError, SsmErrorCode};
-use ruststack_ssm_model::types::ParameterTier;
+use ruststack_ssm_model::{
+    error::{SsmError, SsmErrorCode},
+    types::ParameterTier,
+};
 
 /// Maximum parameter name length.
 const MAX_NAME_LENGTH: usize = 2048;
@@ -50,8 +52,8 @@ pub fn validate_name(name: &str) -> Result<(), SsmError> {
         .all(|c| c.is_ascii_alphanumeric() || "_./-".contains(c))
     {
         return Err(SsmError::validation(format!(
-            "Parameter name '{name}' contains invalid characters. \
-             Only [a-zA-Z0-9_./-] are allowed."
+            "Parameter name '{name}' contains invalid characters. Only [a-zA-Z0-9_./-] are \
+             allowed."
         )));
     }
 
@@ -61,8 +63,8 @@ pub fn validate_name(name: &str) -> Result<(), SsmError> {
     let check_name = lower.trim_start_matches('/');
     if check_name.starts_with("aws") || check_name.starts_with("ssm") {
         return Err(SsmError::validation(format!(
-            "Parameter name '{name}' is not allowed. \
-             Names beginning with 'aws' or 'ssm' (case-insensitive) are reserved."
+            "Parameter name '{name}' is not allowed. Names beginning with 'aws' or 'ssm' \
+             (case-insensitive) are reserved."
         )));
     }
 
@@ -72,8 +74,8 @@ pub fn validate_name(name: &str) -> Result<(), SsmError> {
         return Err(SsmError::with_message(
             SsmErrorCode::HierarchyLevelLimitExceeded,
             format!(
-                "Parameter name '{name}' exceeds the maximum hierarchy depth \
-                 of {MAX_HIERARCHY_DEPTH} levels."
+                "Parameter name '{name}' exceeds the maximum hierarchy depth of \
+                 {MAX_HIERARCHY_DEPTH} levels."
             ),
         ));
     }
@@ -90,8 +92,7 @@ pub fn validate_value(value: &str, tier: &ParameterTier) -> Result<(), SsmError>
 
     if value.len() > max_size {
         return Err(SsmError::validation(format!(
-            "Parameter value exceeds the maximum size of {max_size} bytes for \
-             {tier} tier."
+            "Parameter value exceeds the maximum size of {max_size} bytes for {tier} tier."
         )));
     }
 

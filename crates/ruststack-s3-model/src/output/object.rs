@@ -2,11 +2,13 @@
 
 use std::collections::HashMap;
 
-use crate::request::StreamingBlob;
-
-use crate::types::{
-    ArchiveStatus, ChecksumType, CopyObjectResult, DeletedObject, Error, ObjectLockLegalHoldStatus,
-    ObjectLockMode, ReplicationStatus, RequestCharged, ServerSideEncryption, StorageClass,
+use crate::{
+    request::StreamingBlob,
+    types::{
+        ArchiveStatus, ChecksumType, CopyObjectResult, DeletedObject, Error,
+        ObjectLockLegalHoldStatus, ObjectLockMode, ReplicationStatus, RequestCharged,
+        ServerSideEncryption, StorageClass,
+    },
 };
 
 /// S3 CopyObjectOutput.

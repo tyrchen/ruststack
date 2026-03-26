@@ -1,12 +1,9 @@
 //! EventBridge handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_events_model::error::EventsError;
-use ruststack_events_model::operations::EventsOperation;
+use ruststack_events_model::{error::EventsError, operations::EventsOperation};
 
 use crate::body::EventsResponseBody;
 

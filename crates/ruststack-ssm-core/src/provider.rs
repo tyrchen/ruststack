@@ -1,28 +1,33 @@
 //! SSM provider implementing Phase 0, Phase 1, and Phase 2 operations.
 
-use ruststack_ssm_model::error::{SsmError, SsmErrorCode};
-use ruststack_ssm_model::input::{
-    AddTagsToResourceInput, DeleteParameterInput, DeleteParametersInput, DescribeParametersInput,
-    GetParameterHistoryInput, GetParameterInput, GetParametersByPathInput, GetParametersInput,
-    LabelParameterVersionInput, ListTagsForResourceInput, PutParameterInput,
-    RemoveTagsFromResourceInput, UnlabelParameterVersionInput,
+use ruststack_ssm_model::{
+    error::{SsmError, SsmErrorCode},
+    input::{
+        AddTagsToResourceInput, DeleteParameterInput, DeleteParametersInput,
+        DescribeParametersInput, GetParameterHistoryInput, GetParameterInput,
+        GetParametersByPathInput, GetParametersInput, LabelParameterVersionInput,
+        ListTagsForResourceInput, PutParameterInput, RemoveTagsFromResourceInput,
+        UnlabelParameterVersionInput,
+    },
+    output::{
+        AddTagsToResourceOutput, DeleteParameterOutput, DeleteParametersOutput,
+        DescribeParametersOutput, GetParameterHistoryOutput, GetParameterOutput,
+        GetParametersByPathOutput, GetParametersOutput, LabelParameterVersionOutput,
+        ListTagsForResourceOutput, PutParameterOutput, RemoveTagsFromResourceOutput,
+        UnlabelParameterVersionOutput,
+    },
+    types::ParameterTier,
 };
-use ruststack_ssm_model::output::{
-    AddTagsToResourceOutput, DeleteParameterOutput, DeleteParametersOutput,
-    DescribeParametersOutput, GetParameterHistoryOutput, GetParameterOutput,
-    GetParametersByPathOutput, GetParametersOutput, LabelParameterVersionOutput,
-    ListTagsForResourceOutput, PutParameterOutput, RemoveTagsFromResourceOutput,
-    UnlabelParameterVersionOutput,
-};
-use ruststack_ssm_model::types::ParameterTier;
 
-use crate::config::SsmConfig;
-use crate::filter::validate_filters;
-use crate::selector::parse_name_with_selector;
-use crate::storage::ParameterStore;
-use crate::validation::{
-    MAX_BATCH_SIZE, parse_parameter_type, parse_tier, validate_allowed_pattern,
-    validate_description, validate_name, validate_tags, validate_value,
+use crate::{
+    config::SsmConfig,
+    filter::validate_filters,
+    selector::parse_name_with_selector,
+    storage::ParameterStore,
+    validation::{
+        MAX_BATCH_SIZE, parse_parameter_type, parse_tier, validate_allowed_pattern,
+        validate_description, validate_name, validate_tags, validate_value,
+    },
 };
 
 /// Default max results for `GetParametersByPath`.
@@ -359,8 +364,8 @@ fn validate_resource_type(resource_type: &str) -> Result<(), SsmError> {
         return Err(SsmError::with_message(
             SsmErrorCode::InvalidResourceType,
             format!(
-                "The resource type '{resource_type}' is not valid. \
-                 Valid resource types: Parameter."
+                "The resource type '{resource_type}' is not valid. Valid resource types: \
+                 Parameter."
             ),
         ));
     }

@@ -8,9 +8,10 @@ use std::collections::HashMap;
 
 use dashmap::DashMap;
 use rand::Rng;
-
-use ruststack_secretsmanager_model::error::{SecretsManagerError, SecretsManagerErrorCode};
-use ruststack_secretsmanager_model::types::{RotationRulesType, Tag};
+use ruststack_secretsmanager_model::{
+    error::{SecretsManagerError, SecretsManagerErrorCode},
+    types::{RotationRulesType, Tag},
+};
 
 use crate::version::{AWSCURRENT, AWSPENDING, AWSPREVIOUS, MAX_VERSIONS};
 

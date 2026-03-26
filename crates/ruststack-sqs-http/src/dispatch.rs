@@ -1,12 +1,9 @@
 //! SQS handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_sqs_model::error::SqsError;
-use ruststack_sqs_model::operations::SqsOperation;
+use ruststack_sqs_model::{error::SqsError, operations::SqsOperation};
 
 use crate::body::SqsResponseBody;
 

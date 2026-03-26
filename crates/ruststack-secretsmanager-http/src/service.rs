@@ -1,20 +1,18 @@
 //! Secrets Manager HTTP service implementing the hyper `Service` trait.
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
-
 use ruststack_secretsmanager_model::error::{SecretsManagerError, SecretsManagerErrorCode};
 
-use crate::body::SecretsManagerResponseBody;
-use crate::dispatch::{SecretsManagerHandler, dispatch_operation};
-use crate::response::{CONTENT_TYPE, error_to_response};
-use crate::router::resolve_operation;
+use crate::{
+    body::SecretsManagerResponseBody,
+    dispatch::{SecretsManagerHandler, dispatch_operation},
+    response::{CONTENT_TYPE, error_to_response},
+    router::resolve_operation,
+};
 
 /// Configuration for the Secrets Manager HTTP service.
 #[derive(Clone)]

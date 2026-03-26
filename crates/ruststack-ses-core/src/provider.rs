@@ -9,61 +9,59 @@
 
 use std::sync::Arc;
 
+use ruststack_ses_model::{
+    error::{SesError, SesErrorCode},
+    input::{
+        CloneReceiptRuleSetInput, CreateConfigurationSetEventDestinationInput,
+        CreateConfigurationSetInput, CreateReceiptRuleInput, CreateReceiptRuleSetInput,
+        CreateTemplateInput, DeleteConfigurationSetEventDestinationInput,
+        DeleteConfigurationSetInput, DeleteIdentityInput, DeleteIdentityPolicyInput,
+        DeleteReceiptRuleInput, DeleteReceiptRuleSetInput, DeleteTemplateInput,
+        DeleteVerifiedEmailAddressInput, DescribeActiveReceiptRuleSetInput,
+        DescribeConfigurationSetInput, DescribeReceiptRuleSetInput, GetIdentityDkimAttributesInput,
+        GetIdentityMailFromDomainAttributesInput, GetIdentityNotificationAttributesInput,
+        GetIdentityPoliciesInput, GetIdentityVerificationAttributesInput, GetTemplateInput,
+        ListConfigurationSetsInput, ListIdentitiesInput, ListIdentityPoliciesInput,
+        ListTemplatesInput, PutIdentityPolicyInput, SendEmailInput, SendRawEmailInput,
+        SendTemplatedEmailInput, SetActiveReceiptRuleSetInput,
+        SetIdentityFeedbackForwardingEnabledInput, SetIdentityMailFromDomainInput,
+        SetIdentityNotificationTopicInput, UpdateConfigurationSetEventDestinationInput,
+        UpdateTemplateInput, VerifyDomainDkimInput, VerifyDomainIdentityInput,
+        VerifyEmailAddressInput, VerifyEmailIdentityInput,
+    },
+    output::{
+        CloneReceiptRuleSetResponse, CreateConfigurationSetEventDestinationResponse,
+        CreateConfigurationSetResponse, CreateReceiptRuleResponse, CreateReceiptRuleSetResponse,
+        CreateTemplateResponse, DeleteConfigurationSetEventDestinationResponse,
+        DeleteConfigurationSetResponse, DeleteIdentityPolicyResponse, DeleteIdentityResponse,
+        DeleteReceiptRuleResponse, DeleteReceiptRuleSetResponse, DeleteTemplateResponse,
+        DescribeActiveReceiptRuleSetResponse, DescribeConfigurationSetResponse,
+        DescribeReceiptRuleSetResponse, GetIdentityDkimAttributesResponse,
+        GetIdentityMailFromDomainAttributesResponse, GetIdentityNotificationAttributesResponse,
+        GetIdentityPoliciesResponse, GetIdentityVerificationAttributesResponse,
+        GetSendQuotaResponse, GetSendStatisticsResponse, GetTemplateResponse,
+        ListConfigurationSetsResponse, ListIdentitiesResponse, ListIdentityPoliciesResponse,
+        ListTemplatesResponse, ListVerifiedEmailAddressesResponse, PutIdentityPolicyResponse,
+        SendEmailResponse, SendRawEmailResponse, SendTemplatedEmailResponse,
+        SetActiveReceiptRuleSetResponse, SetIdentityFeedbackForwardingEnabledResponse,
+        SetIdentityMailFromDomainResponse, SetIdentityNotificationTopicResponse,
+        UpdateConfigurationSetEventDestinationResponse, UpdateTemplateResponse,
+        VerifyDomainDkimResponse, VerifyDomainIdentityResponse, VerifyEmailIdentityResponse,
+    },
+    types::{ConfigurationSet, IdentityType, MessageTag, ReceiptRuleSetMetadata, SendDataPoint},
+};
 use tracing::debug;
 
-use ruststack_ses_model::error::{SesError, SesErrorCode};
-use ruststack_ses_model::input::{
-    CloneReceiptRuleSetInput, CreateConfigurationSetEventDestinationInput,
-    CreateConfigurationSetInput, CreateReceiptRuleInput, CreateReceiptRuleSetInput,
-    CreateTemplateInput, DeleteConfigurationSetEventDestinationInput, DeleteConfigurationSetInput,
-    DeleteIdentityInput, DeleteIdentityPolicyInput, DeleteReceiptRuleInput,
-    DeleteReceiptRuleSetInput, DeleteTemplateInput, DeleteVerifiedEmailAddressInput,
-    DescribeActiveReceiptRuleSetInput, DescribeConfigurationSetInput, DescribeReceiptRuleSetInput,
-    GetIdentityDkimAttributesInput, GetIdentityMailFromDomainAttributesInput,
-    GetIdentityNotificationAttributesInput, GetIdentityPoliciesInput,
-    GetIdentityVerificationAttributesInput, GetTemplateInput, ListConfigurationSetsInput,
-    ListIdentitiesInput, ListIdentityPoliciesInput, ListTemplatesInput, PutIdentityPolicyInput,
-    SendEmailInput, SendRawEmailInput, SendTemplatedEmailInput, SetActiveReceiptRuleSetInput,
-    SetIdentityFeedbackForwardingEnabledInput, SetIdentityMailFromDomainInput,
-    SetIdentityNotificationTopicInput, UpdateConfigurationSetEventDestinationInput,
-    UpdateTemplateInput, VerifyDomainDkimInput, VerifyDomainIdentityInput, VerifyEmailAddressInput,
-    VerifyEmailIdentityInput,
+use crate::{
+    config::SesConfig,
+    config_set::ConfigurationSetStore,
+    identity::IdentityStore,
+    receipt_rule::ReceiptRuleSetStore,
+    retrospection::{EmailStore, SentEmail, SentEmailBody, SentEmailDestination, SentEmailTag},
+    statistics::SendStatistics,
+    template::{TemplateStore, render_template},
+    validation::validate_tags,
 };
-use ruststack_ses_model::output::{
-    CloneReceiptRuleSetResponse, CreateConfigurationSetEventDestinationResponse,
-    CreateConfigurationSetResponse, CreateReceiptRuleResponse, CreateReceiptRuleSetResponse,
-    CreateTemplateResponse, DeleteConfigurationSetEventDestinationResponse,
-    DeleteConfigurationSetResponse, DeleteIdentityPolicyResponse, DeleteIdentityResponse,
-    DeleteReceiptRuleResponse, DeleteReceiptRuleSetResponse, DeleteTemplateResponse,
-    DescribeActiveReceiptRuleSetResponse, DescribeConfigurationSetResponse,
-    DescribeReceiptRuleSetResponse, GetIdentityDkimAttributesResponse,
-    GetIdentityMailFromDomainAttributesResponse, GetIdentityNotificationAttributesResponse,
-    GetIdentityPoliciesResponse, GetIdentityVerificationAttributesResponse, GetSendQuotaResponse,
-    GetSendStatisticsResponse, GetTemplateResponse, ListConfigurationSetsResponse,
-    ListIdentitiesResponse, ListIdentityPoliciesResponse, ListTemplatesResponse,
-    ListVerifiedEmailAddressesResponse, PutIdentityPolicyResponse, SendEmailResponse,
-    SendRawEmailResponse, SendTemplatedEmailResponse, SetActiveReceiptRuleSetResponse,
-    SetIdentityFeedbackForwardingEnabledResponse, SetIdentityMailFromDomainResponse,
-    SetIdentityNotificationTopicResponse, UpdateConfigurationSetEventDestinationResponse,
-    UpdateTemplateResponse, VerifyDomainDkimResponse, VerifyDomainIdentityResponse,
-    VerifyEmailIdentityResponse,
-};
-use ruststack_ses_model::types::{
-    ConfigurationSet, IdentityType, ReceiptRuleSetMetadata, SendDataPoint,
-};
-
-use ruststack_ses_model::types::MessageTag;
-
-use crate::config::SesConfig;
-use crate::config_set::ConfigurationSetStore;
-use crate::identity::IdentityStore;
-use crate::receipt_rule::ReceiptRuleSetStore;
-use crate::retrospection::{
-    EmailStore, SentEmail, SentEmailBody, SentEmailDestination, SentEmailTag,
-};
-use crate::statistics::SendStatistics;
-use crate::template::{TemplateStore, render_template};
-use crate::validation::validate_tags;
 
 /// Validate a slice of `MessageTag` values.
 ///
@@ -231,8 +229,8 @@ impl RustStackSes {
             return Err(SesError::with_message(
                 SesErrorCode::MessageRejected,
                 format!(
-                    "Email address is not verified. The following identities failed \
-                     the check in region {}: {}",
+                    "Email address is not verified. The following identities failed the check in \
+                     region {}: {}",
                     self.config.default_region, input.source
                 ),
             ));
@@ -288,8 +286,8 @@ impl RustStackSes {
             return Err(SesError::with_message(
                 SesErrorCode::MessageRejected,
                 format!(
-                    "Email address is not verified. The following identities failed \
-                     the check in region {}: {source}",
+                    "Email address is not verified. The following identities failed the check in \
+                     region {}: {source}",
                     self.config.default_region
                 ),
             ));
@@ -411,8 +409,8 @@ impl RustStackSes {
             return Err(SesError::with_message(
                 SesErrorCode::MessageRejected,
                 format!(
-                    "Email address is not verified. The following identities failed \
-                     the check in region {}: {}",
+                    "Email address is not verified. The following identities failed the check in \
+                     region {}: {}",
                     self.config.default_region, input.source
                 ),
             ));

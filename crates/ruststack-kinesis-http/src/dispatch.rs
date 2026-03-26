@@ -1,12 +1,9 @@
 //! Kinesis handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_kinesis_model::error::KinesisError;
-use ruststack_kinesis_model::operations::KinesisOperation;
+use ruststack_kinesis_model::{error::KinesisError, operations::KinesisOperation};
 
 use crate::body::KinesisResponseBody;
 

@@ -1,44 +1,48 @@
 //! KMS provider implementing all 39 operations.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::Utc;
+use ruststack_kms_model::{
+    error::{KmsError, KmsErrorCode},
+    input::{
+        CancelKeyDeletionInput, CreateAliasInput, CreateGrantInput, CreateKeyInput, DecryptInput,
+        DeleteAliasInput, DescribeKeyInput, DisableKeyInput, DisableKeyRotationInput,
+        EnableKeyInput, EnableKeyRotationInput, EncryptInput, GenerateDataKeyInput,
+        GenerateDataKeyPairInput, GenerateDataKeyPairWithoutPlaintextInput,
+        GenerateDataKeyWithoutPlaintextInput, GenerateMacInput, GenerateRandomInput,
+        GetKeyPolicyInput, GetKeyRotationStatusInput, GetPublicKeyInput, ListAliasesInput,
+        ListGrantsInput, ListKeyPoliciesInput, ListKeysInput, ListResourceTagsInput,
+        ListRetirableGrantsInput, PutKeyPolicyInput, ReEncryptInput, RetireGrantInput,
+        RevokeGrantInput, ScheduleKeyDeletionInput, SignInput, TagResourceInput,
+        UntagResourceInput, UpdateAliasInput, UpdateKeyDescriptionInput, VerifyInput,
+        VerifyMacInput,
+    },
+    output::{
+        CancelKeyDeletionResponse, CreateGrantResponse, CreateKeyResponse, DecryptResponse,
+        DescribeKeyResponse, EncryptResponse, GenerateDataKeyPairResponse,
+        GenerateDataKeyPairWithoutPlaintextResponse, GenerateDataKeyResponse,
+        GenerateDataKeyWithoutPlaintextResponse, GenerateMacResponse, GenerateRandomResponse,
+        GetKeyPolicyResponse, GetKeyRotationStatusResponse, GetPublicKeyResponse,
+        ListAliasesResponse, ListGrantsResponse, ListKeyPoliciesResponse, ListKeysResponse,
+        ListResourceTagsResponse, ReEncryptResponse, ScheduleKeyDeletionResponse, SignResponse,
+        VerifyMacResponse, VerifyResponse,
+    },
+    types::{
+        AliasListEntry, DataKeySpec, EncryptionAlgorithmSpec, GrantListEntry, KeyListEntry,
+        KeyManagerType, KeyMetadata, KeySpec, KeyState, KeyUsageType, OriginType, Tag,
+    },
+};
 
-use ruststack_kms_model::error::{KmsError, KmsErrorCode};
-use ruststack_kms_model::input::{
-    CancelKeyDeletionInput, CreateAliasInput, CreateGrantInput, CreateKeyInput, DecryptInput,
-    DeleteAliasInput, DescribeKeyInput, DisableKeyInput, DisableKeyRotationInput, EnableKeyInput,
-    EnableKeyRotationInput, EncryptInput, GenerateDataKeyInput, GenerateDataKeyPairInput,
-    GenerateDataKeyPairWithoutPlaintextInput, GenerateDataKeyWithoutPlaintextInput,
-    GenerateMacInput, GenerateRandomInput, GetKeyPolicyInput, GetKeyRotationStatusInput,
-    GetPublicKeyInput, ListAliasesInput, ListGrantsInput, ListKeyPoliciesInput, ListKeysInput,
-    ListResourceTagsInput, ListRetirableGrantsInput, PutKeyPolicyInput, ReEncryptInput,
-    RetireGrantInput, RevokeGrantInput, ScheduleKeyDeletionInput, SignInput, TagResourceInput,
-    UntagResourceInput, UpdateAliasInput, UpdateKeyDescriptionInput, VerifyInput, VerifyMacInput,
+use crate::{
+    ciphertext,
+    config::KmsConfig,
+    crypto,
+    key::{KeyMaterial, KmsKey},
+    resolve::resolve_key_id,
+    state::{AliasEntry, GrantEntry, KmsStore},
+    validation,
 };
-use ruststack_kms_model::output::{
-    CancelKeyDeletionResponse, CreateGrantResponse, CreateKeyResponse, DecryptResponse,
-    DescribeKeyResponse, EncryptResponse, GenerateDataKeyPairResponse,
-    GenerateDataKeyPairWithoutPlaintextResponse, GenerateDataKeyResponse,
-    GenerateDataKeyWithoutPlaintextResponse, GenerateMacResponse, GenerateRandomResponse,
-    GetKeyPolicyResponse, GetKeyRotationStatusResponse, GetPublicKeyResponse, ListAliasesResponse,
-    ListGrantsResponse, ListKeyPoliciesResponse, ListKeysResponse, ListResourceTagsResponse,
-    ReEncryptResponse, ScheduleKeyDeletionResponse, SignResponse, VerifyMacResponse,
-    VerifyResponse,
-};
-use ruststack_kms_model::types::{
-    AliasListEntry, DataKeySpec, EncryptionAlgorithmSpec, GrantListEntry, KeyListEntry,
-    KeyManagerType, KeyMetadata, KeySpec, KeyState, KeyUsageType, OriginType, Tag,
-};
-
-use crate::ciphertext;
-use crate::config::KmsConfig;
-use crate::crypto;
-use crate::key::{KeyMaterial, KmsKey};
-use crate::resolve::resolve_key_id;
-use crate::state::{AliasEntry, GrantEntry, KmsStore};
-use crate::validation;
 
 /// The KMS business logic provider.
 #[derive(Debug)]

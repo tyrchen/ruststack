@@ -2,20 +2,18 @@
 //!
 //! SES v2 uses path-based routing under `/v2/email/` with JSON request/response bodies.
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
-
 use ruststack_ses_model::error::SesError;
 
-use crate::body::SesResponseBody;
-use crate::dispatch::SesHandler;
-use crate::request::parse_query_params;
-use crate::response::{JSON_CONTENT_TYPE, error_to_json_response, json_response};
+use crate::{
+    body::SesResponseBody,
+    dispatch::SesHandler,
+    request::parse_query_params,
+    response::{JSON_CONTENT_TYPE, error_to_json_response, json_response},
+};
 
 /// Hyper `Service` implementation for SES v2 (restJson1).
 #[derive(Debug)]

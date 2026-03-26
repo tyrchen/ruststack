@@ -3,14 +3,15 @@
 use std::sync::Arc;
 
 use dashmap::DashMap;
-
-use ruststack_dynamodb_model::error::DynamoDBError;
-use ruststack_dynamodb_model::types::{
-    AttributeDefinition, BillingMode, BillingModeSummary, GlobalSecondaryIndex,
-    GlobalSecondaryIndexDescription, IndexStatus, KeySchemaElement, LocalSecondaryIndex,
-    LocalSecondaryIndexDescription, ProvisionedThroughput, ProvisionedThroughputDescription,
-    SSEDescription, SSESpecification, SseStatus, SseType, StreamSpecification, TableDescription,
-    TableStatus, Tag,
+use ruststack_dynamodb_model::{
+    error::DynamoDBError,
+    types::{
+        AttributeDefinition, BillingMode, BillingModeSummary, GlobalSecondaryIndex,
+        GlobalSecondaryIndexDescription, IndexStatus, KeySchemaElement, LocalSecondaryIndex,
+        LocalSecondaryIndexDescription, ProvisionedThroughput, ProvisionedThroughputDescription,
+        SSEDescription, SSESpecification, SseStatus, SseType, StreamSpecification,
+        TableDescription, TableStatus, Tag, TimeToLiveSpecification,
+    },
 };
 
 use crate::storage::{KeySchema, TableStorage};
@@ -119,6 +120,8 @@ pub struct DynamoDBTable {
     pub sse_specification: Option<SSESpecification>,
     /// Tags.
     pub tags: parking_lot::RwLock<Vec<Tag>>,
+    /// Time-to-Live specification.
+    pub ttl: parking_lot::RwLock<Option<TimeToLiveSpecification>>,
     /// Table ARN.
     pub arn: String,
     /// Stable table ID (UUID v4), assigned at creation time.

@@ -5,9 +5,8 @@
 
 use std::collections::HashMap;
 
-use serde::Serialize;
-
 use ruststack_sns_model::types::MessageAttributeValue;
+use serde::Serialize;
 
 /// SNS message envelope sent to SQS queues and HTTP endpoints.
 ///

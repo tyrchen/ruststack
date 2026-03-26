@@ -5,8 +5,10 @@
 
 use std::collections::HashMap;
 
-use ruststack_sns_model::error::SnsError;
-use ruststack_sns_model::types::{MessageAttributeValue, PublishBatchRequestEntry, Tag};
+use ruststack_sns_model::{
+    error::SnsError,
+    types::{MessageAttributeValue, PublishBatchRequestEntry, Tag},
+};
 
 /// Parse a URL-encoded body into a list of key-value pairs.
 #[must_use]

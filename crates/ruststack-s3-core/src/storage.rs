@@ -20,8 +20,7 @@ use dashmap::DashMap;
 use tokio::io::AsyncReadExt as _;
 use tracing::{debug, trace, warn};
 
-use crate::checksums;
-use crate::error::S3ServiceError;
+use crate::{checksums, error::S3ServiceError};
 
 /// Composite key identifying a stored object: `(bucket, key, version_id)`.
 type StorageKey = (String, String, String);

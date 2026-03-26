@@ -2,8 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use aws_sdk_s3::primitives::ByteStream;
-    use aws_sdk_s3::types::BucketVersioningStatus;
+    use aws_sdk_s3::{primitives::ByteStream, types::BucketVersioningStatus};
 
     use crate::{cleanup_bucket, create_test_bucket, s3_client};
 

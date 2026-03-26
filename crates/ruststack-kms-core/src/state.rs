@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 
 use dashmap::DashMap;
-
 use ruststack_kms_model::types::{GrantConstraints, GrantOperation};
 
 use crate::key::KmsKey;

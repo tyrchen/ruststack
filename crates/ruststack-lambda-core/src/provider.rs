@@ -16,30 +16,34 @@ const MAX_ZIP_SIZE: u64 = 50 * 1024 * 1024;
 /// Maximum synchronous invoke payload size (6 MB, per Appendix C).
 const MAX_SYNC_PAYLOAD: usize = 6 * 1024 * 1024;
 
-use ruststack_lambda_model::input::{
-    AddPermissionInput, CreateAliasInput, CreateFunctionInput, CreateFunctionUrlConfigInput,
-    PublishVersionInput, TagResourceInput, UpdateAliasInput, UpdateFunctionCodeInput,
-    UpdateFunctionConfigurationInput, UpdateFunctionUrlConfigInput,
-};
-use ruststack_lambda_model::output::{
-    AccountLimit, AccountUsage, AddPermissionOutput, GetAccountSettingsOutput, GetFunctionOutput,
-    GetPolicyOutput, ListAliasesOutput, ListFunctionUrlConfigsOutput, ListFunctionsOutput,
-    ListTagsOutput, ListVersionsOutput,
-};
-use ruststack_lambda_model::types::{
-    AliasConfiguration, AliasRoutingConfiguration, EnvironmentResponse, EphemeralStorage,
-    FunctionCodeLocation, FunctionConfiguration, FunctionUrlConfig, ImageConfigResponse, Layer,
-    SnapStartResponse, TracingConfigResponse, VpcConfigResponse,
+use ruststack_lambda_model::{
+    input::{
+        AddPermissionInput, CreateAliasInput, CreateFunctionInput, CreateFunctionUrlConfigInput,
+        PublishVersionInput, TagResourceInput, UpdateAliasInput, UpdateFunctionCodeInput,
+        UpdateFunctionConfigurationInput, UpdateFunctionUrlConfigInput,
+    },
+    output::{
+        AccountLimit, AccountUsage, AddPermissionOutput, GetAccountSettingsOutput,
+        GetFunctionOutput, GetPolicyOutput, ListAliasesOutput, ListFunctionUrlConfigsOutput,
+        ListFunctionsOutput, ListTagsOutput, ListVersionsOutput,
+    },
+    types::{
+        AliasConfiguration, AliasRoutingConfiguration, EnvironmentResponse, EphemeralStorage,
+        FunctionCodeLocation, FunctionConfiguration, FunctionUrlConfig, ImageConfigResponse, Layer,
+        SnapStartResponse, TracingConfigResponse, VpcConfigResponse,
+    },
 };
 
-use crate::config::LambdaConfig;
-use crate::error::LambdaServiceError;
-use crate::resolver::{
-    alias_arn, function_arn, function_version_arn, resolve_function_ref, resolve_version,
-};
-use crate::storage::{
-    AliasRecord, FunctionRecord, FunctionStore, FunctionUrlConfigRecord, PolicyDocument,
-    PolicyStatement, VersionRecord, compute_sha256,
+use crate::{
+    config::LambdaConfig,
+    error::LambdaServiceError,
+    resolver::{
+        alias_arn, function_arn, function_version_arn, resolve_function_ref, resolve_version,
+    },
+    storage::{
+        AliasRecord, FunctionRecord, FunctionStore, FunctionUrlConfigRecord, PolicyDocument,
+        PolicyStatement, VersionRecord, compute_sha256,
+    },
 };
 
 /// Lambda business logic provider.
@@ -609,7 +613,8 @@ impl RustStackLambda {
             let payload_len = payload.len();
             return Err(LambdaServiceError::RequestTooLarge {
                 message: format!(
-                    "Request payload size {payload_len} exceeds the synchronous invoke limit of {MAX_SYNC_PAYLOAD} bytes",
+                    "Request payload size {payload_len} exceeds the synchronous invoke limit of \
+                     {MAX_SYNC_PAYLOAD} bytes",
                 ),
             });
         }

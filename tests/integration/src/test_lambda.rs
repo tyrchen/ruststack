@@ -5,9 +5,9 @@
 
 #[cfg(test)]
 mod tests {
-    use aws_sdk_lambda::primitives::Blob;
-    use aws_sdk_lambda::types::{
-        Architecture, Environment, FunctionCode, FunctionUrlAuthType, Runtime,
+    use aws_sdk_lambda::{
+        primitives::Blob,
+        types::{Architecture, Environment, FunctionCode, FunctionUrlAuthType, Runtime},
     };
 
     use crate::lambda_client;

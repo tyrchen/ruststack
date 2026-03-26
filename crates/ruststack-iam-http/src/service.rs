@@ -4,22 +4,20 @@
 //! `application/x-www-form-urlencoded` and the response is `text/xml`.
 //! Like SNS, IAM uses the `Action=` form parameter for operation routing.
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
-
 use ruststack_iam_model::error::IamError;
 
-use crate::body::IamResponseBody;
-use crate::dispatch::{IamHandler, dispatch_operation};
-use crate::request::parse_form_params;
-use crate::response::{CONTENT_TYPE, error_to_response};
-use crate::router::resolve_operation;
+use crate::{
+    body::IamResponseBody,
+    dispatch::{IamHandler, dispatch_operation},
+    request::parse_form_params,
+    response::{CONTENT_TYPE, error_to_response},
+    router::resolve_operation,
+};
 
 /// Configuration for the IAM HTTP service.
 #[derive(Clone)]

@@ -4,23 +4,19 @@
 //! with the business logic handler. Given a [`RoutingContext`] and HTTP request parts/body,
 //! it:
 //!
-//! 1. Deserializes the HTTP request into the operation's typed Input struct
-//!    (via [`FromS3Request`])
+//! 1. Deserializes the HTTP request into the operation's typed Input struct (via [`FromS3Request`])
 //! 2. Calls the appropriate method on the [`S3Handler`] trait
 //! 3. Serializes the Output struct into an HTTP response (via [`IntoS3Response`])
 //!
 //! Phase 3 of the project will implement [`S3Handler`] on the `RustStackS3` provider.
 //! For now, all operations return `NotImplemented` by default.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-use ruststack_s3_model::S3Operation;
-use ruststack_s3_model::error::S3Error;
+use ruststack_s3_model::{S3Operation, error::S3Error};
 
-use crate::body::S3ResponseBody;
-use crate::router::RoutingContext;
+use crate::{body::S3ResponseBody, router::RoutingContext};
 
 /// Trait that the business logic provider must implement.
 ///

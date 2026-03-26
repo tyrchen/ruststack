@@ -1,24 +1,23 @@
 //! DynamoDB Streams provider implementing all 4 operations.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use ruststack_dynamodb_model::AttributeValue;
-use ruststack_dynamodbstreams_model::error::DynamoDBStreamsError;
-use ruststack_dynamodbstreams_model::input::{
-    DescribeStreamInput, GetRecordsInput, GetShardIteratorInput, ListStreamsInput,
-};
-use ruststack_dynamodbstreams_model::output::{
-    DescribeStreamOutput, GetRecordsOutput, GetShardIteratorOutput, ListStreamsOutput,
-};
-use ruststack_dynamodbstreams_model::types::{
-    self as streams_types, OperationType, Record, SequenceNumberRange, Shard, Stream,
-    StreamDescription, StreamRecord, StreamStatus,
+use ruststack_dynamodbstreams_model::{
+    error::DynamoDBStreamsError,
+    input::{DescribeStreamInput, GetRecordsInput, GetShardIteratorInput, ListStreamsInput},
+    output::{DescribeStreamOutput, GetRecordsOutput, GetShardIteratorOutput, ListStreamsOutput},
+    types::{
+        self as streams_types, OperationType, Record, SequenceNumberRange, Shard, Stream,
+        StreamDescription, StreamRecord, StreamStatus,
+    },
 };
 
-use crate::config::DynamoDBStreamsConfig;
-use crate::iterator::{decode_iterator, encode_iterator};
-use crate::storage::{StreamChangeRecord, StreamStore};
+use crate::{
+    config::DynamoDBStreamsConfig,
+    iterator::{decode_iterator, encode_iterator},
+    storage::{StreamChangeRecord, StreamStore},
+};
 
 /// Main DynamoDB Streams provider implementing all 4 operations.
 #[derive(Debug)]

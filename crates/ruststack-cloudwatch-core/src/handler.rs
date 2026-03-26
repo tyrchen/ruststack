@@ -7,42 +7,43 @@
 //! Covers all 31 CloudWatch operations: metrics, alarms, dashboards,
 //! insight rules, anomaly detectors, metric streams, and tagging.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
+use ruststack_cloudwatch_http::{
+    body::CloudWatchResponseBody,
+    dispatch::{CloudWatchHandler, Protocol},
+    request::{
+        get_optional_bool, get_optional_f64, get_optional_i32, get_optional_param,
+        get_required_param, parse_dimension_filters, parse_dimensions, parse_form_params,
+        parse_string_list, parse_struct_list, parse_tag_list,
+    },
+    response::{XmlWriter, cbor_response, xml_response},
+};
+use ruststack_cloudwatch_model::{
+    error::{CloudWatchError, CloudWatchErrorCode},
+    input::{
+        DeleteAlarmsInput, DeleteAnomalyDetectorInput, DeleteDashboardsInput,
+        DeleteInsightRulesInput, DeleteMetricStreamInput, DescribeAlarmHistoryInput,
+        DescribeAlarmsForMetricInput, DescribeAlarmsInput, DescribeAnomalyDetectorsInput,
+        DescribeInsightRulesInput, DisableAlarmActionsInput, EnableAlarmActionsInput,
+        GetDashboardInput, GetMetricDataInput, GetMetricStatisticsInput, GetMetricStreamInput,
+        ListDashboardsInput, ListMetricStreamsInput, ListMetricsInput, ListTagsForResourceInput,
+        PutAnomalyDetectorInput, PutCompositeAlarmInput, PutDashboardInput, PutInsightRuleInput,
+        PutManagedInsightRulesInput, PutMetricAlarmInput, PutMetricDataInput, PutMetricStreamInput,
+        SetAlarmStateInput, TagResourceInput, UntagResourceInput,
+    },
+    operations::CloudWatchOperation,
+    types::{
+        AlarmType, AnomalyDetectorType, ComparisonOperator, CompositeAlarm, Dimension,
+        DimensionFilter, HistoryItemType, LabelOptions, ManagedRule, MetricAlarm,
+        MetricCharacteristics, MetricDataQuery, MetricDatum, MetricMathAnomalyDetector, MetricStat,
+        MetricStreamFilter, MetricStreamOutputFormat, MetricStreamStatisticsConfiguration,
+        MetricStreamStatisticsMetric, RecentlyActive, ScanBy, SingleMetricAnomalyDetector,
+        StandardUnit, StateValue, Statistic, StatisticSet, Tag,
+    },
+};
 use serde::Serialize;
-
-use ruststack_cloudwatch_http::body::CloudWatchResponseBody;
-use ruststack_cloudwatch_http::dispatch::{CloudWatchHandler, Protocol};
-use ruststack_cloudwatch_http::request::{
-    get_optional_bool, get_optional_f64, get_optional_i32, get_optional_param, get_required_param,
-    parse_dimension_filters, parse_dimensions, parse_form_params, parse_string_list,
-    parse_struct_list, parse_tag_list,
-};
-use ruststack_cloudwatch_http::response::{XmlWriter, cbor_response, xml_response};
-use ruststack_cloudwatch_model::error::{CloudWatchError, CloudWatchErrorCode};
-use ruststack_cloudwatch_model::input::{
-    DeleteAlarmsInput, DeleteAnomalyDetectorInput, DeleteDashboardsInput, DeleteInsightRulesInput,
-    DeleteMetricStreamInput, DescribeAlarmHistoryInput, DescribeAlarmsForMetricInput,
-    DescribeAlarmsInput, DescribeAnomalyDetectorsInput, DescribeInsightRulesInput,
-    DisableAlarmActionsInput, EnableAlarmActionsInput, GetDashboardInput, GetMetricDataInput,
-    GetMetricStatisticsInput, GetMetricStreamInput, ListDashboardsInput, ListMetricStreamsInput,
-    ListMetricsInput, ListTagsForResourceInput, PutAnomalyDetectorInput, PutCompositeAlarmInput,
-    PutDashboardInput, PutInsightRuleInput, PutManagedInsightRulesInput, PutMetricAlarmInput,
-    PutMetricDataInput, PutMetricStreamInput, SetAlarmStateInput, TagResourceInput,
-    UntagResourceInput,
-};
-use ruststack_cloudwatch_model::operations::CloudWatchOperation;
-use ruststack_cloudwatch_model::types::{
-    AlarmType, AnomalyDetectorType, ComparisonOperator, CompositeAlarm, Dimension, DimensionFilter,
-    HistoryItemType, LabelOptions, ManagedRule, MetricAlarm, MetricCharacteristics,
-    MetricDataQuery, MetricDatum, MetricMathAnomalyDetector, MetricStat, MetricStreamFilter,
-    MetricStreamOutputFormat, MetricStreamStatisticsConfiguration, MetricStreamStatisticsMetric,
-    RecentlyActive, ScanBy, SingleMetricAnomalyDetector, StandardUnit, StateValue, Statistic,
-    StatisticSet, Tag,
-};
 
 use crate::provider::RustStackCloudWatch;
 

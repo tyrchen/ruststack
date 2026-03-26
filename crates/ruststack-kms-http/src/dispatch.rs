@@ -1,12 +1,9 @@
 //! KMS handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_kms_model::error::KmsError;
-use ruststack_kms_model::operations::KmsOperation;
+use ruststack_kms_model::{error::KmsError, operations::KmsOperation};
 
 use crate::body::KmsResponseBody;
 

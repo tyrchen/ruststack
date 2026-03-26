@@ -7,8 +7,7 @@
 //! X-Amz-Target: TrentService.CreateKey
 //! ```
 
-use ruststack_kms_model::error::KmsError;
-use ruststack_kms_model::operations::KmsOperation;
+use ruststack_kms_model::{error::KmsError, operations::KmsOperation};
 
 /// The expected prefix for the `X-Amz-Target` header value.
 const TARGET_PREFIX: &str = "TrentService.";

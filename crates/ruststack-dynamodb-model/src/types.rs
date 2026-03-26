@@ -899,6 +899,193 @@ pub struct SSEDescription {
 }
 
 // ---------------------------------------------------------------------------
+// Structs - Time to Live
+// ---------------------------------------------------------------------------
+
+/// Time-to-Live specification for enabling or disabling TTL on a table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TimeToLiveSpecification {
+    /// The name of the TTL attribute used to store the expiration time.
+    pub attribute_name: String,
+    /// Whether TTL is enabled (`true`) or disabled (`false`).
+    pub enabled: bool,
+}
+
+/// Time-to-Live description with status information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TimeToLiveDescription {
+    /// The name of the TTL attribute.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attribute_name: Option<String>,
+    /// The TTL status: `ENABLED`, `DISABLED`, `ENABLING`, or `DISABLING`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_to_live_status: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Structs - Transaction Types
+// ---------------------------------------------------------------------------
+
+/// A single write action within a `TransactWriteItems` request.
+///
+/// Exactly one of the four fields must be set.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TransactWriteItem {
+    /// A condition check against an existing item (no mutation).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition_check: Option<ConditionCheck>,
+    /// A put (insert or replace) action.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub put: Option<TransactPut>,
+    /// A delete action.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delete: Option<TransactDelete>,
+    /// An update action.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update: Option<TransactUpdate>,
+}
+
+/// A condition check within a transaction (no mutation).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ConditionCheck {
+    /// The table containing the item.
+    pub table_name: String,
+    /// The primary key of the item to check.
+    pub key: HashMap<String, AttributeValue>,
+    /// The condition expression that must evaluate to true.
+    pub condition_expression: String,
+    /// Substitution tokens for attribute names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expression_attribute_names: Option<HashMap<String, String>>,
+    /// Substitution tokens for attribute values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expression_attribute_values: Option<HashMap<String, AttributeValue>>,
+    /// Determines whether to return item attributes on condition check failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_values_on_condition_check_failure: Option<String>,
+}
+
+/// A put action within a transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TransactPut {
+    /// The table to put the item into.
+    pub table_name: String,
+    /// The item to put.
+    pub item: HashMap<String, AttributeValue>,
+    /// An optional condition expression.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition_expression: Option<String>,
+    /// Substitution tokens for attribute names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expression_attribute_names: Option<HashMap<String, String>>,
+    /// Substitution tokens for attribute values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expression_attribute_values: Option<HashMap<String, AttributeValue>>,
+    /// Determines whether to return item attributes on condition check failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_values_on_condition_check_failure: Option<String>,
+}
+
+/// A delete action within a transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TransactDelete {
+    /// The table containing the item to delete.
+    pub table_name: String,
+    /// The primary key of the item to delete.
+    pub key: HashMap<String, AttributeValue>,
+    /// An optional condition expression.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition_expression: Option<String>,
+    /// Substitution tokens for attribute names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expression_attribute_names: Option<HashMap<String, String>>,
+    /// Substitution tokens for attribute values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expression_attribute_values: Option<HashMap<String, AttributeValue>>,
+    /// Determines whether to return item attributes on condition check failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_values_on_condition_check_failure: Option<String>,
+}
+
+/// An update action within a transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TransactUpdate {
+    /// The table containing the item to update.
+    pub table_name: String,
+    /// The primary key of the item to update.
+    pub key: HashMap<String, AttributeValue>,
+    /// The update expression defining the mutations.
+    pub update_expression: String,
+    /// An optional condition expression.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition_expression: Option<String>,
+    /// Substitution tokens for attribute names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expression_attribute_names: Option<HashMap<String, String>>,
+    /// Substitution tokens for attribute values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expression_attribute_values: Option<HashMap<String, AttributeValue>>,
+    /// Determines whether to return item attributes on condition check failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_values_on_condition_check_failure: Option<String>,
+}
+
+/// A single get action within a `TransactGetItems` request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TransactGetItem {
+    /// The get operation to perform.
+    pub get: Get,
+}
+
+/// A get operation targeting a single item by primary key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct Get {
+    /// The table containing the item.
+    pub table_name: String,
+    /// The primary key of the item to retrieve.
+    pub key: HashMap<String, AttributeValue>,
+    /// A projection expression to limit returned attributes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projection_expression: Option<String>,
+    /// Substitution tokens for attribute names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expression_attribute_names: Option<HashMap<String, String>>,
+}
+
+/// A reason why a transaction item was cancelled.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct CancellationReason {
+    /// The cancellation reason code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// A human-readable cancellation reason message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// The item that failed the condition check, if applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<HashMap<String, AttributeValue>>,
+}
+
+/// A response item from a `TransactGetItems` operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ItemResponse {
+    /// The retrieved item, or `None` if not found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<HashMap<String, AttributeValue>>,
+}
+
+// ---------------------------------------------------------------------------
 // Structs - Tags
 // ---------------------------------------------------------------------------
 

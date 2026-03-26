@@ -4,8 +4,10 @@
 //! `DescribeParameters` operation. Each filter key supports specific
 //! comparison options as documented in the AWS SSM API reference.
 
-use ruststack_ssm_model::error::{SsmError, SsmErrorCode};
-use ruststack_ssm_model::types::ParameterStringFilter;
+use ruststack_ssm_model::{
+    error::{SsmError, SsmErrorCode},
+    types::ParameterStringFilter,
+};
 
 use crate::storage::ParameterRecord;
 
@@ -52,8 +54,8 @@ fn validate_single_filter(filter: &ParameterStringFilter) -> Result<(), SsmError
                 return Err(SsmError::with_message(
                     SsmErrorCode::InvalidFilterOption,
                     format!(
-                        "The filter option '{opt}' is not valid for key '{key}'. \
-                         Valid options: Equals."
+                        "The filter option '{opt}' is not valid for key '{key}'. Valid options: \
+                         Equals."
                     ),
                 ));
             }
@@ -72,8 +74,8 @@ fn validate_single_filter(filter: &ParameterStringFilter) -> Result<(), SsmError
         return Err(SsmError::with_message(
             SsmErrorCode::InvalidFilterKey,
             format!(
-                "The filter key '{key}' is not valid. \
-                 Valid filter keys: Name, Type, KeyId, Path, Tier, DataType, Label, tag:<key>."
+                "The filter key '{key}' is not valid. Valid filter keys: Name, Type, KeyId, Path, \
+                 Tier, DataType, Label, tag:<key>."
             ),
         ));
     }
@@ -90,8 +92,8 @@ fn validate_single_filter(filter: &ParameterStringFilter) -> Result<(), SsmError
             return Err(SsmError::with_message(
                 SsmErrorCode::InvalidFilterOption,
                 format!(
-                    "The filter option '{opt}' is not valid for key '{key}'. \
-                     Valid options: {valid_options:?}."
+                    "The filter option '{opt}' is not valid for key '{key}'. Valid options: \
+                     {valid_options:?}."
                 ),
             ));
         }

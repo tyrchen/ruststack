@@ -1,8 +1,10 @@
 //! Topic record and attributes.
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Instant,
+};
 
 use crate::subscription::SubscriptionRecord;
 

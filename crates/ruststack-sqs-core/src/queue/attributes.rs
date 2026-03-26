@@ -2,8 +2,7 @@
 
 use std::collections::HashMap;
 
-use ruststack_sqs_model::error::SqsError;
-use ruststack_sqs_model::types::RedrivePolicy;
+use ruststack_sqs_model::{error::SqsError, types::RedrivePolicy};
 
 /// Queue attributes with validated values and defaults.
 #[derive(Debug, Clone)]
@@ -90,7 +89,8 @@ impl QueueAttributes {
                     })?;
                     if policy.max_receive_count < 1 {
                         return Err(SqsError::invalid_parameter_value(
-                            "Value for parameter RedrivePolicy is invalid. Reason: maxReceiveCount must be between 1 and 1000.",
+                            "Value for parameter RedrivePolicy is invalid. Reason: \
+                             maxReceiveCount must be between 1 and 1000.",
                         ));
                     }
                     result.redrive_policy = Some(policy);

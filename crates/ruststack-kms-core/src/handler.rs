@@ -1,16 +1,10 @@
 //! KMS handler implementation bridging HTTP to business logic.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_kms_http::body::KmsResponseBody;
-use ruststack_kms_http::dispatch::KmsHandler;
-use ruststack_kms_http::response::json_response;
-use ruststack_kms_model::error::KmsError;
-use ruststack_kms_model::operations::KmsOperation;
+use ruststack_kms_http::{body::KmsResponseBody, dispatch::KmsHandler, response::json_response};
+use ruststack_kms_model::{error::KmsError, operations::KmsOperation};
 
 use crate::provider::RustStackKms;
 

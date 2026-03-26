@@ -2,25 +2,23 @@
 //!
 //! This crate provides the HTTP layer for a LocalStack-compatible S3 server. It handles:
 //!
-//! - **Routing** ([`router`]): Maps HTTP requests to S3 operations by examining
-//!   method, path, query parameters, and headers. Supports both path-style and
-//!   virtual-hosted-style bucket addressing.
+//! - **Routing** ([`router`]): Maps HTTP requests to S3 operations by examining method, path, query
+//!   parameters, and headers. Supports both path-style and virtual-hosted-style bucket addressing.
 //!
-//! - **Request deserialization** ([`request`]): Converts raw HTTP request parts into
-//!   typed S3 Input structs from `ruststack-s3-model`.
+//! - **Request deserialization** ([`request`]): Converts raw HTTP request parts into typed S3 Input
+//!   structs from `ruststack-s3-model`.
 //!
-//! - **Response serialization** ([`response`]): Converts typed S3 Output structs into
-//!   HTTP responses with appropriate status codes, headers, and bodies.
+//! - **Response serialization** ([`response`]): Converts typed S3 Output structs into HTTP
+//!   responses with appropriate status codes, headers, and bodies.
 //!
-//! - **Dispatch** ([`dispatch`]): Routes identified S3 operations to the business logic
-//!   handler via the [`S3Handler`](dispatch::S3Handler) trait.
+//! - **Dispatch** ([`dispatch`]): Routes identified S3 operations to the business logic handler via
+//!   the [`S3Handler`](dispatch::S3Handler) trait.
 //!
-//! - **Service** ([`service`]): The main [`S3HttpService`](service::S3HttpService) that
-//!   implements hyper's `Service` trait, tying routing, auth, dispatch, and middleware
-//!   together.
+//! - **Service** ([`service`]): The main [`S3HttpService`](service::S3HttpService) that implements
+//!   hyper's `Service` trait, tying routing, auth, dispatch, and middleware together.
 //!
-//! - **Body** ([`body`]): The [`S3ResponseBody`](body::S3ResponseBody) type supporting
-//!   buffered and empty response modes.
+//! - **Body** ([`body`]): The [`S3ResponseBody`](body::S3ResponseBody) type supporting buffered and
+//!   empty response modes.
 //!
 //! # Architecture
 //!

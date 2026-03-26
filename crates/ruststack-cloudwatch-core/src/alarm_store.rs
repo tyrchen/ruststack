@@ -225,9 +225,9 @@ impl Default for AlarmStore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use ruststack_cloudwatch_model::types::StateValue;
+
+    use super::*;
 
     fn make_alarm(name: &str) -> MetricAlarm {
         MetricAlarm {

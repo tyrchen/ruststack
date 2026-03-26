@@ -6,24 +6,25 @@
 //! Uses manual `Pin<Box<dyn Future>>` return types because the `LambdaHandler`
 //! trait requires object safety for `Arc<dyn LambdaHandler>`.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_lambda_http::body::LambdaResponseBody;
-use ruststack_lambda_http::dispatch::LambdaHandler;
-use ruststack_lambda_http::response::{empty_response, json_response};
-use ruststack_lambda_http::router::PathParams;
-use ruststack_lambda_model::error::LambdaError;
-use ruststack_lambda_model::input::{
-    AddPermissionInput, CreateAliasInput, CreateFunctionInput, CreateFunctionUrlConfigInput,
-    PublishVersionInput, TagResourceInput, UpdateAliasInput, UpdateFunctionCodeInput,
-    UpdateFunctionConfigurationInput, UpdateFunctionUrlConfigInput,
+use ruststack_lambda_http::{
+    body::LambdaResponseBody,
+    dispatch::LambdaHandler,
+    response::{empty_response, json_response},
+    router::PathParams,
 };
-use ruststack_lambda_model::operations::LambdaOperation;
-use ruststack_lambda_model::types::InvocationType;
+use ruststack_lambda_model::{
+    error::LambdaError,
+    input::{
+        AddPermissionInput, CreateAliasInput, CreateFunctionInput, CreateFunctionUrlConfigInput,
+        PublishVersionInput, TagResourceInput, UpdateAliasInput, UpdateFunctionCodeInput,
+        UpdateFunctionConfigurationInput, UpdateFunctionUrlConfigInput,
+    },
+    operations::LambdaOperation,
+    types::InvocationType,
+};
 
 use crate::provider::RustStackLambda;
 

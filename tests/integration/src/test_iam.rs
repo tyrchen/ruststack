@@ -1,7 +1,8 @@
 //! Integration tests for the IAM service.
 //!
 //! These tests require a running RustStack server at `localhost:4566`.
-//! They are marked `#[ignore = "requires running RustStack server"]` so they don't run during normal `cargo test`.
+//! They are marked `#[ignore = "requires running RustStack server"]` so they don't run during
+//! normal `cargo test`.
 
 #[allow(unused_imports)]
 use crate::iam_client;

@@ -1,18 +1,15 @@
 //! STS handler implementation bridging HTTP to business logic.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_sts_http::body::StsResponseBody;
-use ruststack_sts_http::dispatch::StsHandler;
-use ruststack_sts_http::request::parse_form_params;
-use ruststack_sts_http::response::{XmlWriter, xml_response};
-use ruststack_sts_model::error::StsError;
-use ruststack_sts_model::operations::StsOperation;
-use ruststack_sts_model::types::Credentials;
+use ruststack_sts_http::{
+    body::StsResponseBody,
+    dispatch::StsHandler,
+    request::parse_form_params,
+    response::{XmlWriter, xml_response},
+};
+use ruststack_sts_model::{error::StsError, operations::StsOperation, types::Credentials};
 
 use crate::provider::RustStackSts;
 

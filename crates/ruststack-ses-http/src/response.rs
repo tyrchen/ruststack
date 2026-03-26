@@ -56,14 +56,9 @@ pub fn json_response(json: String, status: http::StatusCode) -> http::Response<S
 #[must_use]
 pub fn error_to_xml(error: &SesError, request_id: &str) -> String {
     format!(
-        "<ErrorResponse xmlns=\"{XML_NS}\">\
-         <Error>\
-         <Type>{}</Type>\
-         <Code>{}</Code>\
-         <Message>{}</Message>\
-         </Error>\
-         <RequestId>{}</RequestId>\
-         </ErrorResponse>",
+        "<ErrorResponse \
+         xmlns=\"{XML_NS}\"><Error><Type>{}</Type><Code>{}</Code><Message>{}</Message></\
+         Error><RequestId>{}</RequestId></ErrorResponse>",
         error.code.fault(),
         error.code.code(),
         xml_escape(&error.message),

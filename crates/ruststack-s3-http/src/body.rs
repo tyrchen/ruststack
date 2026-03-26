@@ -9,8 +9,10 @@
 //! Streaming support for large objects (e.g., `GetObject`) can be added in the future
 //! by extending this enum with a streaming variant.
 
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use bytes::Bytes;
 use http_body_util::Full;

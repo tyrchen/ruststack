@@ -4,8 +4,7 @@
 //! `Content-Type: application/x-www-form-urlencoded`. The operation is
 //! specified by the `Action=<OperationName>` form parameter.
 
-use ruststack_sns_model::error::SnsError;
-use ruststack_sns_model::operations::SnsOperation;
+use ruststack_sns_model::{error::SnsError, operations::SnsOperation};
 
 /// Resolve an SNS operation from parsed form parameters.
 ///

@@ -3,12 +3,9 @@
 //! Implements all 56 API Gateway v2 operations, maintaining internal storage
 //! and converting between model input/output types and internal records.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::Utc;
-use tracing::info;
-
 #[allow(clippy::wildcard_imports)]
 use ruststack_apigatewayv2_model::input::*;
 #[allow(clippy::wildcard_imports)]
@@ -18,13 +15,16 @@ use ruststack_apigatewayv2_model::types::{
     DeploymentStatus, DomainName, Integration, Model, MutualTlsAuthentication, Route,
     RouteResponse, Stage, TlsConfig, VpcLink, VpcLinkStatus, VpcLinkVersion,
 };
+use tracing::info;
 
-use crate::config::ApiGatewayV2Config;
-use crate::error::ApiGatewayV2ServiceError;
-use crate::storage::{
-    ApiMappingRecord, ApiRecord, ApiStore, AuthorizerRecord, DeploymentRecord, DomainNameRecord,
-    IntegrationRecord, ModelRecord, RouteRecord, RouteResponseRecord, StageRecord, VpcLinkRecord,
-    generate_id,
+use crate::{
+    config::ApiGatewayV2Config,
+    error::ApiGatewayV2ServiceError,
+    storage::{
+        ApiMappingRecord, ApiRecord, ApiStore, AuthorizerRecord, DeploymentRecord,
+        DomainNameRecord, IntegrationRecord, ModelRecord, RouteRecord, RouteResponseRecord,
+        StageRecord, VpcLinkRecord, generate_id,
+    },
 };
 
 /// Main API Gateway v2 provider. Owns resource storage and configuration.

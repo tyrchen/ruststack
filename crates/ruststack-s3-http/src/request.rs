@@ -11,20 +11,21 @@
 //! - `HTTP payload body` - From the request body (XML or raw bytes)
 //! - `HTTP prefix headers: x-amz-meta-` - Collect all `x-amz-meta-*` headers
 
-use std::collections::HashMap;
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use ruststack_s3_model::error::{S3Error, S3ErrorCode};
-use ruststack_s3_model::request::StreamingBlob;
-use ruststack_s3_model::types::{
-    AccelerateConfiguration, AccessControlPolicy, BucketLifecycleConfiguration,
-    BucketLoggingStatus, CORSConfiguration, CompletedMultipartUpload, CreateBucketConfiguration,
-    Delete, NotificationConfiguration, ObjectLockConfiguration, ObjectLockLegalHold,
-    ObjectLockRetention, OwnershipControls, PublicAccessBlockConfiguration,
-    RequestPaymentConfiguration, ServerSideEncryptionConfiguration, Tagging,
-    VersioningConfiguration, WebsiteConfiguration,
+use ruststack_s3_model::{
+    error::{S3Error, S3ErrorCode},
+    request::StreamingBlob,
+    types::{
+        AccelerateConfiguration, AccessControlPolicy, BucketLifecycleConfiguration,
+        BucketLoggingStatus, CORSConfiguration, CompletedMultipartUpload,
+        CreateBucketConfiguration, Delete, NotificationConfiguration, ObjectLockConfiguration,
+        ObjectLockLegalHold, ObjectLockRetention, OwnershipControls,
+        PublicAccessBlockConfiguration, RequestPaymentConfiguration,
+        ServerSideEncryptionConfiguration, Tagging, VersioningConfiguration, WebsiteConfiguration,
+    },
 };
 use ruststack_s3_xml::from_xml;
 

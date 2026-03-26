@@ -8,8 +8,7 @@
 //! When validation is enabled, all access keys map to the secret key `"test"`,
 //! matching LocalStack's default behavior.
 
-use ruststack_auth::credentials::CredentialProvider;
-use ruststack_auth::error::AuthError;
+use ruststack_auth::{credentials::CredentialProvider, error::AuthError};
 use tracing::debug;
 
 /// RustStack authentication provider.

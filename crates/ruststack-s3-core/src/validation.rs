@@ -4,9 +4,7 @@
 //! user-defined metadata following the rules defined in the
 //! [Amazon S3 documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html).
 
-use std::collections::HashMap;
-use std::hash::BuildHasher;
-use std::net::Ipv4Addr;
+use std::{collections::HashMap, hash::BuildHasher, net::Ipv4Addr};
 
 use base64::Engine;
 use md5::{Digest, Md5};
@@ -65,7 +63,8 @@ pub fn validate_bucket_name(name: &str) -> Result<(), S3ServiceError> {
         return Err(S3ServiceError::InvalidBucketName {
             name: name.to_owned(),
             reason: format!(
-                "Bucket name must be between {MIN_BUCKET_NAME_LEN} and {MAX_BUCKET_NAME_LEN} characters long"
+                "Bucket name must be between {MIN_BUCKET_NAME_LEN} and {MAX_BUCKET_NAME_LEN} \
+                 characters long"
             ),
         });
     }

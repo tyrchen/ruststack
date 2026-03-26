@@ -6,9 +6,8 @@
 //! - Content type: `application/json`
 
 use bytes::Bytes;
-use serde::Serialize;
-
 use ruststack_lambda_model::error::LambdaError;
+use serde::Serialize;
 
 /// Content type for Lambda JSON responses.
 pub const CONTENT_TYPE: &str = "application/json";
@@ -82,8 +81,9 @@ pub fn empty_response(status: u16) -> Result<http::Response<Bytes>, LambdaError>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ruststack_lambda_model::error::LambdaErrorCode;
+
+    use super::*;
 
     #[test]
     fn test_should_format_error_with_x_amzn_errortype_header() {

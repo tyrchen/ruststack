@@ -4,16 +4,17 @@
 //! and function URL configurations. Code is stored as raw bytes with
 //! SHA-256 hashes computed on ingestion.
 
-use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::{Path, PathBuf},
+};
 
 use bytes::Bytes;
 use dashmap::DashMap;
-use sha2::{Digest, Sha256};
-
 use ruststack_lambda_model::types::{
     Cors, DeadLetterConfig, ImageConfig, LoggingConfig, SnapStart, TracingConfig, VpcConfig,
 };
+use sha2::{Digest, Sha256};
 
 use crate::error::LambdaServiceError;
 

@@ -2,11 +2,13 @@
 
 use std::collections::HashMap;
 
-use crate::request::StreamingBlob;
-
-use crate::types::{
-    ChecksumAlgorithm, ChecksumType, CompletedMultipartUpload, EncodingType, ObjectCannedACL,
-    ObjectLockLegalHoldStatus, ObjectLockMode, RequestPayer, ServerSideEncryption, StorageClass,
+use crate::{
+    request::StreamingBlob,
+    types::{
+        ChecksumAlgorithm, ChecksumType, CompletedMultipartUpload, EncodingType, ObjectCannedACL,
+        ObjectLockLegalHoldStatus, ObjectLockMode, RequestPayer, ServerSideEncryption,
+        StorageClass,
+    },
 };
 
 /// S3 AbortMultipartUploadInput.

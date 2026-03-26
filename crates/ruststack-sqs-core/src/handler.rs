@@ -1,16 +1,10 @@
 //! SQS handler implementation bridging HTTP to business logic.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_sqs_http::body::SqsResponseBody;
-use ruststack_sqs_http::dispatch::SqsHandler;
-use ruststack_sqs_http::response::json_response;
-use ruststack_sqs_model::error::SqsError;
-use ruststack_sqs_model::operations::SqsOperation;
+use ruststack_sqs_http::{body::SqsResponseBody, dispatch::SqsHandler, response::json_response};
+use ruststack_sqs_model::{error::SqsError, operations::SqsOperation};
 
 use crate::provider::RustStackSqs;
 

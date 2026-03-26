@@ -8,11 +8,13 @@ use std::collections::HashMap;
 
 use ruststack_dynamodb_model::AttributeValue;
 
-use super::ast::{
-    AddAction, AttributePath, CompareOp, DeleteAction, Expr, FunctionName, LogicalOp, Operand,
-    PathElement, SetAction, SetValue, UpdateExpr,
+use super::{
+    ast::{
+        AddAction, AttributePath, CompareOp, DeleteAction, Expr, FunctionName, LogicalOp, Operand,
+        PathElement, SetAction, SetValue, UpdateExpr,
+    },
+    parser::ExpressionError,
 };
-use super::parser::ExpressionError;
 
 // ---------------------------------------------------------------------------
 // Evaluation context
@@ -105,16 +107,16 @@ impl EvalContext<'_> {
         if is_query_constant(low) && is_query_constant(high) {
             if std::mem::discriminant(lo) != std::mem::discriminant(hi) {
                 return Err(ExpressionError::TypeMismatch {
-                    message: "BETWEEN bounds must have the same type when both \
-                              are expression attribute values"
+                    message: "BETWEEN bounds must have the same type when both are expression \
+                              attribute values"
                         .to_owned(),
                 });
             }
             // Check ordering: if low > high, it is a ValidationException.
             if compare_values(lo, hi, CompareOp::Gt)? {
                 return Err(ExpressionError::TypeMismatch {
-                    message: "BETWEEN bounds are in wrong order; \
-                              low bound must be less than or equal to high bound"
+                    message: "BETWEEN bounds are in wrong order; low bound must be less than or \
+                              equal to high bound"
                         .to_owned(),
                 });
             }
@@ -196,8 +198,8 @@ impl EvalContext<'_> {
                 if !is_valid_type_descriptor(&expected_type) {
                     return Err(ExpressionError::TypeMismatch {
                         message: format!(
-                            "Invalid type: {expected_type}. \
-                             Valid types: S, SS, N, NS, B, BS, BOOL, NULL, L, M"
+                            "Invalid type: {expected_type}. Valid types: S, SS, N, NS, B, BS, \
+                             BOOL, NULL, L, M"
                         ),
                     });
                 }
@@ -224,8 +226,8 @@ impl EvalContext<'_> {
                             return Err(ExpressionError::InvalidOperand {
                                 operation: "begins_with".to_owned(),
                                 message: format!(
-                                    "Incorrect operand type for operator or function; \
-                                     operator or function: begins_with, operand type: {td}",
+                                    "Incorrect operand type for operator or function; operator or \
+                                     function: begins_with, operand type: {td}",
                                     td = v.type_descriptor()
                                 ),
                             });
@@ -504,8 +506,8 @@ impl EvalContext<'_> {
             return Err(ExpressionError::InvalidOperand {
                 operation: "ADD".to_owned(),
                 message: format!(
-                    "Incorrect operand type for operator or function; \
-                     operator: ADD, operand type: {operand_type}"
+                    "Incorrect operand type for operator or function; operator: ADD, operand \
+                     type: {operand_type}"
                 ),
             });
         }
@@ -539,8 +541,8 @@ impl EvalContext<'_> {
             return Err(ExpressionError::InvalidOperand {
                 operation: "DELETE".to_owned(),
                 message: format!(
-                    "Incorrect operand type for operator or function; \
-                     operator: DELETE, operand type: {operand_type}"
+                    "Incorrect operand type for operator or function; operator: DELETE, operand \
+                     type: {operand_type}"
                 ),
             });
         }
@@ -595,8 +597,8 @@ impl EvalContext<'_> {
                 return Err(ExpressionError::InvalidOperand {
                     operation: "DELETE".to_owned(),
                     message: format!(
-                        "Type mismatch for DELETE; operator type: {del_type}, \
-                         existing type: {existing_type}"
+                        "Type mismatch for DELETE; operator type: {del_type}, existing type: \
+                         {existing_type}"
                     ),
                 });
             }
@@ -681,8 +683,8 @@ fn validate_ordering_operand_type(
         return Err(ExpressionError::InvalidOperand {
             operation: "operator".to_owned(),
             message: format!(
-                "Incorrect operand type for operator or function; \
-                 operator: {operator_name}, operand type: {type_desc}",
+                "Incorrect operand type for operator or function; operator: {operator_name}, \
+                 operand type: {type_desc}",
                 type_desc = resolved_value.type_descriptor()
             ),
         });
@@ -973,7 +975,9 @@ fn precise_arithmetic(a: &str, b: &str, is_add: bool) -> Result<String, Expressi
     if max_digits > 38 + 2 {
         // Precision would be lost in the result.
         return Err(ExpressionError::Validation {
-            message: "Number overflow. Attempting to store a number with magnitude larger than supported range".to_owned(),
+            message: "Number overflow. Attempting to store a number with magnitude larger than \
+                      supported range"
+                .to_owned(),
         });
     }
 
@@ -1012,7 +1016,9 @@ fn precise_arithmetic(a: &str, b: &str, is_add: bool) -> Result<String, Expressi
     // Validate result precision and magnitude.
     if trimmed.len() > 38 {
         return Err(ExpressionError::Validation {
-            message: "Number overflow. Attempting to store a number with magnitude larger than supported range".to_owned(),
+            message: "Number overflow. Attempting to store a number with magnitude larger than \
+                      supported range"
+                .to_owned(),
         });
     }
 
@@ -1020,12 +1026,16 @@ fn precise_arithmetic(a: &str, b: &str, is_add: bool) -> Result<String, Expressi
     let magnitude = final_exp + trimmed.len() as i64 - 1;
     if magnitude > 125 {
         return Err(ExpressionError::Validation {
-            message: "Number overflow. Attempting to store a number with magnitude larger than supported range".to_owned(),
+            message: "Number overflow. Attempting to store a number with magnitude larger than \
+                      supported range"
+                .to_owned(),
         });
     }
     if magnitude < -130 {
         return Err(ExpressionError::Validation {
-            message: "Number underflow. Attempting to store a number with magnitude smaller than supported range".to_owned(),
+            message: "Number underflow. Attempting to store a number with magnitude smaller than \
+                      supported range"
+                .to_owned(),
         });
     }
 
@@ -1366,8 +1376,7 @@ fn validate_nested_path_for_set(
         // because DynamoDB requires existing intermediate containers.
         return Err(ExpressionError::InvalidOperand {
             operation: "SET".to_owned(),
-            message: "The document path provided in the update expression \
-                      is invalid for update"
+            message: "The document path provided in the update expression is invalid for update"
                 .to_owned(),
         });
     };
@@ -1399,8 +1408,8 @@ fn validate_path_type(
                 }
                 _ => Err(ExpressionError::InvalidOperand {
                     operation: "SET".to_owned(),
-                    message: "The document path provided in the update expression \
-                              is invalid for update"
+                    message: "The document path provided in the update expression is invalid for \
+                              update"
                         .to_owned(),
                 }),
             }
@@ -1416,8 +1425,8 @@ fn validate_path_type(
             }
             _ => Err(ExpressionError::InvalidOperand {
                 operation: "SET".to_owned(),
-                message: "The document path provided in the update expression \
-                          is invalid for update"
+                message: "The document path provided in the update expression is invalid for \
+                          update"
                     .to_owned(),
             }),
         },
@@ -1514,8 +1523,7 @@ fn apply_remove(
         // Path root doesn't exist - this is a validation error for nested paths.
         return Err(ExpressionError::InvalidOperand {
             operation: "REMOVE".to_owned(),
-            message: "The document path provided in the update expression \
-                      is invalid for update"
+            message: "The document path provided in the update expression is invalid for update"
                 .to_owned(),
         });
     }
@@ -1662,8 +1670,8 @@ fn compute_add_result(
             Err(ExpressionError::InvalidOperand {
                 operation: "ADD".to_owned(),
                 message: format!(
-                    "Type mismatch for ADD; operator type: {add_type}, \
-                     existing type: {existing_type}"
+                    "Type mismatch for ADD; operator type: {add_type}, existing type: \
+                     {existing_type}"
                 ),
             })
         }

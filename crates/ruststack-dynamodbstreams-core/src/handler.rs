@@ -1,16 +1,14 @@
 //! DynamoDB Streams handler implementation bridging HTTP to business logic.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_dynamodbstreams_http::body::DynamoDBStreamsResponseBody;
-use ruststack_dynamodbstreams_http::dispatch::DynamoDBStreamsHandler;
-use ruststack_dynamodbstreams_http::response::json_response;
-use ruststack_dynamodbstreams_model::error::DynamoDBStreamsError;
-use ruststack_dynamodbstreams_model::operations::DynamoDBStreamsOperation;
+use ruststack_dynamodbstreams_http::{
+    body::DynamoDBStreamsResponseBody, dispatch::DynamoDBStreamsHandler, response::json_response,
+};
+use ruststack_dynamodbstreams_model::{
+    error::DynamoDBStreamsError, operations::DynamoDBStreamsOperation,
+};
 
 use crate::provider::RustStackDynamoDBStreams;
 

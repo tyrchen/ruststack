@@ -69,7 +69,8 @@ pub fn build_canonical_request(
     let signed_headers_str = build_signed_headers_string(signed_headers);
 
     format!(
-        "{method}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n\n{signed_headers_str}\n{payload_hash}"
+        "{method}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n\\
+         n{signed_headers_str}\n{payload_hash}"
     )
 }
 
@@ -300,10 +301,10 @@ mod tests {
             &headers.iter().map(|(k, v)| (*k, *v)).collect::<Vec<_>>(),
             &signed,
         );
-        let expected = "host:examplebucket.s3.amazonaws.com\n\
-                        range:bytes=0-9\n\
-                        x-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n\
-                        x-amz-date:20130524T000000Z";
+        let expected = "host:examplebucket.s3.amazonaws.com\nrange:bytes=0-9\\
+                        nx-amz-content-sha256:\
+                        e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\\
+                        nx-amz-date:20130524T000000Z";
         assert_eq!(result, expected);
     }
 
@@ -351,16 +352,12 @@ mod tests {
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         );
 
-        let expected = "GET\n\
-                        /test.txt\n\
-                        \n\
-                        host:examplebucket.s3.amazonaws.com\n\
-                        range:bytes=0-9\n\
-                        x-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n\
-                        x-amz-date:20130524T000000Z\n\
-                        \n\
-                        host;range;x-amz-content-sha256;x-amz-date\n\
-                        e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        let expected = "GET\n/test.txt\n\nhost:examplebucket.s3.amazonaws.com\nrange:bytes=0-9\\
+                        nx-amz-content-sha256:\
+                        e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\\
+                        nx-amz-date:20130524T000000Z\n\nhost;range;x-amz-content-sha256;\
+                        x-amz-date\\
+                        ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
         assert_eq!(canonical, expected);
 
         // Verify the hash of the canonical request matches the AWS test vector
@@ -373,11 +370,9 @@ mod tests {
 
     #[test]
     fn test_should_handle_presigned_url_query_string() {
-        let query = "X-Amz-Algorithm=AWS4-HMAC-SHA256\
-            &X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request\
-            &X-Amz-Date=20130524T000000Z\
-            &X-Amz-Expires=86400\
-            &X-Amz-SignedHeaders=host";
+        let query = "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%\
+                     2F20130524%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&\
+                     X-Amz-Expires=86400&X-Amz-SignedHeaders=host";
         let result = build_canonical_query_string(query);
         // Should be sorted, raw values preserved
         assert!(result.contains("X-Amz-Algorithm=AWS4-HMAC-SHA256"));

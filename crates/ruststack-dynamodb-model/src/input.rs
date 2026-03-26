@@ -8,13 +8,15 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::attribute_value::AttributeValue;
-use crate::types::{
-    AttributeDefinition, AttributeValueUpdate, BillingMode, Condition, ConditionalOperator,
-    ExpectedAttributeValue, GlobalSecondaryIndex, KeySchemaElement, KeysAndAttributes,
-    LocalSecondaryIndex, ProvisionedThroughput, ReturnConsumedCapacity,
-    ReturnItemCollectionMetrics, ReturnValue, SSESpecification, Select, StreamSpecification, Tag,
-    WriteRequest,
+use crate::{
+    attribute_value::AttributeValue,
+    types::{
+        AttributeDefinition, AttributeValueUpdate, BillingMode, Condition, ConditionalOperator,
+        ExpectedAttributeValue, GlobalSecondaryIndex, KeySchemaElement, KeysAndAttributes,
+        LocalSecondaryIndex, ProvisionedThroughput, ReturnConsumedCapacity,
+        ReturnItemCollectionMetrics, ReturnValue, SSESpecification, Select, StreamSpecification,
+        Tag, TimeToLiveSpecification, TransactGetItem, TransactWriteItem, WriteRequest,
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -486,4 +488,93 @@ pub struct BatchWriteItemInput {
     /// Determines whether item collection metrics are returned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_item_collection_metrics: Option<ReturnItemCollectionMetrics>,
+}
+
+// ---------------------------------------------------------------------------
+// Tagging
+// ---------------------------------------------------------------------------
+
+/// Input for the `TagResource` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TagResourceInput {
+    /// The ARN of the resource to tag.
+    pub resource_arn: String,
+    /// The tags to add to the resource.
+    pub tags: Vec<Tag>,
+}
+
+/// Input for the `UntagResource` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UntagResourceInput {
+    /// The ARN of the resource to untag.
+    pub resource_arn: String,
+    /// The tag keys to remove.
+    pub tag_keys: Vec<String>,
+}
+
+/// Input for the `ListTagsOfResource` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ListTagsOfResourceInput {
+    /// The ARN of the resource.
+    pub resource_arn: String,
+    /// An optional pagination token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_token: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Time to Live
+// ---------------------------------------------------------------------------
+
+/// Input for the `UpdateTimeToLive` operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UpdateTimeToLiveInput {
+    /// The name of the table.
+    pub table_name: String,
+    /// The TTL specification to apply.
+    pub time_to_live_specification: TimeToLiveSpecification,
+}
+
+/// Input for the `DescribeTimeToLive` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DescribeTimeToLiveInput {
+    /// The name of the table.
+    pub table_name: String,
+}
+
+// ---------------------------------------------------------------------------
+// Transactions
+// ---------------------------------------------------------------------------
+
+/// Input for the `TransactWriteItems` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TransactWriteItemsInput {
+    /// The list of write actions to perform atomically.
+    pub transact_items: Vec<TransactWriteItem>,
+    /// Determines the level of detail about provisioned throughput consumption.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_consumed_capacity: Option<ReturnConsumedCapacity>,
+    /// Determines whether item collection metrics are returned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_item_collection_metrics: Option<ReturnItemCollectionMetrics>,
+    /// An idempotency token for the transaction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_request_token: Option<String>,
+}
+
+/// Input for the `TransactGetItems` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TransactGetItemsInput {
+    /// The list of get actions to perform.
+    pub transact_items: Vec<TransactGetItem>,
+    /// Determines the level of detail about provisioned throughput consumption.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_consumed_capacity: Option<ReturnConsumedCapacity>,
 }

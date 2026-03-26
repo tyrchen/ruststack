@@ -7,8 +7,9 @@
 //! X-Amz-Target: DynamoDBStreams_20120810.DescribeStream
 //! ```
 
-use ruststack_dynamodbstreams_model::error::DynamoDBStreamsError;
-use ruststack_dynamodbstreams_model::operations::DynamoDBStreamsOperation;
+use ruststack_dynamodbstreams_model::{
+    error::DynamoDBStreamsError, operations::DynamoDBStreamsOperation,
+};
 
 /// The expected prefix for the `X-Amz-Target` header value.
 const TARGET_PREFIX: &str = "DynamoDBStreams_20120810.";

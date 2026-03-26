@@ -19,13 +19,15 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tracing::debug;
 
-use crate::canonical::{
-    build_canonical_headers, build_canonical_query_string, build_canonical_uri,
-    build_signed_headers_string,
+use crate::{
+    canonical::{
+        build_canonical_headers, build_canonical_query_string, build_canonical_uri,
+        build_signed_headers_string,
+    },
+    credentials::CredentialProvider,
+    error::AuthError,
+    sigv4::{AuthResult, build_string_to_sign, compute_signature, derive_signing_key},
 };
-use crate::credentials::CredentialProvider;
-use crate::error::AuthError;
-use crate::sigv4::{AuthResult, build_string_to_sign, compute_signature, derive_signing_key};
 
 /// The payload hash value used for all presigned URL requests.
 const UNSIGNED_PAYLOAD: &str = "UNSIGNED-PAYLOAD";
@@ -167,7 +169,8 @@ pub fn verify_presigned(
 
     // For presigned URLs, the payload hash is always UNSIGNED-PAYLOAD.
     let canonical_request = format!(
-        "{method}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n\n{signed_headers_str}\n{UNSIGNED_PAYLOAD}"
+        "{method}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n\\
+         n{signed_headers_str}\n{UNSIGNED_PAYLOAD}"
     );
 
     debug!(canonical_request, "Built presigned canonical request");
@@ -292,12 +295,11 @@ mod tests {
 
     #[test]
     fn test_should_parse_presigned_params() {
-        let query = "X-Amz-Algorithm=AWS4-HMAC-SHA256\
-            &X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request\
-            &X-Amz-Date=20130524T000000Z\
-            &X-Amz-Expires=86400\
-            &X-Amz-SignedHeaders=host\
-            &X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404";
+        let query =
+            "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%\
+             2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&X-Amz-Expires=86400&\
+             X-Amz-SignedHeaders=host&\
+             X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404";
 
         let parsed = parse_presigned_params(query).unwrap();
         assert_eq!(parsed.algorithm, "AWS4-HMAC-SHA256");
@@ -316,11 +318,9 @@ mod tests {
 
     #[test]
     fn test_should_reject_missing_algorithm_param() {
-        let query = "X-Amz-Credential=AKID%2F20130524%2Fus-east-1%2Fs3%2Faws4_request\
-            &X-Amz-Date=20130524T000000Z\
-            &X-Amz-Expires=86400\
-            &X-Amz-SignedHeaders=host\
-            &X-Amz-Signature=abc";
+        let query = "X-Amz-Credential=AKID%2F20130524%2Fus-east-1%2Fs3%2Faws4_request&\
+                     X-Amz-Date=20130524T000000Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&\
+                     X-Amz-Signature=abc";
 
         let result = parse_presigned_params(query);
         assert!(matches!(result, Err(AuthError::MissingQueryParam(_))));
@@ -343,12 +343,9 @@ mod tests {
 
     #[test]
     fn test_should_build_query_string_without_signature() {
-        let query = "X-Amz-Algorithm=AWS4-HMAC-SHA256\
-            &X-Amz-Credential=AKID%2F20130524%2Fus-east-1%2Fs3%2Faws4_request\
-            &X-Amz-Date=20130524T000000Z\
-            &X-Amz-Expires=86400\
-            &X-Amz-SignedHeaders=host\
-            &X-Amz-Signature=abc123";
+        let query = "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKID%2F20130524%\
+                     2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&\
+                     X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=abc123";
 
         let result = build_canonical_query_string_without_signature(query);
         assert!(!result.contains("X-Amz-Signature"));
@@ -367,17 +364,11 @@ mod tests {
         let signing_key = derive_signing_key(TEST_SECRET_KEY, "20130524", "us-east-1", "s3");
 
         // Build canonical request for the presigned URL test vector.
-        let canonical_request = "GET\n\
-            /test.txt\n\
-            X-Amz-Algorithm=AWS4-HMAC-SHA256\
-            &X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request\
-            &X-Amz-Date=20130524T000000Z\
-            &X-Amz-Expires=86400\
-            &X-Amz-SignedHeaders=host\n\
-            host:examplebucket.s3.amazonaws.com\n\
-            \n\
-            host\n\
-            UNSIGNED-PAYLOAD";
+        let canonical_request = "GET\n/test.txt\nX-Amz-Algorithm=AWS4-HMAC-SHA256&\
+                                 X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%\
+                                 2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&\
+                                 X-Amz-Expires=86400&X-Amz-SignedHeaders=host\nhost:examplebucket.\
+                                 s3.amazonaws.com\n\nhost\nUNSIGNED-PAYLOAD";
 
         let canonical_hash = hex::encode(Sha256::digest(canonical_request.as_bytes()));
         assert_eq!(
@@ -411,18 +402,16 @@ mod tests {
         // Build the canonical request components.
         let canonical_uri = "/test.txt";
         let query_without_sig = format!(
-            "X-Amz-Algorithm=AWS4-HMAC-SHA256\
-            &X-Amz-Credential={}\
-            &X-Amz-Date={timestamp}\
-            &X-Amz-Expires=86400\
-            &X-Amz-SignedHeaders=host",
+            "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential={}&X-Amz-Date={timestamp}&\
+             X-Amz-Expires=86400&X-Amz-SignedHeaders=host",
             percent_encoding::utf8_percent_encode(&credential, percent_encoding::NON_ALPHANUMERIC)
         );
 
         let canonical_query = build_canonical_query_string(&query_without_sig);
 
         let canonical_request = format!(
-            "GET\n{canonical_uri}\n{canonical_query}\nhost:examplebucket.s3.amazonaws.com\n\nhost\nUNSIGNED-PAYLOAD"
+            "GET\n{canonical_uri}\n{canonical_query}\nhost:examplebucket.s3.amazonaws.com\n\nhost\\
+             nUNSIGNED-PAYLOAD"
         );
 
         let canonical_hash = hex::encode(Sha256::digest(canonical_request.as_bytes()));

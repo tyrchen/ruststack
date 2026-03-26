@@ -3,40 +3,44 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
+use ruststack_secretsmanager_model::{
+    error::{SecretsManagerError, SecretsManagerErrorCode},
+    input::{
+        BatchGetSecretValueInput, CancelRotateSecretInput, CreateSecretInput,
+        DeleteResourcePolicyInput, DeleteSecretInput, DescribeSecretInput, GetRandomPasswordInput,
+        GetResourcePolicyInput, GetSecretValueInput, ListSecretVersionIdsInput, ListSecretsInput,
+        PutResourcePolicyInput, PutSecretValueInput, RemoveRegionsFromReplicationInput,
+        ReplicateSecretToRegionsInput, RestoreSecretInput, RotateSecretInput,
+        StopReplicationToReplicaInput, TagResourceInput, UntagResourceInput, UpdateSecretInput,
+        UpdateSecretVersionStageInput, ValidateResourcePolicyInput,
+    },
+    output::{
+        BatchGetSecretValueResponse, CancelRotateSecretResponse, CreateSecretResponse,
+        DeleteResourcePolicyResponse, DeleteSecretResponse, DescribeSecretResponse,
+        GetRandomPasswordResponse, GetResourcePolicyResponse, GetSecretValueResponse,
+        ListSecretVersionIdsResponse, ListSecretsResponse, PutResourcePolicyResponse,
+        PutSecretValueResponse, RemoveRegionsFromReplicationResponse,
+        ReplicateSecretToRegionsResponse, RestoreSecretResponse, RotateSecretResponse,
+        StopReplicationToReplicaResponse, UpdateSecretResponse, UpdateSecretVersionStageResponse,
+        ValidateResourcePolicyResponse,
+    },
+    types::{
+        APIErrorType, SecretListEntry, SecretValueEntry, SecretVersionsListEntry, SortByType,
+        SortOrderType,
+    },
+};
 
-use ruststack_secretsmanager_model::error::{SecretsManagerError, SecretsManagerErrorCode};
-use ruststack_secretsmanager_model::input::{
-    BatchGetSecretValueInput, CancelRotateSecretInput, CreateSecretInput,
-    DeleteResourcePolicyInput, DeleteSecretInput, DescribeSecretInput, GetRandomPasswordInput,
-    GetResourcePolicyInput, GetSecretValueInput, ListSecretVersionIdsInput, ListSecretsInput,
-    PutResourcePolicyInput, PutSecretValueInput, RemoveRegionsFromReplicationInput,
-    ReplicateSecretToRegionsInput, RestoreSecretInput, RotateSecretInput,
-    StopReplicationToReplicaInput, TagResourceInput, UntagResourceInput, UpdateSecretInput,
-    UpdateSecretVersionStageInput, ValidateResourcePolicyInput,
+use crate::{
+    config::SecretsManagerConfig,
+    filter::matches_filters,
+    password::generate_random_password,
+    storage::{SecretRecord, SecretStore, SecretVersion},
+    validation::{
+        MAX_TAGS, validate_client_request_token, validate_description, validate_recovery_window,
+        validate_secret_name, validate_secret_value, validate_tags,
+    },
+    version::AWSCURRENT,
 };
-use ruststack_secretsmanager_model::output::{
-    BatchGetSecretValueResponse, CancelRotateSecretResponse, CreateSecretResponse,
-    DeleteResourcePolicyResponse, DeleteSecretResponse, DescribeSecretResponse,
-    GetRandomPasswordResponse, GetResourcePolicyResponse, GetSecretValueResponse,
-    ListSecretVersionIdsResponse, ListSecretsResponse, PutResourcePolicyResponse,
-    PutSecretValueResponse, RemoveRegionsFromReplicationResponse, ReplicateSecretToRegionsResponse,
-    RestoreSecretResponse, RotateSecretResponse, StopReplicationToReplicaResponse,
-    UpdateSecretResponse, UpdateSecretVersionStageResponse, ValidateResourcePolicyResponse,
-};
-use ruststack_secretsmanager_model::types::{
-    APIErrorType, SecretListEntry, SecretValueEntry, SecretVersionsListEntry, SortByType,
-    SortOrderType,
-};
-
-use crate::config::SecretsManagerConfig;
-use crate::filter::matches_filters;
-use crate::password::generate_random_password;
-use crate::storage::{SecretRecord, SecretStore, SecretVersion};
-use crate::validation::{
-    MAX_TAGS, validate_client_request_token, validate_description, validate_recovery_window,
-    validate_secret_name, validate_secret_value, validate_tags,
-};
-use crate::version::AWSCURRENT;
 
 /// Default max results for `ListSecrets`.
 const DEFAULT_LIST_MAX_RESULTS: i32 = 100;
@@ -176,7 +180,8 @@ impl RustStackSecretsManager {
         if record.is_pending_deletion() {
             return Err(SecretsManagerError::with_message(
                 SecretsManagerErrorCode::InvalidRequestException,
-                "You can't perform this operation on the secret because it was marked for deletion.",
+                "You can't perform this operation on the secret because it was marked for \
+                 deletion.",
             ));
         }
 
@@ -231,7 +236,8 @@ impl RustStackSecretsManager {
         if record.is_pending_deletion() {
             return Err(SecretsManagerError::with_message(
                 SecretsManagerErrorCode::InvalidRequestException,
-                "You can't perform this operation on the secret because it was marked for deletion.",
+                "You can't perform this operation on the secret because it was marked for \
+                 deletion.",
             ));
         }
 
@@ -305,7 +311,8 @@ impl RustStackSecretsManager {
             if record.is_pending_deletion() && !force {
                 return Err(SecretsManagerError::with_message(
                     SecretsManagerErrorCode::InvalidRequestException,
-                    "You can't perform this operation on the secret because it was already marked for deletion.",
+                    "You can't perform this operation on the secret because it was already marked \
+                     for deletion.",
                 ));
             }
         }
@@ -314,7 +321,8 @@ impl RustStackSecretsManager {
         if force && recovery_days.is_some() {
             return Err(SecretsManagerError::with_message(
                 SecretsManagerErrorCode::InvalidParameterException,
-                "You can't use ForceDeleteWithoutRecovery in conjunction with RecoveryWindowInDays.",
+                "You can't use ForceDeleteWithoutRecovery in conjunction with \
+                 RecoveryWindowInDays.",
             ));
         }
 
@@ -393,7 +401,8 @@ impl RustStackSecretsManager {
         if record.is_pending_deletion() {
             return Err(SecretsManagerError::with_message(
                 SecretsManagerErrorCode::InvalidRequestException,
-                "You can't perform this operation on the secret because it was marked for deletion.",
+                "You can't perform this operation on the secret because it was marked for \
+                 deletion.",
             ));
         }
 
@@ -615,7 +624,8 @@ impl RustStackSecretsManager {
         if record.is_pending_deletion() {
             return Err(SecretsManagerError::with_message(
                 SecretsManagerErrorCode::InvalidRequestException,
-                "You can't perform this operation on the secret because it was marked for deletion.",
+                "You can't perform this operation on the secret because it was marked for \
+                 deletion.",
             ));
         }
 
@@ -675,7 +685,8 @@ impl RustStackSecretsManager {
         if record.is_pending_deletion() {
             return Err(SecretsManagerError::with_message(
                 SecretsManagerErrorCode::InvalidRequestException,
-                "You can't perform this operation on the secret because it was marked for deletion.",
+                "You can't perform this operation on the secret because it was marked for \
+                 deletion.",
             ));
         }
 
@@ -745,7 +756,8 @@ impl RustStackSecretsManager {
         if record.is_pending_deletion() {
             return Err(SecretsManagerError::with_message(
                 SecretsManagerErrorCode::InvalidRequestException,
-                "You can't perform this operation on the secret because it was marked for deletion.",
+                "You can't perform this operation on the secret because it was marked for \
+                 deletion.",
             ));
         }
 
@@ -896,7 +908,8 @@ impl RustStackSecretsManager {
         if record.is_pending_deletion() {
             return Err(SecretsManagerError::with_message(
                 SecretsManagerErrorCode::InvalidRequestException,
-                "You can't perform this operation on the secret because it was marked for deletion.",
+                "You can't perform this operation on the secret because it was marked for \
+                 deletion.",
             ));
         }
 
@@ -925,7 +938,8 @@ impl RustStackSecretsManager {
         if record.is_pending_deletion() {
             return Err(SecretsManagerError::with_message(
                 SecretsManagerErrorCode::InvalidRequestException,
-                "You can't perform this operation on the secret because it was marked for deletion.",
+                "You can't perform this operation on the secret because it was marked for \
+                 deletion.",
             ));
         }
 
@@ -1029,7 +1043,8 @@ impl RustStackSecretsManager {
         if record.is_pending_deletion() {
             return Err(SecretsManagerError::with_message(
                 SecretsManagerErrorCode::InvalidRequestException,
-                "You can't perform this operation on the secret because it was marked for deletion.",
+                "You can't perform this operation on the secret because it was marked for \
+                 deletion.",
             ));
         }
 
@@ -1078,7 +1093,8 @@ fn resolve_version_from_record<'a>(
                 return Err(SecretsManagerError::with_message(
                     SecretsManagerErrorCode::ResourceNotFoundException,
                     format!(
-                        "Secrets Manager can't find the secret value for VersionId: {vid} and staging label: {stage}"
+                        "Secrets Manager can't find the secret value for VersionId: {vid} and \
+                         staging label: {stage}"
                     ),
                 ));
             }

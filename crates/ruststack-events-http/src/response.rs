@@ -74,8 +74,9 @@ pub fn json_response(json: Vec<u8>, request_id: &str) -> http::Response<EventsRe
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ruststack_events_model::error::EventsErrorCode;
+
+    use super::*;
 
     #[test]
     fn test_should_format_error_json_with_short_type() {

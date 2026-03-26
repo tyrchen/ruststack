@@ -1,16 +1,10 @@
 //! SSM handler implementation bridging HTTP to business logic.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_ssm_http::body::SsmResponseBody;
-use ruststack_ssm_http::dispatch::SsmHandler;
-use ruststack_ssm_http::response::json_response;
-use ruststack_ssm_model::error::SsmError;
-use ruststack_ssm_model::operations::SsmOperation;
+use ruststack_ssm_http::{body::SsmResponseBody, dispatch::SsmHandler, response::json_response};
+use ruststack_ssm_model::{error::SsmError, operations::SsmOperation};
 
 use crate::provider::RustStackSsm;
 

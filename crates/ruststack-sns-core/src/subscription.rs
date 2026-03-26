@@ -1,7 +1,6 @@
 //! Subscription record and attributes.
 
-use std::collections::HashMap;
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 use ruststack_sns_model::error::SnsError;
 

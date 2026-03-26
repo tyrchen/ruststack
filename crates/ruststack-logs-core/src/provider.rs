@@ -5,36 +5,37 @@
 
 use std::collections::HashMap;
 
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
-
-use ruststack_logs_model::error::{LogsError, LogsErrorCode};
-use ruststack_logs_model::input::{
-    AssociateKmsKeyInput, CreateLogGroupInput, CreateLogStreamInput, DeleteDestinationInput,
-    DeleteLogGroupInput, DeleteLogStreamInput, DeleteMetricFilterInput, DeleteQueryDefinitionInput,
-    DeleteResourcePolicyInput, DeleteRetentionPolicyInput, DeleteSubscriptionFilterInput,
-    DescribeDestinationsInput, DescribeLogGroupsInput, DescribeLogStreamsInput,
-    DescribeMetricFiltersInput, DescribeQueriesInput, DescribeQueryDefinitionsInput,
-    DescribeResourcePoliciesInput, DescribeSubscriptionFiltersInput, DisassociateKmsKeyInput,
-    FilterLogEventsInput, GetLogEventsInput, GetQueryResultsInput, ListTagsForResourceInput,
-    ListTagsLogGroupInput, PutDestinationInput, PutDestinationPolicyInput, PutLogEventsInput,
-    PutMetricFilterInput, PutQueryDefinitionInput, PutResourcePolicyInput, PutRetentionPolicyInput,
-    PutSubscriptionFilterInput, StartQueryInput, StopQueryInput, TagLogGroupInput,
-    TagResourceInput, TestMetricFilterInput, UntagLogGroupInput, UntagResourceInput,
-};
-use ruststack_logs_model::output::{
-    DescribeDestinationsResponse, DescribeLogGroupsResponse, DescribeLogStreamsResponse,
-    DescribeMetricFiltersResponse, DescribeQueriesResponse, DescribeQueryDefinitionsResponse,
-    DescribeResourcePoliciesResponse, DescribeSubscriptionFiltersResponse, FilterLogEventsResponse,
-    GetLogEventsResponse, GetQueryResultsResponse, ListTagsForResourceResponse,
-    ListTagsLogGroupResponse, PutDestinationResponse, PutLogEventsResponse,
-    PutQueryDefinitionResponse, PutResourcePolicyResponse, StartQueryResponse, StopQueryResponse,
-    TestMetricFilterResponse,
-};
-use ruststack_logs_model::types::{
-    Destination, FilteredLogEvent, LogGroup, LogStream, MetricFilter, MetricFilterMatchRecord,
-    OutputLogEvent, QueryDefinition, QueryStatistics, QueryStatus, ResourcePolicy,
-    SearchedLogStream, SubscriptionFilter,
+use dashmap::{DashMap, mapref::entry::Entry};
+use ruststack_logs_model::{
+    error::{LogsError, LogsErrorCode},
+    input::{
+        AssociateKmsKeyInput, CreateLogGroupInput, CreateLogStreamInput, DeleteDestinationInput,
+        DeleteLogGroupInput, DeleteLogStreamInput, DeleteMetricFilterInput,
+        DeleteQueryDefinitionInput, DeleteResourcePolicyInput, DeleteRetentionPolicyInput,
+        DeleteSubscriptionFilterInput, DescribeDestinationsInput, DescribeLogGroupsInput,
+        DescribeLogStreamsInput, DescribeMetricFiltersInput, DescribeQueriesInput,
+        DescribeQueryDefinitionsInput, DescribeResourcePoliciesInput,
+        DescribeSubscriptionFiltersInput, DisassociateKmsKeyInput, FilterLogEventsInput,
+        GetLogEventsInput, GetQueryResultsInput, ListTagsForResourceInput, ListTagsLogGroupInput,
+        PutDestinationInput, PutDestinationPolicyInput, PutLogEventsInput, PutMetricFilterInput,
+        PutQueryDefinitionInput, PutResourcePolicyInput, PutRetentionPolicyInput,
+        PutSubscriptionFilterInput, StartQueryInput, StopQueryInput, TagLogGroupInput,
+        TagResourceInput, TestMetricFilterInput, UntagLogGroupInput, UntagResourceInput,
+    },
+    output::{
+        DescribeDestinationsResponse, DescribeLogGroupsResponse, DescribeLogStreamsResponse,
+        DescribeMetricFiltersResponse, DescribeQueriesResponse, DescribeQueryDefinitionsResponse,
+        DescribeResourcePoliciesResponse, DescribeSubscriptionFiltersResponse,
+        FilterLogEventsResponse, GetLogEventsResponse, GetQueryResultsResponse,
+        ListTagsForResourceResponse, ListTagsLogGroupResponse, PutDestinationResponse,
+        PutLogEventsResponse, PutQueryDefinitionResponse, PutResourcePolicyResponse,
+        StartQueryResponse, StopQueryResponse, TestMetricFilterResponse,
+    },
+    types::{
+        Destination, FilteredLogEvent, LogGroup, LogStream, MetricFilter, MetricFilterMatchRecord,
+        OutputLogEvent, QueryDefinition, QueryStatistics, QueryStatus, ResourcePolicy,
+        SearchedLogStream, SubscriptionFilter,
+    },
 };
 
 use crate::config::LogsConfig;
@@ -536,7 +537,8 @@ impl RustStackLogs {
             return Err(LogsError::with_message(
                 LogsErrorCode::InvalidParameterException,
                 format!(
-                    "Log events in a single PutLogEvents request cannot exceed {MAX_PUT_LOG_EVENTS}"
+                    "Log events in a single PutLogEvents request cannot exceed \
+                     {MAX_PUT_LOG_EVENTS}"
                 ),
             ));
         }

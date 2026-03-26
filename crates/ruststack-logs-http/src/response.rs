@@ -71,8 +71,9 @@ pub fn json_response(json: Vec<u8>, request_id: &str) -> http::Response<LogsResp
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ruststack_logs_model::error::LogsErrorCode;
+
+    use super::*;
 
     #[test]
     fn test_should_format_error_json_with_short_type() {

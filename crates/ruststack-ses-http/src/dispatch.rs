@@ -1,13 +1,9 @@
 //! SES handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_ses_model::error::SesError;
-use ruststack_ses_model::operations::SesOperation;
+use ruststack_ses_model::{error::SesError, operations::SesOperation};
 
 use crate::body::SesResponseBody;
 

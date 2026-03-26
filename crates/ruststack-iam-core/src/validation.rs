@@ -28,8 +28,8 @@ pub fn validate_entity_name(name: &str, max_len: usize) -> Result<(), IamError> 
         .all(|c| c.is_ascii_alphanumeric() || "+=,.@_-".contains(c))
     {
         return Err(IamError::invalid_input(format!(
-            "Entity name '{name}' contains invalid characters. \
-             Only alphanumeric characters and +=,.@_- are allowed."
+            "Entity name '{name}' contains invalid characters. Only alphanumeric characters and \
+             +=,.@_- are allowed."
         )));
     }
     Ok(())

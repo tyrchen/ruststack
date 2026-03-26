@@ -56,8 +56,9 @@ pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<DateTime<Utc>, D::
 
 /// Serde helpers for `Option<DateTime<Utc>>` as epoch seconds.
 pub mod option {
-    use super::{DateTime, Deserializer, Serializer, TimeZone, Utc, epoch_to_datetime};
     use serde::de;
+
+    use super::{DateTime, Deserializer, Serializer, TimeZone, Utc, epoch_to_datetime};
 
     /// Serialize `Option<DateTime<Utc>>` as epoch seconds (f64) or null.
     pub fn serialize<S: Serializer>(dt: &Option<DateTime<Utc>>, s: S) -> Result<S::Ok, S::Error> {

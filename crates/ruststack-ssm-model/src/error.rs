@@ -189,8 +189,8 @@ impl SsmError {
         Self::with_message(
             SsmErrorCode::ParameterAlreadyExists,
             format!(
-                "The parameter {name} already exists. To overwrite this value, \
-                 set the overwrite option in the request to true."
+                "The parameter {name} already exists. To overwrite this value, set the overwrite \
+                 option in the request to true."
             ),
         )
     }
@@ -222,8 +222,8 @@ impl SsmError {
         Self::with_message(
             SsmErrorCode::InvalidAction,
             format!(
-                "Operation {target} is not supported. \
-                 Only Parameter Store operations are implemented."
+                "Operation {target} is not supported. Only Parameter Store operations are \
+                 implemented."
             ),
         )
     }

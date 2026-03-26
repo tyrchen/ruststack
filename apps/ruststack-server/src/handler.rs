@@ -5,22 +5,20 @@
 //! dispatched to the corresponding `handle_*` method on [`RustStackS3`], with request
 //! deserialization via [`FromS3Request`] and response serialization via [`IntoS3Response`].
 
-use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
+use std::{collections::HashMap, future::Future, pin::Pin};
 
 use bytes::Bytes;
 use ruststack_s3_core::RustStackS3;
-use ruststack_s3_http::body::S3ResponseBody;
-use ruststack_s3_http::dispatch::S3Handler;
-use ruststack_s3_http::multipart;
-use ruststack_s3_http::request::FromS3Request;
-use ruststack_s3_http::response::IntoS3Response;
-use ruststack_s3_http::router::RoutingContext;
-use ruststack_s3_model::S3Operation;
-use ruststack_s3_model::error::{S3Error, S3ErrorCode};
-use ruststack_s3_model::input::PutObjectInput;
-use ruststack_s3_model::request::StreamingBlob;
+use ruststack_s3_http::{
+    body::S3ResponseBody, dispatch::S3Handler, multipart, request::FromS3Request,
+    response::IntoS3Response, router::RoutingContext,
+};
+use ruststack_s3_model::{
+    S3Operation,
+    error::{S3Error, S3ErrorCode},
+    input::PutObjectInput,
+    request::StreamingBlob,
+};
 
 /// Wrapper that implements [`S3Handler`] by delegating to [`RustStackS3`] handler methods.
 #[derive(Debug, Clone)]
@@ -623,13 +621,10 @@ async fn dispatch_post_object(
             let etag = output.e_tag.unwrap_or_default();
             let location = format!("/{bucket_name}/{key}");
             let xml = format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-                 <PostResponse>\n\
-                   <Location>{location}</Location>\n\
-                   <Bucket>{bucket_name}</Bucket>\n\
-                   <Key>{key}</Key>\n\
-                   <ETag>{etag}</ETag>\n\
-                 </PostResponse>"
+                "<?xml version=\"1.0\" \
+                 encoding=\"UTF-8\"?>\n<PostResponse>\n<Location>{location}</Location>\\
+                 n<Bucket>{bucket_name}</Bucket>\n<Key>{key}</Key>\n<ETag>{etag}</ETag>\n</\
+                 PostResponse>"
             );
             http::Response::builder()
                 .status(success_status)

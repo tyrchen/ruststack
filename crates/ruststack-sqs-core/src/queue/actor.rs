@@ -4,26 +4,34 @@
 //! communicates via a `tokio::sync::mpsc` channel. The actor supports both
 //! standard and FIFO queue types.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
-use tokio::sync::{Notify, mpsc, oneshot};
-use tokio::time::Instant;
+use ruststack_sqs_model::{
+    error::SqsError,
+    input::{ReceiveMessageInput, SendMessageInput},
+    output::{ReceiveMessageOutput, SendMessageOutput},
+    types::Message,
+};
+use tokio::{
+    sync::{Notify, mpsc, oneshot},
+    time::Instant,
+};
 
-use ruststack_sqs_model::error::SqsError;
-use ruststack_sqs_model::input::{ReceiveMessageInput, SendMessageInput};
-use ruststack_sqs_model::output::{ReceiveMessageOutput, SendMessageOutput};
-use ruststack_sqs_model::types::Message;
-
+use super::{
+    attributes::QueueAttributes,
+    storage::{EnqueueResult, FifoQueueStorage, StandardQueueStorage},
+};
 use crate::message::{
     InFlightMessage, QueueMessage, generate_receipt_handle, md5_of_body, md5_of_message_attributes,
     now_epoch_millis,
 };
-
-use super::attributes::QueueAttributes;
-use super::storage::{EnqueueResult, FifoQueueStorage, StandardQueueStorage};
 
 /// Commands sent to a queue actor via its channel.
 pub enum QueueCommand {
@@ -349,7 +357,8 @@ impl QueueActor {
         let body_bytes = input.message_body.len();
         if body_bytes > self.attributes.maximum_message_size as usize {
             return Err(SqsError::invalid_parameter_value(format!(
-                "One or more parameters are invalid. Reason: Message must be shorter than {} bytes.",
+                "One or more parameters are invalid. Reason: Message must be shorter than {} \
+                 bytes.",
                 self.attributes.maximum_message_size
             )));
         }
@@ -377,14 +386,14 @@ impl QueueActor {
         // Reject FIFO-only fields on standard queues.
         if input.message_group_id.is_some() {
             return Err(SqsError::invalid_parameter_value(
-                "Value for parameter MessageGroupId is invalid. \
-                 Reason: The request includes a parameter that is not valid for this queue type.",
+                "Value for parameter MessageGroupId is invalid. Reason: The request includes a \
+                 parameter that is not valid for this queue type.",
             ));
         }
         if input.message_deduplication_id.is_some() {
             return Err(SqsError::invalid_parameter_value(
-                "Value for parameter MessageDeduplicationId is invalid. \
-                 Reason: The request includes a parameter that is not valid for this queue type.",
+                "Value for parameter MessageDeduplicationId is invalid. Reason: The request \
+                 includes a parameter that is not valid for this queue type.",
             ));
         }
 
@@ -448,8 +457,8 @@ impl QueueActor {
         // FIFO queues do not support per-message delay.
         if input.delay_seconds.is_some_and(|d| d > 0) {
             return Err(SqsError::invalid_parameter_value(
-                "Value 0 for parameter DelaySeconds is invalid. Reason: \
-                 The request includes a parameter that is not valid for this queue type.",
+                "Value 0 for parameter DelaySeconds is invalid. Reason: The request includes a \
+                 parameter that is not valid for this queue type.",
             ));
         }
 
@@ -468,8 +477,8 @@ impl QueueActor {
             hex::encode(hash)
         } else {
             return Err(SqsError::invalid_parameter_value(
-                "The queue should either have ContentBasedDeduplication enabled \
-                 or MessageDeduplicationId provided explicitly.",
+                "The queue should either have ContentBasedDeduplication enabled or \
+                 MessageDeduplicationId provided explicitly.",
             ));
         };
 

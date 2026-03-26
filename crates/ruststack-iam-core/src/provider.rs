@@ -11,30 +11,36 @@
 //! - **Phase 3**: Tagging, service-linked roles, simulation stubs, authorization details
 #![allow(clippy::too_many_lines)]
 
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use dashmap::mapref::entry::Entry;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
+use ruststack_iam_http::{
+    request::{
+        get_optional_bool, get_optional_i32, get_optional_param, get_required_param,
+        parse_string_list, parse_tag_list,
+    },
+    response::XmlWriter,
+};
+use ruststack_iam_model::error::IamError;
 use tracing::debug;
 
-use ruststack_iam_http::request::{
-    get_optional_bool, get_optional_i32, get_optional_param, get_required_param, parse_string_list,
-    parse_tag_list,
-};
-use ruststack_iam_http::response::XmlWriter;
-use ruststack_iam_model::error::IamError;
-
-use crate::arn::iam_arn;
-use crate::config::IamConfig;
-use crate::id_gen::{generate_access_key_id, generate_iam_id, generate_secret_access_key};
-use crate::store::IamStore;
-use crate::types::{
-    AccessKeyRecord, GroupRecord, InstanceProfileRecord, ManagedPolicyRecord, PolicyVersionRecord,
-    RoleRecord, UserRecord,
-};
-use crate::validation::{
-    validate_entity_name, validate_max_session_duration, validate_path, validate_policy_document,
+use crate::{
+    arn::iam_arn,
+    config::IamConfig,
+    id_gen::{generate_access_key_id, generate_iam_id, generate_secret_access_key},
+    store::IamStore,
+    types::{
+        AccessKeyRecord, GroupRecord, InstanceProfileRecord, ManagedPolicyRecord,
+        PolicyVersionRecord, RoleRecord, UserRecord,
+    },
+    validation::{
+        validate_entity_name, validate_max_session_duration, validate_path,
+        validate_policy_document,
+    },
 };
 
 /// Characters that must be percent-encoded in policy document output.

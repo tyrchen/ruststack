@@ -3,10 +3,9 @@
 //! DynamoDB errors use JSON format with a `__type` field containing the
 //! fully-qualified error type name.
 
-use std::collections::HashMap;
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
-use crate::attribute_value::AttributeValue;
+use crate::{attribute_value::AttributeValue, types::CancellationReason};
 
 /// Well-known DynamoDB error codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -150,6 +149,8 @@ pub struct DynamoDBError {
     /// The existing item to return in the error response (used by
     /// `ReturnValuesOnConditionCheckFailure=ALL_OLD`).
     pub item: Option<HashMap<String, AttributeValue>>,
+    /// Cancellation reasons for `TransactionCanceledException`.
+    pub cancellation_reasons: Vec<CancellationReason>,
 }
 
 impl fmt::Display for DynamoDBError {
@@ -176,6 +177,7 @@ impl DynamoDBError {
             code,
             source: None,
             item: None,
+            cancellation_reasons: Vec::new(),
         }
     }
 
@@ -188,6 +190,7 @@ impl DynamoDBError {
             code,
             source: None,
             item: None,
+            cancellation_reasons: Vec::new(),
         }
     }
 
@@ -203,6 +206,13 @@ impl DynamoDBError {
     #[must_use]
     pub fn with_item(mut self, item: HashMap<String, AttributeValue>) -> Self {
         self.item = Some(item);
+        self
+    }
+
+    /// Attach cancellation reasons to a `TransactionCanceledException`.
+    #[must_use]
+    pub fn with_cancellation_reasons(mut self, reasons: Vec<CancellationReason>) -> Self {
+        self.cancellation_reasons = reasons;
         self
     }
 
@@ -257,6 +267,17 @@ impl DynamoDBError {
             DynamoDBErrorCode::MissingAction,
             "Missing required header: X-Amz-Target",
         )
+    }
+
+    /// Transaction cancelled with cancellation reasons.
+    #[must_use]
+    pub fn transaction_cancelled(reasons: Vec<CancellationReason>) -> Self {
+        Self::with_message(
+            DynamoDBErrorCode::TransactionCanceledException,
+            "Transaction cancelled, please refer cancellation reasons for specific reasons [See \
+             the CancellationReasons field]",
+        )
+        .with_cancellation_reasons(reasons)
     }
 
     /// Unknown operation.

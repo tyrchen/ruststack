@@ -3,9 +3,7 @@
 //! This module defines the core data structures for S3 objects, delete markers,
 //! object metadata, ownership, ACL configuration, and versioning.
 
-use std::collections::HashMap;
-use std::fmt;
-use std::str::FromStr;
+use std::{collections::HashMap, fmt, str::FromStr};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

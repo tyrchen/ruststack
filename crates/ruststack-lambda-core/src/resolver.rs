@@ -6,8 +6,10 @@
 //! - Full ARN: `arn:aws:lambda:us-east-1:123456789012:function:my-function`
 //! - Qualified ARN: `arn:aws:lambda:us-east-1:123456789012:function:my-function:qualifier`
 
-use crate::error::LambdaServiceError;
-use crate::storage::{FunctionRecord, VersionRecord};
+use crate::{
+    error::LambdaServiceError,
+    storage::{FunctionRecord, VersionRecord},
+};
 
 /// Parse a function reference into `(function_name, optional_qualifier)`.
 ///

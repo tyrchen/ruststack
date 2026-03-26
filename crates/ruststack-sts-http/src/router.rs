@@ -4,8 +4,7 @@
 //! `Content-Type: application/x-www-form-urlencoded`. The operation is
 //! specified by the `Action=<OperationName>` form parameter.
 
-use ruststack_sts_model::error::StsError;
-use ruststack_sts_model::operations::StsOperation;
+use ruststack_sts_model::{error::StsError, operations::StsOperation};
 
 /// Resolve an STS operation from parsed form parameters.
 ///

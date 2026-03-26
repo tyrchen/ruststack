@@ -7,23 +7,28 @@ use ruststack_sts_http::request::{
     get_optional_param, get_required_param, parse_policy_arns, parse_session_tags,
     parse_transitive_tag_keys,
 };
-use ruststack_sts_model::error::StsError;
-use ruststack_sts_model::output::{
-    AssumeRoleResponse, AssumeRoleWithSAMLResponse, AssumeRoleWithWebIdentityResponse,
-    DecodeAuthorizationMessageResponse, GetAccessKeyInfoResponse, GetCallerIdentityResponse,
-    GetFederationTokenResponse, GetSessionTokenResponse,
+use ruststack_sts_model::{
+    error::StsError,
+    output::{
+        AssumeRoleResponse, AssumeRoleWithSAMLResponse, AssumeRoleWithWebIdentityResponse,
+        DecodeAuthorizationMessageResponse, GetAccessKeyInfoResponse, GetCallerIdentityResponse,
+        GetFederationTokenResponse, GetSessionTokenResponse,
+    },
+    types::{AssumedRoleUser, Credentials, FederatedUser},
 };
-use ruststack_sts_model::types::{AssumedRoleUser, Credentials, FederatedUser};
 
-use crate::config::StsConfig;
-use crate::identity::CallerIdentity;
-use crate::keygen::{
-    CredentialGenerator, account_id_from_access_key, generate_federated_user_id, generate_role_id,
-};
-use crate::session::SessionRecord;
-use crate::state::{CredentialRecord, StsState};
-use crate::validation::{
-    parse_role_arn, validate_federated_name, validate_role_arn, validate_session_name,
+use crate::{
+    config::StsConfig,
+    identity::CallerIdentity,
+    keygen::{
+        CredentialGenerator, account_id_from_access_key, generate_federated_user_id,
+        generate_role_id,
+    },
+    session::SessionRecord,
+    state::{CredentialRecord, StsState},
+    validation::{
+        parse_role_arn, validate_federated_name, validate_role_arn, validate_session_name,
+    },
 };
 
 /// Main STS provider implementing all operations.

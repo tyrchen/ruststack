@@ -5,54 +5,60 @@
 //! object lock, accelerate, request payment, website, ACL, and
 //! policy status operations.
 
-use ruststack_s3_model::error::S3Error;
-use ruststack_s3_model::input::{
-    DeleteBucketCorsInput, DeleteBucketEncryptionInput, DeleteBucketLifecycleInput,
-    DeleteBucketOwnershipControlsInput, DeleteBucketPolicyInput, DeleteBucketTaggingInput,
-    DeleteBucketWebsiteInput, DeletePublicAccessBlockInput, GetBucketAccelerateConfigurationInput,
-    GetBucketAclInput, GetBucketCorsInput, GetBucketEncryptionInput,
-    GetBucketLifecycleConfigurationInput, GetBucketLoggingInput,
-    GetBucketNotificationConfigurationInput, GetBucketOwnershipControlsInput, GetBucketPolicyInput,
-    GetBucketPolicyStatusInput, GetBucketRequestPaymentInput, GetBucketTaggingInput,
-    GetBucketVersioningInput, GetBucketWebsiteInput, GetObjectLockConfigurationInput,
-    GetPublicAccessBlockInput, PutBucketAccelerateConfigurationInput, PutBucketAclInput,
-    PutBucketCorsInput, PutBucketEncryptionInput, PutBucketLifecycleConfigurationInput,
-    PutBucketLoggingInput, PutBucketNotificationConfigurationInput,
-    PutBucketOwnershipControlsInput, PutBucketPolicyInput, PutBucketRequestPaymentInput,
-    PutBucketTaggingInput, PutBucketVersioningInput, PutBucketWebsiteInput,
-    PutObjectLockConfigurationInput, PutPublicAccessBlockInput,
-};
-use ruststack_s3_model::output::{
-    GetBucketAccelerateConfigurationOutput, GetBucketAclOutput, GetBucketCorsOutput,
-    GetBucketEncryptionOutput, GetBucketLifecycleConfigurationOutput, GetBucketLoggingOutput,
-    GetBucketNotificationConfigurationOutput, GetBucketOwnershipControlsOutput,
-    GetBucketPolicyOutput, GetBucketPolicyStatusOutput, GetBucketRequestPaymentOutput,
-    GetBucketTaggingOutput, GetBucketVersioningOutput, GetBucketWebsiteOutput,
-    GetObjectLockConfigurationOutput, GetPublicAccessBlockOutput,
-    PutBucketLifecycleConfigurationOutput, PutObjectLockConfigurationOutput,
-};
-use ruststack_s3_model::types::{
-    BucketAccelerateStatus, BucketVersioningStatus, CORSRule,
-    DefaultRetention as ModelDefaultRetention, ErrorDocument, Grant, Grantee, IndexDocument,
-    ObjectLockConfiguration as ModelObjectLockConfiguration, ObjectLockEnabled,
-    ObjectLockRetentionMode, ObjectLockRule as ModelObjectLockRule, ObjectOwnership,
-    OwnershipControls, OwnershipControlsRule, Payer, Permission, PolicyStatus, Protocol,
-    PublicAccessBlockConfiguration, RedirectAllRequestsTo, ServerSideEncryption,
-    ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule,
-    Tag,
+use ruststack_s3_model::{
+    error::S3Error,
+    input::{
+        DeleteBucketCorsInput, DeleteBucketEncryptionInput, DeleteBucketLifecycleInput,
+        DeleteBucketOwnershipControlsInput, DeleteBucketPolicyInput, DeleteBucketTaggingInput,
+        DeleteBucketWebsiteInput, DeletePublicAccessBlockInput,
+        GetBucketAccelerateConfigurationInput, GetBucketAclInput, GetBucketCorsInput,
+        GetBucketEncryptionInput, GetBucketLifecycleConfigurationInput, GetBucketLoggingInput,
+        GetBucketNotificationConfigurationInput, GetBucketOwnershipControlsInput,
+        GetBucketPolicyInput, GetBucketPolicyStatusInput, GetBucketRequestPaymentInput,
+        GetBucketTaggingInput, GetBucketVersioningInput, GetBucketWebsiteInput,
+        GetObjectLockConfigurationInput, GetPublicAccessBlockInput,
+        PutBucketAccelerateConfigurationInput, PutBucketAclInput, PutBucketCorsInput,
+        PutBucketEncryptionInput, PutBucketLifecycleConfigurationInput, PutBucketLoggingInput,
+        PutBucketNotificationConfigurationInput, PutBucketOwnershipControlsInput,
+        PutBucketPolicyInput, PutBucketRequestPaymentInput, PutBucketTaggingInput,
+        PutBucketVersioningInput, PutBucketWebsiteInput, PutObjectLockConfigurationInput,
+        PutPublicAccessBlockInput,
+    },
+    output::{
+        GetBucketAccelerateConfigurationOutput, GetBucketAclOutput, GetBucketCorsOutput,
+        GetBucketEncryptionOutput, GetBucketLifecycleConfigurationOutput, GetBucketLoggingOutput,
+        GetBucketNotificationConfigurationOutput, GetBucketOwnershipControlsOutput,
+        GetBucketPolicyOutput, GetBucketPolicyStatusOutput, GetBucketRequestPaymentOutput,
+        GetBucketTaggingOutput, GetBucketVersioningOutput, GetBucketWebsiteOutput,
+        GetObjectLockConfigurationOutput, GetPublicAccessBlockOutput,
+        PutBucketLifecycleConfigurationOutput, PutObjectLockConfigurationOutput,
+    },
+    types::{
+        BucketAccelerateStatus, BucketVersioningStatus, CORSRule,
+        DefaultRetention as ModelDefaultRetention, ErrorDocument, Grant, Grantee, IndexDocument,
+        ObjectLockConfiguration as ModelObjectLockConfiguration, ObjectLockEnabled,
+        ObjectLockRetentionMode, ObjectLockRule as ModelObjectLockRule, ObjectOwnership,
+        OwnershipControls, OwnershipControlsRule, Payer, Permission, PolicyStatus, Protocol,
+        PublicAccessBlockConfiguration, RedirectAllRequestsTo, ServerSideEncryption,
+        ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule,
+        Tag,
+    },
 };
 use tracing::debug;
 
-use crate::cors::CorsRule;
-use crate::error::S3ServiceError;
-use crate::provider::RustStackS3;
-use crate::state::bucket::{
-    BucketEncryption, CorsRuleConfig, ObjectLockConfiguration, ObjectLockRule,
-    OwnershipControlsConfig, PublicAccessBlockConfig, VersioningStatus, WebsiteConfig,
-};
-use crate::state::object::{CannedAcl, Owner as InternalOwner};
-
 use super::bucket::to_model_owner;
+use crate::{
+    cors::CorsRule,
+    error::S3ServiceError,
+    provider::RustStackS3,
+    state::{
+        bucket::{
+            BucketEncryption, CorsRuleConfig, ObjectLockConfiguration, ObjectLockRule,
+            OwnershipControlsConfig, PublicAccessBlockConfig, VersioningStatus, WebsiteConfig,
+        },
+        object::{CannedAcl, Owner as InternalOwner},
+    },
+};
 
 // These handler methods must remain async for consistency.
 #[allow(clippy::unused_async)]

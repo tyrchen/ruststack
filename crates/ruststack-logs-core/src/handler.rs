@@ -1,16 +1,10 @@
 //! CloudWatch Logs handler implementation bridging HTTP to business logic.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_logs_http::body::LogsResponseBody;
-use ruststack_logs_http::dispatch::LogsHandler;
-use ruststack_logs_http::response::json_response;
-use ruststack_logs_model::error::LogsError;
-use ruststack_logs_model::operations::LogsOperation;
+use ruststack_logs_http::{body::LogsResponseBody, dispatch::LogsHandler, response::json_response};
+use ruststack_logs_model::{error::LogsError, operations::LogsOperation};
 
 use crate::provider::RustStackLogs;
 

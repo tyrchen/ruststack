@@ -10,9 +10,10 @@
 //! ```
 
 use http::Method;
-
-use ruststack_lambda_model::error::LambdaError;
-use ruststack_lambda_model::operations::{LAMBDA_ROUTES, LambdaOperation};
+use ruststack_lambda_model::{
+    error::LambdaError,
+    operations::{LAMBDA_ROUTES, LambdaOperation},
+};
 
 /// Extracted path parameters from a matched route.
 ///
@@ -253,7 +254,8 @@ mod tests {
     #[test]
     fn test_should_percent_decode_path_param() {
         let params = match_path(
-            "/2015-03-31/functions/arn%3Aaws%3Alambda%3Aus-east-1%3A123456789012%3Afunction%3Amy-func",
+            "/2015-03-31/functions/arn%3Aaws%3Alambda%3Aus-east-1%3A123456789012%3Afunction%\
+             3Amy-func",
             "/2015-03-31/functions/{FunctionName}",
         )
         .expect("should match");

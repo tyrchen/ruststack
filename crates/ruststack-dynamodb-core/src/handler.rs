@@ -1,16 +1,12 @@
 //! DynamoDB handler implementation bridging HTTP to business logic.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_dynamodb_http::body::DynamoDBResponseBody;
-use ruststack_dynamodb_http::dispatch::DynamoDBHandler;
-use ruststack_dynamodb_http::response::json_response;
-use ruststack_dynamodb_model::error::DynamoDBError;
-use ruststack_dynamodb_model::operations::DynamoDBOperation;
+use ruststack_dynamodb_http::{
+    body::DynamoDBResponseBody, dispatch::DynamoDBHandler, response::json_response,
+};
+use ruststack_dynamodb_model::{error::DynamoDBError, operations::DynamoDBOperation};
 
 use crate::provider::RustStackDynamoDB;
 
@@ -44,6 +40,7 @@ impl DynamoDBHandler for RustStackDynamoDBHandler {
 }
 
 /// Dispatch a DynamoDB operation to the appropriate handler method.
+#[allow(clippy::too_many_lines)]
 fn dispatch(
     provider: &RustStackDynamoDB,
     op: DynamoDBOperation,
@@ -116,6 +113,41 @@ fn dispatch(
         DynamoDBOperation::BatchWriteItem => {
             let input = deserialize(body)?;
             let output = provider.handle_batch_write_item(input)?;
+            serialize(&output, &request_id)
+        }
+        DynamoDBOperation::TagResource => {
+            let input = deserialize(body)?;
+            let output = provider.handle_tag_resource(input)?;
+            serialize(&output, &request_id)
+        }
+        DynamoDBOperation::UntagResource => {
+            let input = deserialize(body)?;
+            let output = provider.handle_untag_resource(input)?;
+            serialize(&output, &request_id)
+        }
+        DynamoDBOperation::ListTagsOfResource => {
+            let input = deserialize(body)?;
+            let output = provider.handle_list_tags_of_resource(input)?;
+            serialize(&output, &request_id)
+        }
+        DynamoDBOperation::DescribeTimeToLive => {
+            let input = deserialize(body)?;
+            let output = provider.handle_describe_time_to_live(input)?;
+            serialize(&output, &request_id)
+        }
+        DynamoDBOperation::UpdateTimeToLive => {
+            let input = deserialize(body)?;
+            let output = provider.handle_update_time_to_live(input)?;
+            serialize(&output, &request_id)
+        }
+        DynamoDBOperation::TransactGetItems => {
+            let input = deserialize(body)?;
+            let output = provider.handle_transact_get_items(input)?;
+            serialize(&output, &request_id)
+        }
+        DynamoDBOperation::TransactWriteItems => {
+            let input = deserialize(body)?;
+            let output = provider.handle_transact_write_items(input)?;
             serialize(&output, &request_id)
         }
     }

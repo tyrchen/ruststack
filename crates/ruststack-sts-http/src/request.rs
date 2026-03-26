@@ -214,7 +214,9 @@ mod tests {
 
     #[test]
     fn test_should_extract_access_key_from_auth() {
-        let auth = "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260319/us-east-1/sts/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=abc123";
+        let auth = "AWS4-HMAC-SHA256 \
+                    Credential=AKIAIOSFODNN7EXAMPLE/20260319/us-east-1/sts/aws4_request, \
+                    SignedHeaders=content-type;host;x-amz-date, Signature=abc123";
         assert_eq!(
             extract_access_key_from_auth(auth),
             Some("AKIAIOSFODNN7EXAMPLE".to_owned())

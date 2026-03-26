@@ -1,7 +1,6 @@
 //! Lambda error types.
 
-use std::error::Error;
-use std::fmt;
+use std::{error::Error, fmt};
 
 /// Lambda error codes matching AWS Lambda API error types.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -8,9 +8,12 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::attribute_value::AttributeValue;
-use crate::types::{
-    ConsumedCapacity, ItemCollectionMetrics, KeysAndAttributes, TableDescription, WriteRequest,
+use crate::{
+    attribute_value::AttributeValue,
+    types::{
+        ConsumedCapacity, ItemCollectionMetrics, ItemResponse, KeysAndAttributes, TableDescription,
+        Tag, TimeToLiveDescription, TimeToLiveSpecification, WriteRequest,
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -235,4 +238,80 @@ pub struct BatchWriteItemOutput {
     /// The capacity units consumed by the operation for each table.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub consumed_capacity: Vec<ConsumedCapacity>,
+}
+
+// ---------------------------------------------------------------------------
+// Tagging
+// ---------------------------------------------------------------------------
+
+/// Output for the `TagResource` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TagResourceOutput {}
+
+/// Output for the `UntagResource` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UntagResourceOutput {}
+
+/// Output for the `ListTagsOfResource` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ListTagsOfResourceOutput {
+    /// The tags associated with the resource.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<Tag>>,
+    /// A pagination token for subsequent requests.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_token: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Time to Live
+// ---------------------------------------------------------------------------
+
+/// Output for the `UpdateTimeToLive` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UpdateTimeToLiveOutput {
+    /// The TTL specification that was applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_to_live_specification: Option<TimeToLiveSpecification>,
+}
+
+/// Output for the `DescribeTimeToLive` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DescribeTimeToLiveOutput {
+    /// The current TTL description for the table.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_to_live_description: Option<TimeToLiveDescription>,
+}
+
+// ---------------------------------------------------------------------------
+// Transactions
+// ---------------------------------------------------------------------------
+
+/// Output for the `TransactWriteItems` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TransactWriteItemsOutput {
+    /// The capacity units consumed by the operation for each table.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub consumed_capacity: Vec<ConsumedCapacity>,
+    /// Item collection metrics for the affected tables.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub item_collection_metrics: HashMap<String, Vec<ItemCollectionMetrics>>,
+}
+
+/// Output for the `TransactGetItems` operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TransactGetItemsOutput {
+    /// The capacity units consumed by the operation for each table.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub consumed_capacity: Vec<ConsumedCapacity>,
+    /// The items retrieved, in the same order as the input.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub responses: Option<Vec<ItemResponse>>,
 }

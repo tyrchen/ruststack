@@ -6,7 +6,6 @@ use std::collections::{HashMap, VecDeque};
 
 use dashmap::DashMap;
 use parking_lot::RwLock;
-
 use ruststack_dynamodb_core::stream::ChangeEvent;
 use ruststack_dynamodb_model::AttributeValue;
 use ruststack_dynamodbstreams_model::types::{
@@ -363,8 +362,9 @@ fn convert_stream_view_type(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ruststack_dynamodb_core::stream::ChangeEventName;
+
+    use super::*;
 
     #[test]
     fn test_should_create_and_list_streams() {

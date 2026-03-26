@@ -12,26 +12,23 @@
 //! 7. Common response headers (`x-amz-request-id`, `Server`, `Date`)
 //! 8. Error response formatting
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
-use hyper::body::Incoming;
-use hyper::service::Service;
+use hyper::{body::Incoming, service::Service};
+use ruststack_auth::CredentialProvider;
+use ruststack_s3_model::error::{S3Error, S3ErrorCode};
 use sha2::{Digest, Sha256};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use ruststack_auth::CredentialProvider;
-use ruststack_s3_model::error::{S3Error, S3ErrorCode};
-
-use crate::body::S3ResponseBody;
-use crate::dispatch::{S3Handler, dispatch_operation};
-use crate::response::error_to_response;
-use crate::router::S3Router;
+use crate::{
+    body::S3ResponseBody,
+    dispatch::{S3Handler, dispatch_operation},
+    response::error_to_response,
+    router::S3Router,
+};
 
 /// Configuration for the S3 HTTP service.
 #[derive(Clone)]

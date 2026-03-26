@@ -1,20 +1,18 @@
 //! CloudWatch Logs HTTP service implementing the hyper `Service` trait.
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
-
 use ruststack_logs_model::error::LogsError;
 
-use crate::body::LogsResponseBody;
-use crate::dispatch::{LogsHandler, dispatch_operation};
-use crate::response::{CONTENT_TYPE, error_to_response};
-use crate::router::resolve_operation;
+use crate::{
+    body::LogsResponseBody,
+    dispatch::{LogsHandler, dispatch_operation},
+    response::{CONTENT_TYPE, error_to_response},
+    router::resolve_operation,
+};
 
 /// Configuration for the CloudWatch Logs HTTP service.
 #[derive(Clone)]

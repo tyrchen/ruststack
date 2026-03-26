@@ -10,26 +10,25 @@
 //! DashMap<PartitionKey, BTreeMap<SortableAttributeValue, StoredItem>>
 //! ```
 //!
-//! - Partition-level concurrency: different partitions can be read/written
-//!   concurrently without contention.
-//! - Sort key ordering: within each partition, items are stored in a `BTreeMap`
-//!   keyed by [`SortableAttributeValue`], which implements [`Ord`] following
-//!   DynamoDB comparison rules.
-//! - For tables without a sort key, a sentinel value is used as the single
-//!   BTreeMap key per partition.
+//! - Partition-level concurrency: different partitions can be read/written concurrently without
+//!   contention.
+//! - Sort key ordering: within each partition, items are stored in a `BTreeMap` keyed by
+//!   [`SortableAttributeValue`], which implements [`Ord`] following DynamoDB comparison rules.
+//! - For tables without a sort key, a sentinel value is used as the single BTreeMap key per
+//!   partition.
 
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::ops::Bound;
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, HashMap},
+    hash::{DefaultHasher, Hash, Hasher},
+    ops::Bound,
+    sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
+};
 
 use dashmap::DashMap;
+use ruststack_dynamodb_model::{AttributeValue, types::ScalarAttributeType};
 use thiserror::Error;
 use tracing::debug;
-
-use ruststack_dynamodb_model::AttributeValue;
-use ruststack_dynamodb_model::types::ScalarAttributeType;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -97,12 +96,11 @@ pub struct PrimaryKey {
 ///
 /// Ordering rules follow DynamoDB semantics:
 /// - **Strings (S)**: UTF-8 byte ordering.
-/// - **Numbers (N)**: Numeric ordering (parsed as `f64`). Full 38-digit
-///   precision would require `bigdecimal`, but `f64` is sufficient for
-///   local development use cases.
+/// - **Numbers (N)**: Numeric ordering (parsed as `f64`). Full 38-digit precision would require
+///   `bigdecimal`, but `f64` is sufficient for local development use cases.
 /// - **Binary (B)**: Byte-by-byte unsigned ordering.
-/// - **Sentinel**: A special value used when the table has no sort key.
-///   It always compares equal to itself.
+/// - **Sentinel**: A special value used when the table has no sort key. It always compares equal to
+///   itself.
 #[derive(Debug, Clone)]
 pub enum SortableAttributeValue {
     /// String sort key.

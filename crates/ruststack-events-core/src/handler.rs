@@ -1,16 +1,12 @@
 //! EventBridge handler implementation bridging HTTP to business logic.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_events_http::body::EventsResponseBody;
-use ruststack_events_http::dispatch::EventsHandler;
-use ruststack_events_http::response::json_response;
-use ruststack_events_model::error::EventsError;
-use ruststack_events_model::operations::EventsOperation;
+use ruststack_events_http::{
+    body::EventsResponseBody, dispatch::EventsHandler, response::json_response,
+};
+use ruststack_events_model::{error::EventsError, operations::EventsOperation};
 
 use crate::provider::RustStackEvents;
 

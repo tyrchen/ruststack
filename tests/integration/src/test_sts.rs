@@ -260,7 +260,8 @@ mod tests {
         // A minimal base64-encoded SAML assertion (not cryptographically valid).
         let saml_assertion = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            "<SAMLResponse><Assertion><Subject><NameID>user@example.com</NameID></Subject></Assertion></SAMLResponse>",
+            "<SAMLResponse><Assertion><Subject><NameID>user@example.com</NameID></Subject></\
+             Assertion></SAMLResponse>",
         );
 
         let result = client

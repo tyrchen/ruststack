@@ -3,10 +3,11 @@
 //! Templates contain `{{variable}}` placeholders that are substituted
 //! with values from a JSON data object during rendering.
 
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
-use ruststack_ses_model::error::{SesError, SesErrorCode};
-use ruststack_ses_model::types::{Template, TemplateMetadata};
+use dashmap::{DashMap, mapref::entry::Entry};
+use ruststack_ses_model::{
+    error::{SesError, SesErrorCode},
+    types::{Template, TemplateMetadata},
+};
 
 /// Store for email templates.
 ///

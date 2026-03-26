@@ -4,8 +4,7 @@
 //! `Content-Type: application/x-www-form-urlencoded`. The operation is
 //! specified by the `Action=<OperationName>` form parameter.
 
-use ruststack_cloudwatch_model::error::CloudWatchError;
-use ruststack_cloudwatch_model::operations::CloudWatchOperation;
+use ruststack_cloudwatch_model::{error::CloudWatchError, operations::CloudWatchOperation};
 
 /// Resolve a CloudWatch operation from parsed form parameters.
 ///

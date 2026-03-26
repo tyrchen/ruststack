@@ -3,16 +3,12 @@
 //! Uses `async_trait` because `LambdaHandler` requires object safety for
 //! dynamic dispatch (`Arc<dyn LambdaHandler>`).
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
+use ruststack_lambda_model::{error::LambdaError, operations::LambdaOperation};
 
-use ruststack_lambda_model::error::LambdaError;
-use ruststack_lambda_model::operations::LambdaOperation;
-
-use crate::body::LambdaResponseBody;
-use crate::router::PathParams;
+use crate::{body::LambdaResponseBody, router::PathParams};
 
 /// The boundary between HTTP and business logic for Lambda.
 ///

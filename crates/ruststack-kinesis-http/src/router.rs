@@ -7,8 +7,7 @@
 //! X-Amz-Target: Kinesis_20131202.PutRecord
 //! ```
 
-use ruststack_kinesis_model::error::KinesisError;
-use ruststack_kinesis_model::operations::KinesisOperation;
+use ruststack_kinesis_model::{error::KinesisError, operations::KinesisOperation};
 
 /// The expected prefix for the `X-Amz-Target` header value.
 const TARGET_PREFIX: &str = "Kinesis_20131202.";
