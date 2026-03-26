@@ -95,14 +95,20 @@ impl std::fmt::Debug for StoredData {
 impl Drop for StoredData {
     fn drop(&mut self) {
         if let Self::OnDisk { path, .. } = self {
-            if let Err(e) = std::fs::remove_file(path.as_path()) {
-                // File may have already been cleaned up; only warn if the
-                // error is something other than "not found".
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    warn!(path = %path.display(), error = %e, "failed to remove temp file");
-                }
-            } else {
-                trace!(path = %path.display(), "removed temp file");
+            let path = path.clone();
+            // Spawn async file removal on the tokio runtime. If no runtime is
+            // active (e.g. during test teardown), the file will be cleaned up
+            // by the OS temp-dir reaper.
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    if let Err(e) = tokio::fs::remove_file(&path).await {
+                        if e.kind() != std::io::ErrorKind::NotFound {
+                            warn!(path = %path.display(), error = %e, "failed to remove temp file");
+                        }
+                    } else {
+                        trace!(path = %path.display(), "removed temp file");
+                    }
+                });
             }
         }
     }
