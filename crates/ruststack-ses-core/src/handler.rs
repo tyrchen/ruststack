@@ -7,42 +7,44 @@
 //! configuration sets, event destinations, receipt rules, identity
 //! notification/DKIM/mail-from configuration, and sending authorization.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use base64::Engine;
 use bytes::Bytes;
-
-use ruststack_ses_http::body::SesResponseBody;
-use ruststack_ses_http::dispatch::SesHandler;
-use ruststack_ses_http::request::{
-    get_optional_bool, get_optional_param, get_required_param, parse_form_params,
-    parse_member_list, parse_tag_list,
+use ruststack_ses_http::{
+    body::SesResponseBody,
+    dispatch::SesHandler,
+    request::{
+        get_optional_bool, get_optional_param, get_required_param, parse_form_params,
+        parse_member_list, parse_tag_list,
+    },
+    response::{XmlWriter, xml_response},
 };
-use ruststack_ses_http::response::{XmlWriter, xml_response};
-use ruststack_ses_model::error::SesError;
-use ruststack_ses_model::input::{
-    CloneReceiptRuleSetInput, CreateConfigurationSetEventDestinationInput,
-    CreateConfigurationSetInput, CreateReceiptRuleInput, CreateReceiptRuleSetInput,
-    CreateTemplateInput, DeleteConfigurationSetEventDestinationInput, DeleteConfigurationSetInput,
-    DeleteIdentityInput, DeleteIdentityPolicyInput, DeleteReceiptRuleInput,
-    DeleteReceiptRuleSetInput, DeleteTemplateInput, DeleteVerifiedEmailAddressInput,
-    DescribeActiveReceiptRuleSetInput, DescribeConfigurationSetInput, DescribeReceiptRuleSetInput,
-    GetIdentityDkimAttributesInput, GetIdentityMailFromDomainAttributesInput,
-    GetIdentityNotificationAttributesInput, GetIdentityPoliciesInput,
-    GetIdentityVerificationAttributesInput, GetTemplateInput, ListConfigurationSetsInput,
-    ListIdentitiesInput, ListIdentityPoliciesInput, ListTemplatesInput, PutIdentityPolicyInput,
-    SendEmailInput, SendRawEmailInput, SendTemplatedEmailInput, SetActiveReceiptRuleSetInput,
-    SetIdentityFeedbackForwardingEnabledInput, SetIdentityMailFromDomainInput,
-    SetIdentityNotificationTopicInput, UpdateConfigurationSetEventDestinationInput,
-    UpdateTemplateInput, VerifyDomainDkimInput, VerifyDomainIdentityInput, VerifyEmailAddressInput,
-    VerifyEmailIdentityInput,
-};
-use ruststack_ses_model::operations::SesOperation;
-use ruststack_ses_model::types::{
-    BehaviorOnMXFailure, Body, ConfigurationSet, Content, Destination, EventDestination,
-    IdentityType, Message, MessageTag, NotificationType, RawMessage, ReceiptRule, Template,
+use ruststack_ses_model::{
+    error::SesError,
+    input::{
+        CloneReceiptRuleSetInput, CreateConfigurationSetEventDestinationInput,
+        CreateConfigurationSetInput, CreateReceiptRuleInput, CreateReceiptRuleSetInput,
+        CreateTemplateInput, DeleteConfigurationSetEventDestinationInput,
+        DeleteConfigurationSetInput, DeleteIdentityInput, DeleteIdentityPolicyInput,
+        DeleteReceiptRuleInput, DeleteReceiptRuleSetInput, DeleteTemplateInput,
+        DeleteVerifiedEmailAddressInput, DescribeActiveReceiptRuleSetInput,
+        DescribeConfigurationSetInput, DescribeReceiptRuleSetInput, GetIdentityDkimAttributesInput,
+        GetIdentityMailFromDomainAttributesInput, GetIdentityNotificationAttributesInput,
+        GetIdentityPoliciesInput, GetIdentityVerificationAttributesInput, GetTemplateInput,
+        ListConfigurationSetsInput, ListIdentitiesInput, ListIdentityPoliciesInput,
+        ListTemplatesInput, PutIdentityPolicyInput, SendEmailInput, SendRawEmailInput,
+        SendTemplatedEmailInput, SetActiveReceiptRuleSetInput,
+        SetIdentityFeedbackForwardingEnabledInput, SetIdentityMailFromDomainInput,
+        SetIdentityNotificationTopicInput, UpdateConfigurationSetEventDestinationInput,
+        UpdateTemplateInput, VerifyDomainDkimInput, VerifyDomainIdentityInput,
+        VerifyEmailAddressInput, VerifyEmailIdentityInput,
+    },
+    operations::SesOperation,
+    types::{
+        BehaviorOnMXFailure, Body, ConfigurationSet, Content, Destination, EventDestination,
+        IdentityType, Message, MessageTag, NotificationType, RawMessage, ReceiptRule, Template,
+    },
 };
 
 use crate::provider::RustStackSes;

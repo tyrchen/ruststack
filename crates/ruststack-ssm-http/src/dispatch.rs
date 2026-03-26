@@ -1,12 +1,9 @@
 //! SSM handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_ssm_model::error::SsmError;
-use ruststack_ssm_model::operations::SsmOperation;
+use ruststack_ssm_model::{error::SsmError, operations::SsmOperation};
 
 use crate::body::SsmResponseBody;
 

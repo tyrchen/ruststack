@@ -13,8 +13,10 @@
 
 use http::Method;
 use percent_encoding::percent_decode_str;
-use ruststack_s3_model::error::{S3Error, S3ErrorCode};
-use ruststack_s3_model::operations::S3Operation;
+use ruststack_s3_model::{
+    error::{S3Error, S3ErrorCode},
+    operations::S3Operation,
+};
 
 /// Configuration for S3 request routing.
 #[derive(Debug, Clone)]

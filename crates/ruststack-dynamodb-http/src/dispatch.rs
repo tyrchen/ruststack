@@ -1,12 +1,9 @@
 //! DynamoDB handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_dynamodb_model::error::DynamoDBError;
-use ruststack_dynamodb_model::operations::DynamoDBOperation;
+use ruststack_dynamodb_model::{error::DynamoDBError, operations::DynamoDBOperation};
 
 use crate::body::DynamoDBResponseBody;
 

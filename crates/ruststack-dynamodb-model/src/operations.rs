@@ -38,6 +38,32 @@ pub enum DynamoDBOperation {
     BatchGetItem,
     /// Batch write (put/delete) items to multiple tables.
     BatchWriteItem,
+
+    // Tagging
+    /// Add tags to a resource.
+    TagResource,
+    /// Remove tags from a resource.
+    UntagResource,
+    /// List tags for a resource.
+    ListTagsOfResource,
+
+    // Time to Live
+    /// Describe the TTL settings for a table.
+    DescribeTimeToLive,
+    /// Update the TTL settings for a table.
+    UpdateTimeToLive,
+
+    // Transactions
+    /// Get items atomically across tables.
+    TransactGetItems,
+    /// Write items atomically across tables.
+    TransactWriteItems,
+
+    // Describe
+    /// Describe account limits for DynamoDB.
+    DescribeLimits,
+    /// Describe regional endpoints for DynamoDB.
+    DescribeEndpoints,
 }
 
 impl DynamoDBOperation {
@@ -58,6 +84,15 @@ impl DynamoDBOperation {
             Self::Scan => "Scan",
             Self::BatchGetItem => "BatchGetItem",
             Self::BatchWriteItem => "BatchWriteItem",
+            Self::TagResource => "TagResource",
+            Self::UntagResource => "UntagResource",
+            Self::ListTagsOfResource => "ListTagsOfResource",
+            Self::DescribeTimeToLive => "DescribeTimeToLive",
+            Self::UpdateTimeToLive => "UpdateTimeToLive",
+            Self::TransactGetItems => "TransactGetItems",
+            Self::TransactWriteItems => "TransactWriteItems",
+            Self::DescribeLimits => "DescribeLimits",
+            Self::DescribeEndpoints => "DescribeEndpoints",
         }
     }
 
@@ -78,6 +113,15 @@ impl DynamoDBOperation {
             "Scan" => Some(Self::Scan),
             "BatchGetItem" => Some(Self::BatchGetItem),
             "BatchWriteItem" => Some(Self::BatchWriteItem),
+            "TagResource" => Some(Self::TagResource),
+            "UntagResource" => Some(Self::UntagResource),
+            "ListTagsOfResource" => Some(Self::ListTagsOfResource),
+            "DescribeTimeToLive" => Some(Self::DescribeTimeToLive),
+            "UpdateTimeToLive" => Some(Self::UpdateTimeToLive),
+            "TransactGetItems" => Some(Self::TransactGetItems),
+            "TransactWriteItems" => Some(Self::TransactWriteItems),
+            "DescribeLimits" => Some(Self::DescribeLimits),
+            "DescribeEndpoints" => Some(Self::DescribeEndpoints),
             _ => None,
         }
     }

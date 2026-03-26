@@ -3,22 +3,20 @@
 //! SES v1 uses the `awsQuery` protocol (form-urlencoded request, XML response).
 //! SES v2 uses `restJson1` (JSON request/response, path-based routing).
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
-
 use ruststack_ses_model::error::SesError;
 
-use crate::body::SesResponseBody;
-use crate::dispatch::{SesHandler, dispatch_operation};
-use crate::request::parse_form_params;
-use crate::response::{XML_CONTENT_TYPE, error_to_response};
-use crate::router::resolve_operation;
+use crate::{
+    body::SesResponseBody,
+    dispatch::{SesHandler, dispatch_operation},
+    request::parse_form_params,
+    response::{XML_CONTENT_TYPE, error_to_response},
+    router::resolve_operation,
+};
 
 /// Configuration for the SES HTTP service.
 #[derive(Clone)]

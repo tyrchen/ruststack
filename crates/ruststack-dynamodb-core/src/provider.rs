@@ -1,38 +1,51 @@
 //! DynamoDB provider implementing all MVP operations.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-
-use ruststack_dynamodb_model::AttributeValue;
-use ruststack_dynamodb_model::error::DynamoDBError;
-use ruststack_dynamodb_model::input::{
-    BatchGetItemInput, BatchWriteItemInput, CreateTableInput, DeleteItemInput, DeleteTableInput,
-    DescribeTableInput, GetItemInput, ListTablesInput, PutItemInput, QueryInput, ScanInput,
-    UpdateItemInput, UpdateTableInput,
-};
-use ruststack_dynamodb_model::output::{
-    BatchGetItemOutput, BatchWriteItemOutput, CreateTableOutput, DeleteItemOutput,
-    DeleteTableOutput, DescribeTableOutput, GetItemOutput, ListTablesOutput, PutItemOutput,
-    QueryOutput, ScanOutput, UpdateItemOutput, UpdateTableOutput,
-};
-use ruststack_dynamodb_model::types::{
-    AttributeAction, AttributeDefinition, AttributeValueUpdate, BillingMode, ComparisonOperator,
-    Condition, ConditionalOperator, ExpectedAttributeValue, KeyType, ReturnValue,
-    ScalarAttributeType, Select, TableStatus,
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
 };
 
-use crate::config::DynamoDBConfig;
-use crate::error::{expression_error_to_dynamodb, storage_error_to_dynamodb};
-use crate::expression::{
-    AttributePath, EvalContext, PathElement, UpdateExpr, collect_names_from_expr,
-    collect_names_from_projection, collect_names_from_update, collect_paths_from_expr,
-    collect_values_from_expr, collect_values_from_update, parse_condition, parse_projection,
-    parse_update,
+use ruststack_dynamodb_model::{
+    AttributeValue,
+    error::DynamoDBError,
+    input::{
+        BatchGetItemInput, BatchWriteItemInput, CreateTableInput, DeleteItemInput,
+        DeleteTableInput, DescribeEndpointsInput, DescribeLimitsInput, DescribeTableInput,
+        DescribeTimeToLiveInput, GetItemInput, ListTablesInput, ListTagsOfResourceInput,
+        PutItemInput, QueryInput, ScanInput, TagResourceInput, TransactGetItemsInput,
+        TransactWriteItemsInput, UntagResourceInput, UpdateItemInput, UpdateTableInput,
+        UpdateTimeToLiveInput,
+    },
+    output::{
+        BatchGetItemOutput, BatchWriteItemOutput, CreateTableOutput, DeleteItemOutput,
+        DeleteTableOutput, DescribeEndpointsOutput, DescribeLimitsOutput, DescribeTableOutput,
+        DescribeTimeToLiveOutput, Endpoint, GetItemOutput, ListTablesOutput,
+        ListTagsOfResourceOutput, PutItemOutput, QueryOutput, ScanOutput, TagResourceOutput,
+        TransactGetItemsOutput, TransactWriteItemsOutput, UntagResourceOutput, UpdateItemOutput,
+        UpdateTableOutput, UpdateTimeToLiveOutput,
+    },
+    types::{
+        AttributeAction, AttributeDefinition, AttributeValueUpdate, BillingMode,
+        CancellationReason, ComparisonOperator, Condition, ConditionalOperator,
+        ExpectedAttributeValue, ItemResponse, KeyType, ReturnValue, ScalarAttributeType, Select,
+        TableStatus, TimeToLiveDescription,
+    },
 };
-use crate::state::{DynamoDBServiceState, DynamoDBTable};
-use crate::storage::{
-    KeyAttribute, KeySchema, PrimaryKey, SortKeyCondition, SortableAttributeValue, TableStorage,
-    calculate_item_size, extract_primary_key, partition_key_segment,
+
+use crate::{
+    config::DynamoDBConfig,
+    error::{expression_error_to_dynamodb, storage_error_to_dynamodb},
+    expression::{
+        AttributePath, EvalContext, PathElement, UpdateExpr, collect_names_from_expr,
+        collect_names_from_projection, collect_names_from_update, collect_paths_from_expr,
+        collect_values_from_expr, collect_values_from_update, parse_condition, parse_projection,
+        parse_update,
+    },
+    state::{DynamoDBServiceState, DynamoDBTable},
+    storage::{
+        KeyAttribute, KeySchema, PrimaryKey, SortKeyCondition, SortableAttributeValue,
+        TableStorage, calculate_item_size, extract_primary_key, partition_key_segment,
+    },
 };
 
 /// Maximum item size in bytes (400 KB).
@@ -98,7 +111,8 @@ fn validate_number_string(s: &str) -> Result<(), DynamoDBError> {
         if ch == '.' {
             if has_dot {
                 return Err(DynamoDBError::validation(
-                    "The parameter cannot be converted to a numeric value: numeric value is not valid",
+                    "The parameter cannot be converted to a numeric value: numeric value is not \
+                     valid",
                 ));
             }
             has_dot = true;
@@ -136,7 +150,8 @@ fn validate_number_string(s: &str) -> Result<(), DynamoDBError> {
     }
 
     // Compute the actual magnitude of the number.
-    // The number is: significant_digits * 10^(explicit_exp - frac_digits + trailing_zeros_in_significant)
+    // The number is: significant_digits * 10^(explicit_exp - frac_digits +
+    // trailing_zeros_in_significant)
     let dot_pos = mantissa.find('.');
     #[allow(clippy::cast_possible_wrap)]
     let frac_digits = if let Some(pos) = dot_pos {
@@ -153,7 +168,8 @@ fn validate_number_string(s: &str) -> Result<(), DynamoDBError> {
 
     if magnitude > 125 {
         return Err(DynamoDBError::validation(
-            "Number overflow. Attempting to store a number with magnitude larger than supported range",
+            "Number overflow. Attempting to store a number with magnitude larger than supported \
+             range",
         ));
     }
     // The smallest allowed magnitude is -130.
@@ -161,7 +177,8 @@ fn validate_number_string(s: &str) -> Result<(), DynamoDBError> {
     // A number like 1e-131 has magnitude = -131, which is NOT allowed.
     if magnitude < -130 {
         return Err(DynamoDBError::validation(
-            "Number underflow. Attempting to store a number with magnitude smaller than supported range",
+            "Number underflow. Attempting to store a number with magnitude smaller than supported \
+             range",
         ));
     }
 
@@ -206,8 +223,8 @@ fn validate_numbers_in_value(val: &AttributeValue) -> Result<(), DynamoDBError> 
 fn validate_table_name(name: &str) -> Result<(), DynamoDBError> {
     if name.len() < 3 || name.len() > 255 {
         return Err(DynamoDBError::validation(format!(
-            "TableName must be at least 3 characters long and at most 255 characters long, \
-             but was {} characters",
+            "TableName must be at least 3 characters long and at most 255 characters long, but \
+             was {} characters",
             name.len()
         )));
     }
@@ -233,17 +250,15 @@ fn validate_key_not_empty(
             match val {
                 AttributeValue::S(s) if s.is_empty() => {
                     return Err(DynamoDBError::validation(format!(
-                        "One or more parameter values are not valid. \
-                         The AttributeValue for a key attribute cannot contain an \
-                         empty string value. Key: {}",
+                        "One or more parameter values are not valid. The AttributeValue for a key \
+                         attribute cannot contain an empty string value. Key: {}",
                         ka.name
                     )));
                 }
                 AttributeValue::B(b) if b.is_empty() => {
                     return Err(DynamoDBError::validation(format!(
-                        "One or more parameter values are not valid. \
-                         The AttributeValue for a key attribute cannot contain an \
-                         empty string value. Key: {}",
+                        "One or more parameter values are not valid. The AttributeValue for a key \
+                         attribute cannot contain an empty string value. Key: {}",
                         ka.name
                     )));
                 }
@@ -262,9 +277,8 @@ fn validate_key_only_has_key_attrs(
     for attr_name in key.keys() {
         if !is_key_attribute(attr_name, key_schema) {
             return Err(DynamoDBError::validation(format!(
-                "One or more parameter values are not valid. \
-                 Number of user supplied keys don't match number of table schema keys. \
-                 Keys provided: [{}], schema keys: [{}]",
+                "One or more parameter values are not valid. Number of user supplied keys don't \
+                 match number of table schema keys. Keys provided: [{}], schema keys: [{}]",
                 format_key_names(key),
                 format_schema_key_names(key_schema),
             )));
@@ -291,8 +305,8 @@ fn validate_key_types(
             };
             if !type_matches {
                 return Err(DynamoDBError::validation(format!(
-                    "The provided key element does not match the schema. \
-                     Expected type {expected} for key column {name}, got type {actual}",
+                    "The provided key element does not match the schema. Expected type {expected} \
+                     for key column {name}, got type {actual}",
                     expected = ka.attr_type,
                     name = ka.name,
                     actual = val.type_descriptor(),
@@ -309,8 +323,8 @@ fn validate_no_duplicate_attributes_to_get(attrs: &[String]) -> Result<(), Dynam
     for attr in attrs {
         if !seen.insert(attr.as_str()) {
             return Err(DynamoDBError::validation(format!(
-                "One or more parameter values are not valid. \
-                 Duplicate value in AttributesToGet: {attr}"
+                "One or more parameter values are not valid. Duplicate value in AttributesToGet: \
+                 {attr}"
             )));
         }
     }
@@ -356,7 +370,8 @@ fn validate_select(
             Select::SpecificAttributes => {
                 if !has_projection && !has_attributes_to_get {
                     return Err(DynamoDBError::validation(
-                        "SPECIFIC_ATTRIBUTES requires either ProjectionExpression or AttributesToGet",
+                        "SPECIFIC_ATTRIBUTES requires either ProjectionExpression or \
+                         AttributesToGet",
                     ));
                 }
             }
@@ -395,8 +410,8 @@ fn validate_parallel_scan(
             // TotalSegments must be in [1, MAX_TOTAL_SEGMENTS].
             if total > MAX_TOTAL_SEGMENTS {
                 return Err(DynamoDBError::validation(format!(
-                    "1 validation error detected: Value '{total}' at 'totalSegments' failed \
-                     to satisfy constraint: Member must have value less than or equal to \
+                    "1 validation error detected: Value '{total}' at 'totalSegments' failed to \
+                     satisfy constraint: Member must have value less than or equal to \
                      {MAX_TOTAL_SEGMENTS}. The Segment parameter is required but was not present \
                      in the request when parameter TotalSegments is present"
                 )));
@@ -404,8 +419,8 @@ fn validate_parallel_scan(
             // Segment must be in [0, TotalSegments).
             if seg >= total {
                 return Err(DynamoDBError::validation(format!(
-                    "The Segment parameter is zero-indexed and must be less than \
-                     parameter TotalSegments. Segment: {seg}, TotalSegments: {total}"
+                    "The Segment parameter is zero-indexed and must be less than parameter \
+                     TotalSegments. Segment: {seg}, TotalSegments: {total}"
                 )));
             }
             // ExclusiveStartKey must map to the same segment.
@@ -415,8 +430,8 @@ fn validate_parallel_scan(
                 #[allow(clippy::cast_sign_loss)]
                 if key_segment != seg as u32 {
                     return Err(DynamoDBError::validation(
-                        "The provided Exclusive start key does not map to the provided \
-                         Segment and TotalSegments values."
+                        "The provided Exclusive start key does not map to the provided Segment \
+                         and TotalSegments values."
                             .to_owned(),
                     ));
                 }
@@ -429,12 +444,12 @@ fn validate_parallel_scan(
         // missing one, but boto3 rejects this client-side. We still
         // handle it for raw API callers.
         (Some(_), None) => Err(DynamoDBError::validation(
-            "The TotalSegments parameter is required but was not present in the request \
-             when parameter Segment is present",
+            "The TotalSegments parameter is required but was not present in the request when \
+             parameter Segment is present",
         )),
         (None, Some(_)) => Err(DynamoDBError::validation(
-            "The Segment parameter is required but was not present in the request \
-             when parameter TotalSegments is present",
+            "The Segment parameter is required but was not present in the request when parameter \
+             TotalSegments is present",
         )),
     }
 }
@@ -510,9 +525,8 @@ impl RustStackDynamoDB {
         // Validate attribute definitions are present.
         if input.attribute_definitions.is_empty() {
             return Err(DynamoDBError::validation(
-                "One or more parameter values were invalid: \
-                 Some AttributeDefinitions are not valid. \
-                 AttributeDefinitions must be provided for all key attributes",
+                "One or more parameter values were invalid: Some AttributeDefinitions are not \
+                 valid. AttributeDefinitions must be provided for all key attributes",
             ));
         }
 
@@ -563,6 +577,7 @@ impl RustStackDynamoDB {
             stream_specification: input.stream_specification,
             sse_specification: input.sse_specification,
             tags: parking_lot::RwLock::new(input.tags),
+            ttl: parking_lot::RwLock::new(None),
             arn,
             table_id: uuid::Uuid::new_v4().to_string(),
             created_at: chrono::Utc::now(),
@@ -728,7 +743,8 @@ impl RustStackDynamoDB {
         if !input.expected.is_empty() && input.condition_expression.is_some() {
             return Err(DynamoDBError::validation(
                 "Can not use both expression and non-expression parameters in the same request: \
-                 Non-expression parameters: {Expected} Expression parameters: {ConditionExpression}",
+                 Non-expression parameters: {Expected} Expression parameters: \
+                 {ConditionExpression}",
             ));
         }
 
@@ -951,7 +967,8 @@ impl RustStackDynamoDB {
         if !input.expected.is_empty() && input.condition_expression.is_some() {
             return Err(DynamoDBError::validation(
                 "Can not use both expression and non-expression parameters in the same request: \
-                 Non-expression parameters: {Expected} Expression parameters: {ConditionExpression}",
+                 Non-expression parameters: {Expected} Expression parameters: \
+                 {ConditionExpression}",
             ));
         }
 
@@ -1077,13 +1094,15 @@ impl RustStackDynamoDB {
         if !input.attribute_updates.is_empty() && input.update_expression.is_some() {
             return Err(DynamoDBError::validation(
                 "Can not use both expression and non-expression parameters in the same request: \
-                 Non-expression parameters: {AttributeUpdates} Expression parameters: {UpdateExpression}",
+                 Non-expression parameters: {AttributeUpdates} Expression parameters: \
+                 {UpdateExpression}",
             ));
         }
         if !input.attribute_updates.is_empty() && input.condition_expression.is_some() {
             return Err(DynamoDBError::validation(
                 "Can not use both expression and non-expression parameters in the same request: \
-                 Non-expression parameters: {AttributeUpdates} Expression parameters: {ConditionExpression}",
+                 Non-expression parameters: {AttributeUpdates} Expression parameters: \
+                 {ConditionExpression}",
             ));
         }
         if !input.expected.is_empty() && input.update_expression.is_some() {
@@ -1095,7 +1114,8 @@ impl RustStackDynamoDB {
         if !input.expected.is_empty() && input.condition_expression.is_some() {
             return Err(DynamoDBError::validation(
                 "Can not use both expression and non-expression parameters in the same request: \
-                 Non-expression parameters: {Expected} Expression parameters: {ConditionExpression}",
+                 Non-expression parameters: {Expected} Expression parameters: \
+                 {ConditionExpression}",
             ));
         }
 
@@ -1150,8 +1170,7 @@ impl RustStackDynamoDB {
                             }
                             Some(existing_val) => {
                                 return Err(DynamoDBError::validation(format!(
-                                    "Type mismatch for ADD; operator type: L, \
-                                     existing type: {}",
+                                    "Type mismatch for ADD; operator type: L, existing type: {}",
                                     existing_val.type_descriptor(),
                                 )));
                             }
@@ -1891,8 +1910,8 @@ impl RustStackDynamoDB {
         let total_writes: usize = input.request_items.values().map(Vec::len).sum();
         if total_writes > 25 {
             return Err(DynamoDBError::validation(format!(
-                "Too many items in the BatchWriteItem request; \
-                 the request length {total_writes} exceeds the limit of 25"
+                "Too many items in the BatchWriteItem request; the request length {total_writes} \
+                 exceeds the limit of 25"
             )));
         }
 
@@ -1992,6 +2011,681 @@ impl RustStackDynamoDB {
             item_collection_metrics: HashMap::new(),
             consumed_capacity: Vec::new(),
         })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tagging operations
+// ---------------------------------------------------------------------------
+
+/// Maximum number of tags per resource.
+const MAX_TAGS_PER_RESOURCE: usize = 50;
+
+/// Maximum tag key length (characters).
+const MAX_TAG_KEY_LENGTH: usize = 128;
+
+/// Maximum tag value length (characters).
+const MAX_TAG_VALUE_LENGTH: usize = 256;
+
+impl RustStackDynamoDB {
+    /// Resolve a DynamoDB resource ARN to a table name.
+    fn resolve_table_from_arn(arn: &str) -> Result<&str, DynamoDBError> {
+        arn.rsplit_once('/')
+            .map(|(_, name)| name)
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| DynamoDBError::validation("Invalid resource ARN"))
+    }
+
+    /// Handle `TagResource`.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn handle_tag_resource(
+        &self,
+        input: TagResourceInput,
+    ) -> Result<TagResourceOutput, DynamoDBError> {
+        let table_name = Self::resolve_table_from_arn(&input.resource_arn)?;
+        let table = self.state.require_table(table_name)?;
+
+        // Validate each tag.
+        for tag in &input.tags {
+            if tag.key.is_empty() || tag.key.len() > MAX_TAG_KEY_LENGTH {
+                return Err(DynamoDBError::validation(format!(
+                    "Tag key must be between 1 and {MAX_TAG_KEY_LENGTH} characters long"
+                )));
+            }
+            if tag.value.len() > MAX_TAG_VALUE_LENGTH {
+                return Err(DynamoDBError::validation(format!(
+                    "Tag value must be no more than {MAX_TAG_VALUE_LENGTH} characters long"
+                )));
+            }
+            if tag.key.starts_with("aws:") {
+                return Err(DynamoDBError::validation(
+                    "Tag keys starting with 'aws:' are reserved for system use",
+                ));
+            }
+        }
+
+        let mut tags = table.tags.write();
+
+        // Clone, merge, validate count, then commit — avoids TOCTOU where
+        // over-limit tags persist if validation fails after mutation.
+        let mut merged = tags.clone();
+        for new_tag in &input.tags {
+            if let Some(existing) = merged.iter_mut().find(|t| t.key == new_tag.key) {
+                existing.value.clone_from(&new_tag.value);
+            } else {
+                merged.push(new_tag.clone());
+            }
+        }
+
+        if merged.len() > MAX_TAGS_PER_RESOURCE {
+            return Err(DynamoDBError::validation(format!(
+                "The number of tags exceeds the limit of {MAX_TAGS_PER_RESOURCE}"
+            )));
+        }
+
+        *tags = merged;
+
+        Ok(TagResourceOutput {})
+    }
+
+    /// Handle `UntagResource`.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn handle_untag_resource(
+        &self,
+        input: UntagResourceInput,
+    ) -> Result<UntagResourceOutput, DynamoDBError> {
+        let table_name = Self::resolve_table_from_arn(&input.resource_arn)?;
+        let table = self.state.require_table(table_name)?;
+
+        let keys_to_remove: HashSet<&str> = input.tag_keys.iter().map(String::as_str).collect();
+        let mut tags = table.tags.write();
+        tags.retain(|t| !keys_to_remove.contains(t.key.as_str()));
+
+        Ok(UntagResourceOutput {})
+    }
+
+    /// Handle `ListTagsOfResource`.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn handle_list_tags_of_resource(
+        &self,
+        input: ListTagsOfResourceInput,
+    ) -> Result<ListTagsOfResourceOutput, DynamoDBError> {
+        let table_name = Self::resolve_table_from_arn(&input.resource_arn)?;
+        let table = self.state.require_table(table_name)?;
+
+        let tags = table.tags.read().clone();
+        Ok(ListTagsOfResourceOutput {
+            tags: Some(tags),
+            next_token: None,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Time to Live operations
+// ---------------------------------------------------------------------------
+
+impl RustStackDynamoDB {
+    /// Handle `UpdateTimeToLive`.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn handle_update_time_to_live(
+        &self,
+        input: UpdateTimeToLiveInput,
+    ) -> Result<UpdateTimeToLiveOutput, DynamoDBError> {
+        validate_table_name(&input.table_name)?;
+        let table = self.state.require_table(&input.table_name)?;
+
+        if input.time_to_live_specification.attribute_name.is_empty() {
+            return Err(DynamoDBError::validation(
+                "TimeToLiveSpecification AttributeName must not be empty",
+            ));
+        }
+
+        let spec = input.time_to_live_specification;
+        *table.ttl.write() = Some(spec.clone());
+
+        Ok(UpdateTimeToLiveOutput {
+            time_to_live_specification: Some(spec),
+        })
+    }
+
+    /// Handle `DescribeTimeToLive`.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn handle_describe_time_to_live(
+        &self,
+        input: DescribeTimeToLiveInput,
+    ) -> Result<DescribeTimeToLiveOutput, DynamoDBError> {
+        validate_table_name(&input.table_name)?;
+        let table = self.state.require_table(&input.table_name)?;
+
+        let ttl_guard = table.ttl.read();
+        let description = match ttl_guard.as_ref() {
+            Some(spec) => TimeToLiveDescription {
+                attribute_name: Some(spec.attribute_name.clone()),
+                time_to_live_status: Some(if spec.enabled {
+                    "ENABLED".to_owned()
+                } else {
+                    "DISABLED".to_owned()
+                }),
+            },
+            None => TimeToLiveDescription {
+                attribute_name: None,
+                time_to_live_status: Some("DISABLED".to_owned()),
+            },
+        };
+
+        Ok(DescribeTimeToLiveOutput {
+            time_to_live_description: Some(description),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Describe operations
+// ---------------------------------------------------------------------------
+
+impl RustStackDynamoDB {
+    /// Handle `DescribeLimits`.
+    ///
+    /// Returns hardcoded account and table capacity limits matching the default
+    /// AWS DynamoDB provisioned-mode limits.
+    pub fn handle_describe_limits(
+        &self,
+        _input: DescribeLimitsInput,
+    ) -> Result<DescribeLimitsOutput, DynamoDBError> {
+        Ok(DescribeLimitsOutput {
+            account_max_read_capacity_units: Some(80_000),
+            account_max_write_capacity_units: Some(80_000),
+            table_max_read_capacity_units: Some(40_000),
+            table_max_write_capacity_units: Some(40_000),
+        })
+    }
+
+    /// Handle `DescribeEndpoints`.
+    ///
+    /// Returns a single endpoint for the configured region with a 1440-minute
+    /// (24 hour) cache period, matching the real DynamoDB behaviour.
+    pub fn handle_describe_endpoints(
+        &self,
+        _input: DescribeEndpointsInput,
+    ) -> Result<DescribeEndpointsOutput, DynamoDBError> {
+        let address = format!("dynamodb.{}.amazonaws.com", self.config.default_region);
+        Ok(DescribeEndpointsOutput {
+            endpoints: vec![Endpoint {
+                address,
+                cache_period_in_minutes: 1440,
+            }],
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transaction operations
+// ---------------------------------------------------------------------------
+
+/// Maximum number of items in a transaction.
+const MAX_TRANSACT_ITEMS: usize = 100;
+
+impl RustStackDynamoDB {
+    /// Handle `TransactGetItems`.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn handle_transact_get_items(
+        &self,
+        input: TransactGetItemsInput,
+    ) -> Result<TransactGetItemsOutput, DynamoDBError> {
+        if input.transact_items.is_empty() {
+            return Err(DynamoDBError::validation(
+                "1 validation error detected: Value null at 'transactItems' failed to satisfy \
+                 constraint: Member must not be null",
+            ));
+        }
+        if input.transact_items.len() > MAX_TRANSACT_ITEMS {
+            return Err(DynamoDBError::validation(format!(
+                "1 validation error detected: Value '[TransactGetItem]' at 'transactItems' failed \
+                 to satisfy constraint: Member must have length less than or equal to \
+                 {MAX_TRANSACT_ITEMS}"
+            )));
+        }
+
+        let mut responses = Vec::with_capacity(input.transact_items.len());
+
+        for transact_item in &input.transact_items {
+            let get = &transact_item.get;
+            let table = self.state.require_table(&get.table_name)?;
+            let pk = extract_primary_key(&table.key_schema, &get.key)
+                .map_err(storage_error_to_dynamodb)?;
+
+            let item = table.storage.get_item(&pk);
+
+            // Apply projection if specified.
+            let result_item = match (item, &get.projection_expression) {
+                (Some(found_item), Some(projection)) => {
+                    let names = get.expression_attribute_names.as_ref();
+                    let empty_names = HashMap::new();
+                    let names_ref = names.unwrap_or(&empty_names);
+                    let paths =
+                        parse_projection(projection).map_err(projection_error_to_dynamodb)?;
+                    let empty_values = HashMap::new();
+                    let ctx = EvalContext {
+                        item: &found_item,
+                        names: names_ref,
+                        values: &empty_values,
+                    };
+                    let projected = ctx.apply_projection(&paths);
+                    if projected.is_empty() {
+                        None
+                    } else {
+                        Some(projected)
+                    }
+                }
+                (Some(found_item), None) => Some(found_item),
+                (None, _) => None,
+            };
+
+            responses.push(ItemResponse { item: result_item });
+        }
+
+        Ok(TransactGetItemsOutput {
+            consumed_capacity: Vec::new(),
+            responses: Some(responses),
+        })
+    }
+
+    /// Handle `TransactWriteItems`.
+    #[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+    pub fn handle_transact_write_items(
+        &self,
+        input: TransactWriteItemsInput,
+    ) -> Result<TransactWriteItemsOutput, DynamoDBError> {
+        if input.transact_items.is_empty() {
+            return Err(DynamoDBError::validation(
+                "1 validation error detected: Value null at 'transactItems' failed to satisfy \
+                 constraint: Member must not be null",
+            ));
+        }
+        if input.transact_items.len() > MAX_TRANSACT_ITEMS {
+            return Err(DynamoDBError::validation(format!(
+                "1 validation error detected: Value '[TransactWriteItem]' at 'transactItems' \
+                 failed to satisfy constraint: Member must have length less than or equal to \
+                 {MAX_TRANSACT_ITEMS}"
+            )));
+        }
+
+        // Phase 1: Validate each item has exactly one action and collect
+        // (table_name, primary_key) pairs for duplicate detection.
+        let mut seen_keys: HashSet<(String, PrimaryKey)> = HashSet::new();
+
+        for (idx, item) in input.transact_items.iter().enumerate() {
+            let action_count = [
+                item.condition_check.is_some(),
+                item.put.is_some(),
+                item.delete.is_some(),
+                item.update.is_some(),
+            ]
+            .iter()
+            .filter(|&&b| b)
+            .count();
+
+            if action_count != 1 {
+                return Err(DynamoDBError::validation(format!(
+                    "TransactItems[{idx}] must specify exactly one of ConditionCheck, Put, \
+                     Delete, or Update"
+                )));
+            }
+
+            // Extract (table_name, key) for duplicate detection.
+            let (table_name, key_map) = if let Some(ref cc) = item.condition_check {
+                (cc.table_name.as_str(), &cc.key)
+            } else if let Some(ref put) = item.put {
+                let table = self.state.require_table(&put.table_name)?;
+                let pk = extract_primary_key(&table.key_schema, &put.item)
+                    .map_err(storage_error_to_dynamodb)?;
+                if !seen_keys.insert((put.table_name.clone(), pk)) {
+                    return Err(DynamoDBError::validation(
+                        "Transaction request cannot include multiple operations on one item",
+                    ));
+                }
+                continue;
+            } else if let Some(ref del) = item.delete {
+                (del.table_name.as_str(), &del.key)
+            } else if let Some(ref upd) = item.update {
+                (upd.table_name.as_str(), &upd.key)
+            } else {
+                continue;
+            };
+
+            let table = self.state.require_table(table_name)?;
+            let pk = extract_primary_key(&table.key_schema, key_map)
+                .map_err(storage_error_to_dynamodb)?;
+            if !seen_keys.insert((table_name.to_owned(), pk)) {
+                return Err(DynamoDBError::validation(
+                    "Transaction request cannot include multiple operations on one item",
+                ));
+            }
+        }
+
+        // Phase 2: Evaluate all condition expressions.
+        let mut cancellation_reasons: Vec<CancellationReason> = vec![
+            CancellationReason {
+                code: Some("None".to_owned()),
+                message: Some("None".to_owned()),
+                item: None,
+            };
+            input.transact_items.len()
+        ];
+        let mut any_cancelled = false;
+
+        for (idx, item) in input.transact_items.iter().enumerate() {
+            let condition_result = self.evaluate_transact_write_condition(item);
+            match condition_result {
+                Ok(()) => {}
+                Err(reason) => {
+                    cancellation_reasons[idx] = reason;
+                    any_cancelled = true;
+                }
+            }
+        }
+
+        if any_cancelled {
+            return Err(DynamoDBError::transaction_cancelled(cancellation_reasons));
+        }
+
+        // Phase 3: Apply all writes.
+        for item in &input.transact_items {
+            if let Some(ref put) = item.put {
+                let table = self.state.require_table(&put.table_name)?;
+                let old = table
+                    .storage
+                    .put_item(put.item.clone())
+                    .map_err(storage_error_to_dynamodb)?;
+
+                if table
+                    .stream_specification
+                    .as_ref()
+                    .is_some_and(|s| s.stream_enabled)
+                {
+                    let event_name = if old.is_some() {
+                        crate::stream::ChangeEventName::Modify
+                    } else {
+                        crate::stream::ChangeEventName::Insert
+                    };
+                    let keys = extract_key_attributes(&put.item, &table.key_schema_elements);
+                    let size = calculate_item_size(&put.item);
+                    self.emitter.emit(crate::stream::ChangeEvent {
+                        table_name: table.name.clone(),
+                        event_name,
+                        keys,
+                        old_image: old,
+                        new_image: Some(put.item.clone()),
+                        size_bytes: size,
+                    });
+                }
+            } else if let Some(ref del) = item.delete {
+                let table = self.state.require_table(&del.table_name)?;
+                let pk = extract_primary_key(&table.key_schema, &del.key)
+                    .map_err(storage_error_to_dynamodb)?;
+                let old = table.storage.delete_item(&pk);
+
+                if table
+                    .stream_specification
+                    .as_ref()
+                    .is_some_and(|s| s.stream_enabled)
+                {
+                    if let Some(ref old_item) = old {
+                        let keys = extract_key_attributes(old_item, &table.key_schema_elements);
+                        let size = calculate_item_size(old_item);
+                        self.emitter.emit(crate::stream::ChangeEvent {
+                            table_name: table.name.clone(),
+                            event_name: crate::stream::ChangeEventName::Remove,
+                            keys,
+                            old_image: Some(old_item.clone()),
+                            new_image: None,
+                            size_bytes: size,
+                        });
+                    }
+                }
+            } else if let Some(ref upd) = item.update {
+                let table = self.state.require_table(&upd.table_name)?;
+                let pk = extract_primary_key(&table.key_schema, &upd.key)
+                    .map_err(storage_error_to_dynamodb)?;
+                let existing = table.storage.get_item(&pk);
+                let current = existing.clone().unwrap_or_else(|| upd.key.clone());
+
+                let names = upd.expression_attribute_names.as_ref();
+                let values = upd.expression_attribute_values.as_ref();
+                let empty_names = HashMap::new();
+                let empty_values = HashMap::new();
+                let names_ref = names.unwrap_or(&empty_names);
+                let values_ref = values.unwrap_or(&empty_values);
+
+                let parsed =
+                    parse_update(&upd.update_expression).map_err(expression_error_to_dynamodb)?;
+                let ctx = EvalContext {
+                    item: &current,
+                    names: names_ref,
+                    values: values_ref,
+                };
+                let updated = ctx
+                    .apply_update(&parsed)
+                    .map_err(expression_error_to_dynamodb)?;
+
+                let old = table
+                    .storage
+                    .put_item(updated.clone())
+                    .map_err(storage_error_to_dynamodb)?;
+
+                if table
+                    .stream_specification
+                    .as_ref()
+                    .is_some_and(|s| s.stream_enabled)
+                {
+                    let event_name = if existing.is_some() {
+                        crate::stream::ChangeEventName::Modify
+                    } else {
+                        crate::stream::ChangeEventName::Insert
+                    };
+                    let keys = extract_key_attributes(&updated, &table.key_schema_elements);
+                    let size = calculate_item_size(&updated);
+                    self.emitter.emit(crate::stream::ChangeEvent {
+                        table_name: table.name.clone(),
+                        event_name,
+                        keys,
+                        old_image: old,
+                        new_image: Some(updated),
+                        size_bytes: size,
+                    });
+                }
+            }
+            // ConditionCheck: no mutation needed.
+        }
+
+        Ok(TransactWriteItemsOutput {
+            consumed_capacity: Vec::new(),
+            item_collection_metrics: HashMap::new(),
+        })
+    }
+
+    /// Evaluate a condition expression for a single transaction write item.
+    ///
+    /// Returns `Ok(())` if the condition passes (or no condition exists),
+    /// or a `CancellationReason` if the condition fails.
+    fn evaluate_transact_write_condition(
+        &self,
+        item: &ruststack_dynamodb_model::types::TransactWriteItem,
+    ) -> Result<(), CancellationReason> {
+        if let Some(ref cc) = item.condition_check {
+            self.evaluate_condition_for_key(
+                &cc.table_name,
+                &cc.key,
+                Some(&cc.condition_expression),
+                cc.expression_attribute_names.as_ref(),
+                cc.expression_attribute_values.as_ref(),
+                cc.return_values_on_condition_check_failure.as_deref(),
+            )
+        } else if let Some(ref put) = item.put {
+            if let Some(ref condition) = put.condition_expression {
+                self.evaluate_transact_put_condition(put, condition)
+            } else {
+                Ok(())
+            }
+        } else if let Some(ref del) = item.delete {
+            self.evaluate_condition_for_key(
+                &del.table_name,
+                &del.key,
+                del.condition_expression.as_deref(),
+                del.expression_attribute_names.as_ref(),
+                del.expression_attribute_values.as_ref(),
+                del.return_values_on_condition_check_failure.as_deref(),
+            )
+        } else if let Some(ref upd) = item.update {
+            self.evaluate_condition_for_key(
+                &upd.table_name,
+                &upd.key,
+                upd.condition_expression.as_deref(),
+                upd.expression_attribute_names.as_ref(),
+                upd.expression_attribute_values.as_ref(),
+                upd.return_values_on_condition_check_failure.as_deref(),
+            )
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Evaluate a condition expression for a `TransactPut` action.
+    ///
+    /// Put actions derive their primary key from the item rather than a
+    /// separate `Key` field, requiring special handling.
+    fn evaluate_transact_put_condition(
+        &self,
+        put: &ruststack_dynamodb_model::types::TransactPut,
+        condition: &str,
+    ) -> Result<(), CancellationReason> {
+        let table = self
+            .state
+            .require_table(&put.table_name)
+            .map_err(|e| CancellationReason {
+                code: Some("ValidationException".to_owned()),
+                message: Some(e.message.clone()),
+                item: None,
+            })?;
+        let pk =
+            extract_primary_key(&table.key_schema, &put.item).map_err(|e| CancellationReason {
+                code: Some("ValidationException".to_owned()),
+                message: Some(e.to_string()),
+                item: None,
+            })?;
+        let key_map: HashMap<String, AttributeValue> =
+            extract_key_attributes(&put.item, &table.key_schema_elements);
+        let existing = table.storage.get_item(&pk);
+        let empty = HashMap::new();
+        let item_ref = existing.as_ref().unwrap_or(&empty);
+        let empty_names = HashMap::new();
+        let empty_values = HashMap::new();
+        let names = put
+            .expression_attribute_names
+            .as_ref()
+            .unwrap_or(&empty_names);
+        let values = put
+            .expression_attribute_values
+            .as_ref()
+            .unwrap_or(&empty_values);
+
+        let expr = parse_condition(condition).map_err(|e| CancellationReason {
+            code: Some("ValidationException".to_owned()),
+            message: Some(e.to_string()),
+            item: None,
+        })?;
+        let ctx = EvalContext {
+            item: item_ref,
+            names,
+            values,
+        };
+        let result = ctx.evaluate(&expr).map_err(|e| CancellationReason {
+            code: Some("ValidationException".to_owned()),
+            message: Some(e.to_string()),
+            item: None,
+        })?;
+        if !result {
+            let return_item =
+                if put.return_values_on_condition_check_failure.as_deref() == Some("ALL_OLD") {
+                    existing
+                } else {
+                    None
+                };
+            return Err(CancellationReason {
+                code: Some("ConditionalCheckFailed".to_owned()),
+                message: Some("The conditional request failed".to_owned()),
+                item: return_item.or(Some(key_map)),
+            });
+        }
+        Ok(())
+    }
+
+    /// Evaluate a condition expression for a given table and key.
+    fn evaluate_condition_for_key(
+        &self,
+        table_name: &str,
+        key: &HashMap<String, AttributeValue>,
+        condition_expression: Option<&str>,
+        expression_names: Option<&HashMap<String, String>>,
+        expression_values: Option<&HashMap<String, AttributeValue>>,
+        return_values_on_failure: Option<&str>,
+    ) -> Result<(), CancellationReason> {
+        let Some(condition_str) = condition_expression else {
+            return Ok(());
+        };
+
+        let table = self
+            .state
+            .require_table(table_name)
+            .map_err(|e| CancellationReason {
+                code: Some("ValidationException".to_owned()),
+                message: Some(e.message.clone()),
+                item: None,
+            })?;
+        let pk = extract_primary_key(&table.key_schema, key).map_err(|e| CancellationReason {
+            code: Some("ValidationException".to_owned()),
+            message: Some(e.to_string()),
+            item: None,
+        })?;
+        let existing = table.storage.get_item(&pk);
+        let empty = HashMap::new();
+        let item_ref = existing.as_ref().unwrap_or(&empty);
+        let empty_names = HashMap::new();
+        let empty_values = HashMap::new();
+        let names = expression_names.unwrap_or(&empty_names);
+        let values = expression_values.unwrap_or(&empty_values);
+
+        let expr = parse_condition(condition_str).map_err(|e| CancellationReason {
+            code: Some("ValidationException".to_owned()),
+            message: Some(e.to_string()),
+            item: None,
+        })?;
+        let ctx = EvalContext {
+            item: item_ref,
+            names,
+            values,
+        };
+        let result = ctx.evaluate(&expr).map_err(|e| CancellationReason {
+            code: Some("ValidationException".to_owned()),
+            message: Some(e.to_string()),
+            item: None,
+        })?;
+
+        if !result {
+            let return_item = if return_values_on_failure == Some("ALL_OLD") {
+                existing
+            } else {
+                None
+            };
+            return Err(CancellationReason {
+                code: Some("ConditionalCheckFailed".to_owned()),
+                message: Some("The conditional request failed".to_owned()),
+                item: return_item,
+            });
+        }
+
+        Ok(())
     }
 }
 
@@ -2287,7 +2981,8 @@ fn build_condition_fragment(
                 values.insert(val_ph.clone(), v.clone());
             }
             format!(
-                "(attribute_exists({name_placeholder}) AND NOT contains({name_placeholder}, {val_ph}))"
+                "(attribute_exists({name_placeholder}) AND NOT contains({name_placeholder}, \
+                 {val_ph}))"
             )
         }
         ComparisonOperator::BeginsWith => {
@@ -2380,8 +3075,8 @@ fn validate_return_values_on_condition_check_failure(
         if v != "NONE" && v != "ALL_OLD" {
             return Err(DynamoDBError::validation(format!(
                 "1 validation error detected: Value '{v}' at \
-                 'returnValuesOnConditionCheckFailure' failed to satisfy constraint: \
-                 Member must satisfy enum value set: [NONE, ALL_OLD]"
+                 'returnValuesOnConditionCheckFailure' failed to satisfy constraint: Member must \
+                 satisfy enum value set: [NONE, ALL_OLD]"
             )));
         }
     }
@@ -2422,27 +3117,24 @@ fn validate_comparison_operator(
         | ComparisonOperator::BeginsWith => {
             if count != 1 {
                 return Err(DynamoDBError::validation(format!(
-                    "One or more parameter values were invalid: \
-                     Invalid number of argument(s) for the {comp_op} \
-                     ComparisonOperator"
+                    "One or more parameter values were invalid: Invalid number of argument(s) for \
+                     the {comp_op} ComparisonOperator"
                 )));
             }
         }
         ComparisonOperator::Contains | ComparisonOperator::NotContains => {
             if count != 1 {
                 return Err(DynamoDBError::validation(format!(
-                    "One or more parameter values were invalid: \
-                     Invalid number of argument(s) for the {comp_op} \
-                     ComparisonOperator"
+                    "One or more parameter values were invalid: Invalid number of argument(s) for \
+                     the {comp_op} ComparisonOperator"
                 )));
             }
             // CONTAINS/NOT_CONTAINS only accept scalar types (S, N, B).
             if let Some(val) = value_list.first() {
                 if !is_scalar_attribute_value(val) {
                     return Err(DynamoDBError::validation(format!(
-                        "One or more parameter values were invalid: \
-                         ComparisonOperator {comp_op} is not valid for {val_type} \
-                         AttributeValue type",
+                        "One or more parameter values were invalid: ComparisonOperator {comp_op} \
+                         is not valid for {val_type} AttributeValue type",
                         val_type = val.type_descriptor(),
                     )));
                 }
@@ -2451,27 +3143,24 @@ fn validate_comparison_operator(
         ComparisonOperator::Between => {
             if count != 2 {
                 return Err(DynamoDBError::validation(
-                    "One or more parameter values were invalid: \
-                     Invalid number of argument(s) for the BETWEEN \
-                     ComparisonOperator",
+                    "One or more parameter values were invalid: Invalid number of argument(s) for \
+                     the BETWEEN ComparisonOperator",
                 ));
             }
         }
         ComparisonOperator::In => {
             if count == 0 {
                 return Err(DynamoDBError::validation(
-                    "One or more parameter values were invalid: \
-                     Invalid number of argument(s) for the IN \
-                     ComparisonOperator",
+                    "One or more parameter values were invalid: Invalid number of argument(s) for \
+                     the IN ComparisonOperator",
                 ));
             }
             // IN requires all values to be scalar and of the same type.
             for val in value_list {
                 if !is_scalar_attribute_value(val) {
                     return Err(DynamoDBError::validation(
-                        "One or more parameter values were invalid: \
-                         ComparisonOperator IN is not valid for non-scalar \
-                         AttributeValue type",
+                        "One or more parameter values were invalid: ComparisonOperator IN is not \
+                         valid for non-scalar AttributeValue type",
                     ));
                 }
             }
@@ -2481,9 +3170,8 @@ fn validate_comparison_operator(
                 for val in &value_list[1..] {
                     if val.type_descriptor() != first_type {
                         return Err(DynamoDBError::validation(
-                            "One or more parameter values were invalid: \
-                             AttributeValues inside AttributeValueList must all \
-                             be of the same type",
+                            "One or more parameter values were invalid: AttributeValues inside \
+                             AttributeValueList must all be of the same type",
                         ));
                     }
                 }
@@ -2492,9 +3180,8 @@ fn validate_comparison_operator(
         ComparisonOperator::Null | ComparisonOperator::NotNull => {
             if count != 0 {
                 return Err(DynamoDBError::validation(format!(
-                    "One or more parameter values were invalid: \
-                     Invalid number of argument(s) for the {comp_op} \
-                     ComparisonOperator"
+                    "One or more parameter values were invalid: Invalid number of argument(s) for \
+                     the {comp_op} ComparisonOperator"
                 )));
             }
         }
@@ -2525,15 +3212,14 @@ fn validate_expected(
         } else if exp.exists == Some(true) && exp.value.is_none() {
             // Exists:True without Value is a validation error.
             return Err(DynamoDBError::validation(format!(
-                "One or more parameter values were invalid: \
-                 Exists is set to TRUE for attribute ({attr_name}), \
-                 Value must also be set"
+                "One or more parameter values were invalid: Exists is set to TRUE for attribute \
+                 ({attr_name}), Value must also be set"
             )));
         } else if exp.exists == Some(false) && exp.value.is_some() {
             // Exists:False with Value is a validation error.
             return Err(DynamoDBError::validation(format!(
-                "One or more parameter values were invalid: \
-                 Value cannot be used when Exists is set to FALSE for attribute ({attr_name})"
+                "One or more parameter values were invalid: Value cannot be used when Exists is \
+                 set to FALSE for attribute ({attr_name})"
             )));
         }
     }
@@ -2552,8 +3238,8 @@ fn validate_no_empty_sets(values: &HashMap<String, AttributeValue>) -> Result<()
     for (key, val) in values {
         if is_empty_set(val) {
             return Err(DynamoDBError::validation(format!(
-                "One or more parameter values are not valid. The AttributeValue for a member \
-                 of the ExpressionAttributeValues ({key}) contains an empty set"
+                "One or more parameter values are not valid. The AttributeValue for a member of \
+                 the ExpressionAttributeValues ({key}) contains an empty set"
             )));
         }
     }
@@ -2619,8 +3305,8 @@ fn validate_item_no_empty_sets(
     for val in item.values() {
         if contains_empty_set(val) {
             return Err(DynamoDBError::validation(
-                "One or more parameter values were invalid: An number of elements of the \
-                 input set is empty",
+                "One or more parameter values were invalid: An number of elements of the input \
+                 set is empty",
             ));
         }
     }
@@ -2698,8 +3384,8 @@ fn validate_no_unresolved_names(
     for name in used_names {
         if name.starts_with('#') && !provided_names.contains_key(name.as_str()) {
             return Err(DynamoDBError::validation(format!(
-                "Value provided in ExpressionAttributeNames unused in expressions: \
-                 unresolved attribute name reference: {name}"
+                "Value provided in ExpressionAttributeNames unused in expressions: unresolved \
+                 attribute name reference: {name}"
             )));
         }
     }
@@ -2845,14 +3531,14 @@ fn validate_update_paths(
         for j in (i + 1)..resolved.len() {
             if paths_overlap(&resolved[i], &resolved[j]) {
                 return Err(DynamoDBError::validation(
-                    "Invalid UpdateExpression: Two document paths overlap with each other; \
-                     must remove or rewrite one of these paths",
+                    "Invalid UpdateExpression: Two document paths overlap with each other; must \
+                     remove or rewrite one of these paths",
                 ));
             }
             if paths_conflict(&resolved[i], &resolved[j]) {
                 return Err(DynamoDBError::validation(
-                    "Invalid UpdateExpression: Two document paths conflict with each other; \
-                     must remove or rewrite one of these paths",
+                    "Invalid UpdateExpression: Two document paths conflict with each other; must \
+                     remove or rewrite one of these paths",
                 ));
             }
         }
@@ -3047,12 +3733,12 @@ fn merge_attribute_values(target: &mut AttributeValue, source: AttributeValue) {
 /// - `NONE` / `None`: empty map
 /// - `ALL_OLD`: all attributes of the old item (or empty if no old item)
 /// - `ALL_NEW`: all attributes of the new item
-/// - `UPDATED_OLD`: for each path targeted by the update expression, return
-///   the old value if it existed (before the update). Only returns the
-///   specific nested sub-path, not the entire top-level attribute.
-/// - `UPDATED_NEW`: for each path targeted by the update expression, return
-///   the new value if it exists (after the update). For REMOVE'd attributes,
-///   the path no longer exists so it is not returned.
+/// - `UPDATED_OLD`: for each path targeted by the update expression, return the old value if it
+///   existed (before the update). Only returns the specific nested sub-path, not the entire
+///   top-level attribute.
+/// - `UPDATED_NEW`: for each path targeted by the update expression, return the new value if it
+///   exists (after the update). For REMOVE'd attributes, the path no longer exists so it is not
+///   returned.
 fn compute_update_return_values(
     return_values: Option<&ReturnValue>,
     old_item: Option<&HashMap<String, AttributeValue>>,
@@ -4045,13 +4731,16 @@ fn gsi_build_last_key(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use ruststack_dynamodb_model::error::DynamoDBErrorCode;
-    use ruststack_dynamodb_model::input::{BatchWriteItemInput, CreateTableInput, UpdateItemInput};
-    use ruststack_dynamodb_model::types::{
-        AttributeDefinition, KeySchemaElement, KeyType, PutRequest, ScalarAttributeType,
-        WriteRequest,
+    use ruststack_dynamodb_model::{
+        error::DynamoDBErrorCode,
+        input::{BatchWriteItemInput, CreateTableInput, UpdateItemInput},
+        types::{
+            AttributeDefinition, KeySchemaElement, KeyType, PutRequest, ScalarAttributeType,
+            WriteRequest,
+        },
     };
+
+    use super::*;
 
     /// Create a provider with a pre-configured test table named "TestTable".
     fn setup_provider_with_table() -> RustStackDynamoDB {

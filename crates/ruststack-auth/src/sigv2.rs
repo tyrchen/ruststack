@@ -20,16 +20,13 @@
 
 use std::collections::BTreeMap;
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
 use subtle::ConstantTimeEq;
 use tracing::debug;
 
-use crate::credentials::CredentialProvider;
-use crate::error::AuthError;
-use crate::sigv4::AuthResult;
+use crate::{credentials::CredentialProvider, error::AuthError, sigv4::AuthResult};
 
 type HmacSha1 = Hmac<Sha1>;
 

@@ -4,14 +4,14 @@
 //! bucket-name uniqueness. All operations are thread-safe via `DashMap`.
 
 use chrono::{DateTime, Utc};
-use dashmap::DashMap;
-use dashmap::mapref::one::{Ref, RefMut};
+use dashmap::{
+    DashMap,
+    mapref::one::{Ref, RefMut},
+};
 use tracing::{debug, info};
 
+use super::{bucket::S3Bucket, object::Owner};
 use crate::error::S3ServiceError;
-
-use super::bucket::S3Bucket;
-use super::object::Owner;
 
 /// Top-level S3 service state holding all buckets.
 ///
@@ -55,10 +55,10 @@ impl S3ServiceState {
     ///
     /// # Errors
     ///
-    /// - [`S3ServiceError::BucketAlreadyOwnedByYou`] if the caller already
-    ///   owns a bucket with the same name.
-    /// - [`S3ServiceError::BucketAlreadyExists`] if the bucket name is taken
-    ///   by a different account.
+    /// - [`S3ServiceError::BucketAlreadyOwnedByYou`] if the caller already owns a bucket with the
+    ///   same name.
+    /// - [`S3ServiceError::BucketAlreadyExists`] if the bucket name is taken by a different
+    ///   account.
     pub fn create_bucket(
         &self,
         name: String,
@@ -89,8 +89,8 @@ impl S3ServiceState {
     /// # Errors
     ///
     /// - [`S3ServiceError::NoSuchBucket`] if the bucket does not exist.
-    /// - [`S3ServiceError::BucketNotEmpty`] if the bucket still contains
-    ///   objects or in-progress multipart uploads.
+    /// - [`S3ServiceError::BucketNotEmpty`] if the bucket still contains objects or in-progress
+    ///   multipart uploads.
     pub fn delete_bucket(&self, name: &str) -> Result<(), S3ServiceError> {
         let bucket_ref = self
             .buckets

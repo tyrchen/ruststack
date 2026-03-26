@@ -48,7 +48,8 @@ pub enum S3ServiceError {
 
     /// The bucket already exists and is owned by you.
     #[error(
-        "Your previous request to create the named bucket succeeded and you already own it: {bucket}"
+        "Your previous request to create the named bucket succeeded and you already own it: \
+         {bucket}"
     )]
     BucketAlreadyOwnedByYou {
         /// The bucket name that already exists.

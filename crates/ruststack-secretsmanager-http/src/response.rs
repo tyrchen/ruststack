@@ -90,8 +90,9 @@ pub fn json_response(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ruststack_secretsmanager_model::error::SecretsManagerErrorCode;
+
+    use super::*;
 
     #[test]
     fn test_should_format_error_json_with_capital_message() {

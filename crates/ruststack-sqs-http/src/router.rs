@@ -7,8 +7,7 @@
 //! X-Amz-Target: AmazonSQS.CreateQueue
 //! ```
 
-use ruststack_sqs_model::error::SqsError;
-use ruststack_sqs_model::operations::SqsOperation;
+use ruststack_sqs_model::{error::SqsError, operations::SqsOperation};
 
 /// The expected prefix for the `X-Amz-Target` header value.
 const TARGET_PREFIX: &str = "AmazonSQS.";

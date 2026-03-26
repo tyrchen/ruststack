@@ -4,8 +4,7 @@
 
 use bytes::Bytes;
 
-use crate::error::ApiGatewayV2ServiceError;
-use crate::storage::IntegrationRecord;
+use crate::{error::ApiGatewayV2ServiceError, storage::IntegrationRecord};
 
 /// Handle a mock integration.
 ///

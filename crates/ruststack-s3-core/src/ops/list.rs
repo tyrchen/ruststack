@@ -2,22 +2,23 @@
 //!
 //! Implements `list_objects` (v1), `list_objects_v2`, and `list_object_versions`.
 
-use ruststack_s3_model::error::S3Error;
-use ruststack_s3_model::input::{ListObjectVersionsInput, ListObjectsInput, ListObjectsV2Input};
-use ruststack_s3_model::output::{
-    ListObjectVersionsOutput, ListObjectsOutput, ListObjectsV2Output,
-};
-use ruststack_s3_model::types::{
-    CommonPrefix, DeleteMarkerEntry, Object, ObjectStorageClass, ObjectVersion,
-    ObjectVersionStorageClass, Owner,
+use ruststack_s3_model::{
+    error::S3Error,
+    input::{ListObjectVersionsInput, ListObjectsInput, ListObjectsV2Input},
+    output::{ListObjectVersionsOutput, ListObjectsOutput, ListObjectsV2Output},
+    types::{
+        CommonPrefix, DeleteMarkerEntry, Object, ObjectStorageClass, ObjectVersion,
+        ObjectVersionStorageClass, Owner,
+    },
 };
 use tracing::debug;
 
-use crate::error::S3ServiceError;
-use crate::provider::RustStackS3;
-use crate::state::keystore::VersionListEntry;
-use crate::state::object::Owner as InternalOwner;
-use crate::utils::{decode_continuation_token, encode_continuation_token};
+use crate::{
+    error::S3ServiceError,
+    provider::RustStackS3,
+    state::{keystore::VersionListEntry, object::Owner as InternalOwner},
+    utils::{decode_continuation_token, encode_continuation_token},
+};
 
 /// Default maximum number of keys returned in a single listing response.
 const DEFAULT_MAX_KEYS: i32 = 1000;

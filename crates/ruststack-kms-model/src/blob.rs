@@ -4,8 +4,7 @@
 //! as base64-encoded strings in JSON. This module provides custom serde
 //! serializers/deserializers for `bytes::Bytes` that handle the base64 encoding.
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
+use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Serialize `bytes::Bytes` as a base64 string.

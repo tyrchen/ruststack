@@ -40,14 +40,9 @@ pub fn xml_response(xml: String, request_id: &str) -> http::Response<StsResponse
 #[must_use]
 pub fn error_to_xml(error: &StsError, request_id: &str) -> String {
     format!(
-        "<ErrorResponse xmlns=\"{XML_NS}\">\
-         <Error>\
-         <Type>{}</Type>\
-         <Code>{}</Code>\
-         <Message>{}</Message>\
-         </Error>\
-         <RequestId>{}</RequestId>\
-         </ErrorResponse>",
+        "<ErrorResponse \
+         xmlns=\"{XML_NS}\"><Error><Type>{}</Type><Code>{}</Code><Message>{}</Message></\
+         Error><RequestId>{}</RequestId></ErrorResponse>",
         error.code.fault(),
         error.code.code(),
         xml_escape(&error.message),

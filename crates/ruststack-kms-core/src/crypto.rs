@@ -5,19 +5,21 @@
 
 use std::collections::HashMap;
 
-use aws_lc_rs::aead::{self, Aad, BoundKey, NONCE_LEN, Nonce, NonceSequence, SealingKey};
-use aws_lc_rs::encoding::AsDer;
-use aws_lc_rs::rand::{SecureRandom, SystemRandom};
-use aws_lc_rs::signature::{self, EcdsaKeyPair, KeyPair as _, RsaKeyPair};
-
-use ruststack_kms_model::error::{KmsError, KmsErrorCode};
-use ruststack_kms_model::types::{
-    DataKeyPairSpec, DataKeySpec, EncryptionAlgorithmSpec, KeySpec, MacAlgorithmSpec,
-    SigningAlgorithmSpec,
+use aws_lc_rs::{
+    aead::{self, Aad, BoundKey, NONCE_LEN, Nonce, NonceSequence, SealingKey},
+    encoding::AsDer,
+    rand::{SecureRandom, SystemRandom},
+    signature::{self, EcdsaKeyPair, KeyPair as _, RsaKeyPair},
+};
+use ruststack_kms_model::{
+    error::{KmsError, KmsErrorCode},
+    types::{
+        DataKeyPairSpec, DataKeySpec, EncryptionAlgorithmSpec, KeySpec, MacAlgorithmSpec,
+        SigningAlgorithmSpec,
+    },
 };
 
-use crate::ciphertext;
-use crate::key::KeyMaterial;
+use crate::{ciphertext, key::KeyMaterial};
 
 /// Thread-safe random number generator.
 fn rng() -> &'static SystemRandom {

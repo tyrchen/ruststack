@@ -72,8 +72,9 @@ pub fn json_response(json: Vec<u8>, request_id: &str) -> http::Response<SsmRespo
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ruststack_ssm_model::error::SsmErrorCode;
+
+    use super::*;
 
     #[test]
     fn test_should_format_error_json_with_short_type() {

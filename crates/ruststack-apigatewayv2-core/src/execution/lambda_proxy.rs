@@ -8,11 +8,10 @@ use std::collections::HashMap;
 use bytes::Bytes;
 use serde::Deserialize;
 
-use crate::error::ApiGatewayV2ServiceError;
-use crate::provider::RustStackApiGatewayV2;
-use crate::storage::IntegrationRecord;
-
 use super::event::build_lambda_event;
+use crate::{
+    error::ApiGatewayV2ServiceError, provider::RustStackApiGatewayV2, storage::IntegrationRecord,
+};
 
 /// Lambda function response (payload format version 2.0).
 #[derive(Debug, Deserialize)]

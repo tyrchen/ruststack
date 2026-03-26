@@ -1,12 +1,11 @@
 //! Secrets Manager handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_secretsmanager_model::error::SecretsManagerError;
-use ruststack_secretsmanager_model::operations::SecretsManagerOperation;
+use ruststack_secretsmanager_model::{
+    error::SecretsManagerError, operations::SecretsManagerOperation,
+};
 
 use crate::body::SecretsManagerResponseBody;
 

@@ -291,16 +291,10 @@ mod tests {
     #[test]
     fn test_should_parse_simple_multipart() {
         let boundary = "----boundary";
-        let body = "------boundary\r\n\
-             Content-Disposition: form-data; name=\"key\"\r\n\
-             \r\n\
-             my-object-key\r\n\
-             ------boundary\r\n\
-             Content-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\n\
-             Content-Type: text/plain\r\n\
-             \r\n\
-             hello world\r\n\
-             ------boundary--\r\n";
+        let body = "------boundary\r\nContent-Disposition: form-data; \
+                    name=\"key\"\r\n\r\nmy-object-key\r\n------boundary\r\nContent-Disposition: \
+                    form-data; name=\"file\"; filename=\"test.txt\"\r\nContent-Type: \
+                    text/plain\r\n\r\nhello world\r\n------boundary--\r\n";
 
         let result = parse_multipart(body.as_bytes(), boundary).expect("should parse");
         assert_eq!(
@@ -314,24 +308,8 @@ mod tests {
     #[test]
     fn test_should_parse_multipart_with_policy_fields() {
         let boundary = "xyzzy";
-        let body = "--xyzzy\r\n\
-             Content-Disposition: form-data; name=\"key\"\r\n\
-             \r\n\
-             uploads/test.bin\r\n\
-             --xyzzy\r\n\
-             Content-Disposition: form-data; name=\"policy\"\r\n\
-             \r\n\
-             eyJjb25kaXRpb25zIjpbXX0=\r\n\
-             --xyzzy\r\n\
-             Content-Disposition: form-data; name=\"x-amz-algorithm\"\r\n\
-             \r\n\
-             AWS4-HMAC-SHA256\r\n\
-             --xyzzy\r\n\
-             Content-Disposition: form-data; name=\"file\"; filename=\"test.bin\"\r\n\
-             Content-Type: application/octet-stream\r\n\
-             \r\n\
-             \x00\x01\x02\x03\r\n\
-             --xyzzy--\r\n";
+        #[rustfmt::skip]
+        let body = "--xyzzy\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nuploads/test.bin\r\n--xyzzy\r\nContent-Disposition: form-data; name=\"policy\"\r\n\r\neyJjb25kaXRpb25zIjpbXX0=\r\n--xyzzy\r\nContent-Disposition: form-data; name=\"x-amz-algorithm\"\r\n\r\nAWS4-HMAC-SHA256\r\n--xyzzy\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n\x00\x01\x02\x03\r\n--xyzzy--\r\n";
 
         let result = parse_multipart(body.as_bytes(), boundary).expect("should parse");
         assert_eq!(
@@ -352,11 +330,8 @@ mod tests {
     #[test]
     fn test_should_reject_missing_file() {
         let boundary = "abc";
-        let body = "--abc\r\n\
-                     Content-Disposition: form-data; name=\"key\"\r\n\
-                     \r\n\
-                     test\r\n\
-                     --abc--\r\n";
+        let body =
+            "--abc\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\ntest\r\n--abc--\r\n";
 
         let result = parse_multipart(body.as_bytes(), boundary);
         assert!(result.is_err());

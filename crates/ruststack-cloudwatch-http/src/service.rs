@@ -6,23 +6,20 @@
 //!
 //! The protocol is detected automatically from request headers and URL path.
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
+use ruststack_cloudwatch_model::{error::CloudWatchError, operations::CloudWatchOperation};
 
-use ruststack_cloudwatch_model::error::CloudWatchError;
-use ruststack_cloudwatch_model::operations::CloudWatchOperation;
-
-use crate::body::CloudWatchResponseBody;
-use crate::dispatch::{CloudWatchHandler, Protocol, dispatch_operation};
-use crate::request::parse_form_params;
-use crate::response::{CONTENT_TYPE, cbor_error_response, error_to_response};
-use crate::router::resolve_operation;
+use crate::{
+    body::CloudWatchResponseBody,
+    dispatch::{CloudWatchHandler, Protocol, dispatch_operation},
+    request::parse_form_params,
+    response::{CONTENT_TYPE, cbor_error_response, error_to_response},
+    router::resolve_operation,
+};
 
 /// Configuration for the CloudWatch HTTP service.
 #[derive(Clone)]

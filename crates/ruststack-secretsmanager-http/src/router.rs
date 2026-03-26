@@ -7,8 +7,9 @@
 //! X-Amz-Target: secretsmanager.CreateSecret
 //! ```
 
-use ruststack_secretsmanager_model::error::SecretsManagerError;
-use ruststack_secretsmanager_model::operations::SecretsManagerOperation;
+use ruststack_secretsmanager_model::{
+    error::SecretsManagerError, operations::SecretsManagerOperation,
+};
 
 /// The expected prefix for the `X-Amz-Target` header value.
 const TARGET_PREFIX: &str = "secretsmanager.";

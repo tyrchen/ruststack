@@ -1,12 +1,9 @@
 //! SNS handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_sns_model::error::SnsError;
-use ruststack_sns_model::operations::SnsOperation;
+use ruststack_sns_model::{error::SnsError, operations::SnsOperation};
 
 use crate::body::SnsResponseBody;
 

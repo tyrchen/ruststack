@@ -1,20 +1,18 @@
 //! API Gateway v2 HTTP service implementing the hyper `Service` trait.
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
-
-use http_body_util::BodyExt;
-use hyper::body::Incoming;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
+use http_body_util::BodyExt;
+use hyper::body::Incoming;
 use ruststack_apigatewayv2_model::error::ApiGatewayV2Error;
 
-use crate::body::ApiGatewayV2ResponseBody;
-use crate::dispatch::{ApiGatewayV2Handler, dispatch_operation};
-use crate::response::{CONTENT_TYPE, error_to_response};
-use crate::router::resolve_operation;
+use crate::{
+    body::ApiGatewayV2ResponseBody,
+    dispatch::{ApiGatewayV2Handler, dispatch_operation},
+    response::{CONTENT_TYPE, error_to_response},
+    router::resolve_operation,
+};
 
 /// Configuration for the API Gateway v2 HTTP service.
 #[derive(Clone)]

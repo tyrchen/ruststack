@@ -2,12 +2,13 @@
 
 use std::collections::HashMap;
 
-use crate::request::StreamingBlob;
-
-use crate::types::{
-    ChecksumAlgorithm, ChecksumMode, Delete, MetadataDirective, ObjectCannedACL,
-    ObjectLockLegalHoldStatus, ObjectLockMode, RequestPayer, ServerSideEncryption, StorageClass,
-    TaggingDirective,
+use crate::{
+    request::StreamingBlob,
+    types::{
+        ChecksumAlgorithm, ChecksumMode, Delete, MetadataDirective, ObjectCannedACL,
+        ObjectLockLegalHoldStatus, ObjectLockMode, RequestPayer, ServerSideEncryption,
+        StorageClass, TaggingDirective,
+    },
 };
 
 /// S3 CopyObjectInput.

@@ -1,7 +1,6 @@
 //! Shard iterator token encoding and decoding.
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
+use base64::{Engine, engine::general_purpose::STANDARD};
 
 /// A shard iterator token encoding the stream name, shard ID, position, and nonce.
 #[derive(Debug, Clone, PartialEq, Eq)]

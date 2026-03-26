@@ -13,8 +13,7 @@
 
 use std::collections::HashMap;
 
-use ruststack_sns_model::error::SnsError;
-use ruststack_sns_model::types::MessageAttributeValue;
+use ruststack_sns_model::{error::SnsError, types::MessageAttributeValue};
 
 use crate::subscription::FilterPolicyScope;
 
@@ -389,15 +388,15 @@ fn evaluate_anything_but(
 pub fn resolve_protocol_message(message: &str, protocol: &str) -> Result<String, SnsError> {
     let parsed: serde_json::Value = serde_json::from_str(message).map_err(|_| {
         SnsError::invalid_parameter(
-            "Invalid parameter: Message Reason: \
-             When MessageStructure is 'json', the message must be valid JSON",
+            "Invalid parameter: Message Reason: When MessageStructure is 'json', the message must \
+             be valid JSON",
         )
     })?;
 
     let obj = parsed.as_object().ok_or_else(|| {
         SnsError::invalid_parameter(
-            "Invalid parameter: Message Reason: \
-             When MessageStructure is 'json', the message must be a JSON object",
+            "Invalid parameter: Message Reason: When MessageStructure is 'json', the message must \
+             be a JSON object",
         )
     })?;
 
@@ -411,8 +410,8 @@ pub fn resolve_protocol_message(message: &str, protocol: &str) -> Result<String,
         .map(String::from)
         .ok_or_else(|| {
             SnsError::invalid_parameter(
-                "Invalid parameter: Message Reason: \
-                 When MessageStructure is 'json', the message must contain a 'default' key",
+                "Invalid parameter: Message Reason: When MessageStructure is 'json', the message \
+                 must contain a 'default' key",
             )
         })
 }

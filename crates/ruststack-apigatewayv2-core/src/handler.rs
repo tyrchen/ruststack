@@ -6,20 +6,18 @@
 //! Uses manual `Pin<Box<dyn Future>>` return types because the `ApiGatewayV2Handler`
 //! trait requires object safety for `Arc<dyn ApiGatewayV2Handler>`.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_apigatewayv2_http::body::ApiGatewayV2ResponseBody;
-use ruststack_apigatewayv2_http::dispatch::ApiGatewayV2Handler;
-use ruststack_apigatewayv2_http::response::{empty_response, json_response};
-use ruststack_apigatewayv2_http::router::PathParams;
-use ruststack_apigatewayv2_model::error::ApiGatewayV2Error;
+use ruststack_apigatewayv2_http::{
+    body::ApiGatewayV2ResponseBody,
+    dispatch::ApiGatewayV2Handler,
+    response::{empty_response, json_response},
+    router::PathParams,
+};
 #[allow(clippy::wildcard_imports)]
 use ruststack_apigatewayv2_model::input::*;
-use ruststack_apigatewayv2_model::operations::ApiGatewayV2Operation;
+use ruststack_apigatewayv2_model::{error::ApiGatewayV2Error, operations::ApiGatewayV2Operation};
 
 use crate::provider::RustStackApiGatewayV2;
 

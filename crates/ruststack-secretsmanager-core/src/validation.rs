@@ -1,7 +1,9 @@
 //! Validation rules for Secrets Manager resources.
 
-use ruststack_secretsmanager_model::error::{SecretsManagerError, SecretsManagerErrorCode};
-use ruststack_secretsmanager_model::types::Tag;
+use ruststack_secretsmanager_model::{
+    error::{SecretsManagerError, SecretsManagerErrorCode},
+    types::Tag,
+};
 
 /// Maximum secret name length.
 const MAX_NAME_LENGTH: usize = 512;
@@ -40,8 +42,8 @@ pub fn validate_secret_name(name: &str) -> Result<(), SecretsManagerError> {
         return Err(SecretsManagerError::with_message(
             SecretsManagerErrorCode::InvalidParameterException,
             format!(
-                "The parameter Name \"{name}\" contains invalid characters. \
-                 Only ASCII letters, digits, and /_+=.@- are allowed."
+                "The parameter Name \"{name}\" contains invalid characters. Only ASCII letters, \
+                 digits, and /_+=.@- are allowed."
             ),
         ));
     }

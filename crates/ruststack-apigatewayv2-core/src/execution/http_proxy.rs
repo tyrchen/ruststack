@@ -4,9 +4,9 @@
 
 use bytes::Bytes;
 
-use crate::error::ApiGatewayV2ServiceError;
-use crate::provider::RustStackApiGatewayV2;
-use crate::storage::IntegrationRecord;
+use crate::{
+    error::ApiGatewayV2ServiceError, provider::RustStackApiGatewayV2, storage::IntegrationRecord,
+};
 
 /// Handle an HTTP proxy integration.
 ///

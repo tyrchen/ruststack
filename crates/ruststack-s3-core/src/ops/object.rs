@@ -3,38 +3,39 @@
 //! Implements `put_object`, `get_object`, `head_object`, `delete_object`,
 //! `delete_objects`, and `copy_object`.
 
-use std::collections::HashMap;
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 
 use bytes::Bytes;
 use chrono::Utc;
-use ruststack_s3_model::error::{S3Error, S3ErrorCode};
-use ruststack_s3_model::input::{
-    CopyObjectInput, DeleteObjectInput, DeleteObjectsInput, GetObjectInput, HeadObjectInput,
-    PutObjectInput,
-};
-use ruststack_s3_model::output::{
-    CopyObjectOutput, DeleteObjectOutput, DeleteObjectsOutput, GetObjectOutput, HeadObjectOutput,
-    PutObjectOutput,
-};
-use ruststack_s3_model::request::StreamingBlob;
-use ruststack_s3_model::types::{
-    ChecksumType, CopyObjectResult, DeletedObject, MetadataDirective, ObjectCannedACL,
-    ObjectLockLegalHoldStatus, ObjectLockMode, ServerSideEncryption, StorageClass,
+use ruststack_s3_model::{
+    error::{S3Error, S3ErrorCode},
+    input::{
+        CopyObjectInput, DeleteObjectInput, DeleteObjectsInput, GetObjectInput, HeadObjectInput,
+        PutObjectInput,
+    },
+    output::{
+        CopyObjectOutput, DeleteObjectOutput, DeleteObjectsOutput, GetObjectOutput,
+        HeadObjectOutput, PutObjectOutput,
+    },
+    request::StreamingBlob,
+    types::{
+        ChecksumType, CopyObjectResult, DeletedObject, MetadataDirective, ObjectCannedACL,
+        ObjectLockLegalHoldStatus, ObjectLockMode, ServerSideEncryption, StorageClass,
+    },
 };
 use tracing::debug;
 
-use crate::checksums::{ChecksumAlgorithm, compute_checksum};
-use crate::error::S3ServiceError;
-use crate::provider::RustStackS3;
-use crate::state::keystore::ObjectStore;
-use crate::state::object::{
-    CannedAcl, ChecksumData, ObjectMetadata, Owner as InternalOwner, S3Object,
+use crate::{
+    checksums::{ChecksumAlgorithm, compute_checksum},
+    error::S3ServiceError,
+    provider::RustStackS3,
+    state::{
+        keystore::ObjectStore,
+        object::{CannedAcl, ChecksumData, ObjectMetadata, Owner as InternalOwner, S3Object},
+    },
+    utils::{is_valid_if_match, is_valid_if_none_match, parse_copy_source, parse_range_header},
+    validation::{validate_content_md5, validate_metadata, validate_object_key},
 };
-use crate::utils::{
-    is_valid_if_match, is_valid_if_none_match, parse_copy_source, parse_range_header,
-};
-use crate::validation::{validate_content_md5, validate_metadata, validate_object_key};
 
 /// Check whether Object Lock (legal hold or retention) prevents deletion of a
 /// specific object version.
@@ -46,10 +47,10 @@ use crate::validation::{validate_content_md5, validate_metadata, validate_object
 ///
 /// AWS S3 rules:
 /// - DELETE *without* a version ID always succeeds (creates a delete marker).
-/// - DELETE *with* a version ID must be rejected if the version has a legal
-///   hold enabled or a retention period that has not yet expired.
-/// - `BypassGovernanceRetention` allows skipping GOVERNANCE-mode retention
-///   checks, but never COMPLIANCE-mode or legal holds.
+/// - DELETE *with* a version ID must be rejected if the version has a legal hold enabled or a
+///   retention period that has not yet expired.
+/// - `BypassGovernanceRetention` allows skipping GOVERNANCE-mode retention checks, but never
+///   COMPLIANCE-mode or legal holds.
 ///
 /// Returns `Ok(())` when the deletion is allowed.
 #[allow(clippy::result_large_err)]

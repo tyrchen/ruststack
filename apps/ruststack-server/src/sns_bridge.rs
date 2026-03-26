@@ -7,9 +7,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-
-use ruststack_sns_core::config::SnsConfig;
-use ruststack_sns_core::publisher::{DeliveryError, SqsPublisher};
+use ruststack_sns_core::{
+    config::SnsConfig,
+    publisher::{DeliveryError, SqsPublisher},
+};
 use ruststack_sqs_core::provider::RustStackSqs;
 use ruststack_sqs_model::input::SendMessageInput;
 

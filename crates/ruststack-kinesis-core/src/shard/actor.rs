@@ -1,17 +1,17 @@
 //! Shard actor implementing the actor-per-shard pattern.
 
-use std::str::FromStr;
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use ruststack_kinesis_model::types::HashKeyRange as ModelHashKeyRange;
 use tokio::sync::{mpsc, oneshot};
 
-use ruststack_kinesis_model::types::HashKeyRange as ModelHashKeyRange;
-
-use super::hash::HashKeyRange;
-use super::sequence::{SequenceNumber, SequenceNumberGenerator};
-use super::storage::{ShardRecordLog, StoredRecord};
+use super::{
+    hash::HashKeyRange,
+    sequence::{SequenceNumber, SequenceNumberGenerator},
+    storage::{ShardRecordLog, StoredRecord},
+};
 
 /// Commands sent to a shard actor.
 #[derive(Debug)]

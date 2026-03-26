@@ -30,121 +30,13 @@ mod service;
 #[cfg(feature = "sns")]
 mod sns_bridge;
 
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::{Context, Result};
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use hyper_util::server::conn::auto::Builder as HttpConnBuilder;
-use tokio::net::TcpListener;
-use tracing::{info, warn};
-use tracing_subscriber::EnvFilter;
-
-#[cfg(feature = "dynamodb")]
-use ruststack_dynamodb_core::config::DynamoDBConfig;
-#[cfg(feature = "dynamodb")]
-use ruststack_dynamodb_core::handler::RustStackDynamoDBHandler;
-#[cfg(feature = "dynamodb")]
-use ruststack_dynamodb_core::provider::RustStackDynamoDB;
-#[cfg(feature = "dynamodb")]
-use ruststack_dynamodb_http::service::{DynamoDBHttpConfig, DynamoDBHttpService};
-
-#[cfg(feature = "sqs")]
-use ruststack_sqs_core::config::SqsConfig;
-#[cfg(feature = "sqs")]
-use ruststack_sqs_core::handler::RustStackSqsHandler;
-#[cfg(feature = "sqs")]
-use ruststack_sqs_core::provider::RustStackSqs;
-#[cfg(feature = "sqs")]
-use ruststack_sqs_http::service::{SqsHttpConfig, SqsHttpService};
-
-#[cfg(feature = "ssm")]
-use ruststack_ssm_core::config::SsmConfig;
-#[cfg(feature = "ssm")]
-use ruststack_ssm_core::handler::RustStackSsmHandler;
-#[cfg(feature = "ssm")]
-use ruststack_ssm_core::provider::RustStackSsm;
-#[cfg(feature = "ssm")]
-use ruststack_ssm_http::service::{SsmHttpConfig, SsmHttpService};
-
-#[cfg(feature = "sns")]
-use crate::sns_bridge::RustStackSqsPublisher;
-#[cfg(feature = "sns")]
-use ruststack_sns_core::config::SnsConfig;
-#[cfg(feature = "sns")]
-use ruststack_sns_core::handler::RustStackSnsHandler;
-#[cfg(feature = "sns")]
-use ruststack_sns_core::provider::RustStackSns;
-#[cfg(feature = "sns")]
-use ruststack_sns_http::service::{SnsHttpConfig, SnsHttpService};
-
-#[cfg(feature = "lambda")]
-use ruststack_lambda_core::config::LambdaConfig;
-#[cfg(feature = "lambda")]
-use ruststack_lambda_core::handler::RustStackLambdaHandler;
-#[cfg(feature = "lambda")]
-use ruststack_lambda_core::provider::RustStackLambda;
-#[cfg(feature = "lambda")]
-use ruststack_lambda_http::service::{LambdaHttpConfig, LambdaHttpService};
-
-#[cfg(feature = "events")]
-use crate::events_bridge::LocalTargetDelivery;
-#[cfg(feature = "events")]
-use ruststack_events_core::config::EventsConfig;
-#[cfg(feature = "events")]
-use ruststack_events_core::handler::RustStackEventsHandler;
-#[cfg(feature = "events")]
-use ruststack_events_core::provider::RustStackEvents;
-#[cfg(feature = "events")]
-use ruststack_events_http::service::{EventsHttpConfig, EventsHttpService};
-
-#[cfg(feature = "logs")]
-use ruststack_logs_core::config::LogsConfig;
-#[cfg(feature = "logs")]
-use ruststack_logs_core::handler::RustStackLogsHandler;
-#[cfg(feature = "logs")]
-use ruststack_logs_core::provider::RustStackLogs;
-#[cfg(feature = "logs")]
-use ruststack_logs_http::service::{LogsHttpConfig, LogsHttpService};
-
-#[cfg(feature = "kms")]
-use ruststack_kms_core::config::KmsConfig;
-#[cfg(feature = "kms")]
-use ruststack_kms_core::handler::RustStackKmsHandler;
-#[cfg(feature = "kms")]
-use ruststack_kms_core::provider::RustStackKms;
-#[cfg(feature = "kms")]
-use ruststack_kms_http::service::{KmsHttpConfig, KmsHttpService};
-
-#[cfg(feature = "kinesis")]
-use ruststack_kinesis_core::config::KinesisConfig;
-#[cfg(feature = "kinesis")]
-use ruststack_kinesis_core::handler::RustStackKinesisHandler;
-#[cfg(feature = "kinesis")]
-use ruststack_kinesis_core::provider::RustStackKinesis;
-#[cfg(feature = "kinesis")]
-use ruststack_kinesis_http::service::{KinesisHttpConfig, KinesisHttpService};
-
-#[cfg(feature = "secretsmanager")]
-use ruststack_secretsmanager_core::config::SecretsManagerConfig;
-#[cfg(feature = "secretsmanager")]
-use ruststack_secretsmanager_core::handler::RustStackSecretsManagerHandler;
-#[cfg(feature = "secretsmanager")]
-use ruststack_secretsmanager_core::provider::RustStackSecretsManager;
-#[cfg(feature = "secretsmanager")]
-use ruststack_secretsmanager_http::service::{SecretsManagerHttpConfig, SecretsManagerHttpService};
-
-#[cfg(feature = "ses")]
-use ruststack_ses_core::config::SesConfig;
-#[cfg(feature = "ses")]
-use ruststack_ses_core::handler::RustStackSesHandler;
-#[cfg(feature = "ses")]
-use ruststack_ses_core::provider::RustStackSes;
-#[cfg(feature = "ses")]
-use ruststack_ses_http::service::{SesHttpConfig, SesHttpService};
-#[cfg(feature = "ses")]
-use ruststack_ses_http::v2::SesV2HttpService;
-
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto::Builder as HttpConnBuilder,
+};
 #[cfg(feature = "apigatewayv2")]
 use ruststack_apigatewayv2_core::config::ApiGatewayV2Config;
 #[cfg(feature = "apigatewayv2")]
@@ -153,7 +45,22 @@ use ruststack_apigatewayv2_core::handler::RustStackApiGatewayV2Handler;
 use ruststack_apigatewayv2_core::provider::RustStackApiGatewayV2;
 #[cfg(feature = "apigatewayv2")]
 use ruststack_apigatewayv2_http::service::{ApiGatewayV2HttpConfig, ApiGatewayV2HttpService};
-
+#[cfg(feature = "cloudwatch")]
+use ruststack_cloudwatch_core::config::CloudWatchConfig;
+#[cfg(feature = "cloudwatch")]
+use ruststack_cloudwatch_core::handler::RustStackCloudWatchHandler;
+#[cfg(feature = "cloudwatch")]
+use ruststack_cloudwatch_core::provider::RustStackCloudWatch;
+#[cfg(feature = "cloudwatch")]
+use ruststack_cloudwatch_http::service::{CloudWatchHttpConfig, CloudWatchHttpService};
+#[cfg(feature = "dynamodb")]
+use ruststack_dynamodb_core::config::DynamoDBConfig;
+#[cfg(feature = "dynamodb")]
+use ruststack_dynamodb_core::handler::RustStackDynamoDBHandler;
+#[cfg(feature = "dynamodb")]
+use ruststack_dynamodb_core::provider::RustStackDynamoDB;
+#[cfg(feature = "dynamodb")]
+use ruststack_dynamodb_http::service::{DynamoDBHttpConfig, DynamoDBHttpService};
 #[cfg(feature = "dynamodbstreams")]
 use ruststack_dynamodbstreams_core::config::DynamoDBStreamsConfig;
 #[cfg(feature = "dynamodbstreams")]
@@ -170,16 +77,14 @@ use ruststack_dynamodbstreams_core::storage::StreamStore;
 use ruststack_dynamodbstreams_http::service::{
     DynamoDBStreamsHttpConfig, DynamoDBStreamsHttpService,
 };
-
-#[cfg(feature = "cloudwatch")]
-use ruststack_cloudwatch_core::config::CloudWatchConfig;
-#[cfg(feature = "cloudwatch")]
-use ruststack_cloudwatch_core::handler::RustStackCloudWatchHandler;
-#[cfg(feature = "cloudwatch")]
-use ruststack_cloudwatch_core::provider::RustStackCloudWatch;
-#[cfg(feature = "cloudwatch")]
-use ruststack_cloudwatch_http::service::{CloudWatchHttpConfig, CloudWatchHttpService};
-
+#[cfg(feature = "events")]
+use ruststack_events_core::config::EventsConfig;
+#[cfg(feature = "events")]
+use ruststack_events_core::handler::RustStackEventsHandler;
+#[cfg(feature = "events")]
+use ruststack_events_core::provider::RustStackEvents;
+#[cfg(feature = "events")]
+use ruststack_events_http::service::{EventsHttpConfig, EventsHttpService};
 #[cfg(feature = "iam")]
 use ruststack_iam_core::config::IamConfig;
 #[cfg(feature = "iam")]
@@ -190,7 +95,84 @@ use ruststack_iam_core::provider::RustStackIam;
 use ruststack_iam_core::store::IamStore;
 #[cfg(feature = "iam")]
 use ruststack_iam_http::service::{IamHttpConfig, IamHttpService};
-
+#[cfg(feature = "kinesis")]
+use ruststack_kinesis_core::config::KinesisConfig;
+#[cfg(feature = "kinesis")]
+use ruststack_kinesis_core::handler::RustStackKinesisHandler;
+#[cfg(feature = "kinesis")]
+use ruststack_kinesis_core::provider::RustStackKinesis;
+#[cfg(feature = "kinesis")]
+use ruststack_kinesis_http::service::{KinesisHttpConfig, KinesisHttpService};
+#[cfg(feature = "kms")]
+use ruststack_kms_core::config::KmsConfig;
+#[cfg(feature = "kms")]
+use ruststack_kms_core::handler::RustStackKmsHandler;
+#[cfg(feature = "kms")]
+use ruststack_kms_core::provider::RustStackKms;
+#[cfg(feature = "kms")]
+use ruststack_kms_http::service::{KmsHttpConfig, KmsHttpService};
+#[cfg(feature = "lambda")]
+use ruststack_lambda_core::config::LambdaConfig;
+#[cfg(feature = "lambda")]
+use ruststack_lambda_core::handler::RustStackLambdaHandler;
+#[cfg(feature = "lambda")]
+use ruststack_lambda_core::provider::RustStackLambda;
+#[cfg(feature = "lambda")]
+use ruststack_lambda_http::service::{LambdaHttpConfig, LambdaHttpService};
+#[cfg(feature = "logs")]
+use ruststack_logs_core::config::LogsConfig;
+#[cfg(feature = "logs")]
+use ruststack_logs_core::handler::RustStackLogsHandler;
+#[cfg(feature = "logs")]
+use ruststack_logs_core::provider::RustStackLogs;
+#[cfg(feature = "logs")]
+use ruststack_logs_http::service::{LogsHttpConfig, LogsHttpService};
+#[cfg(feature = "s3")]
+use ruststack_s3_core::{RustStackS3, S3Config};
+#[cfg(feature = "s3")]
+use ruststack_s3_http::service::{S3HttpConfig, S3HttpService};
+#[cfg(feature = "secretsmanager")]
+use ruststack_secretsmanager_core::config::SecretsManagerConfig;
+#[cfg(feature = "secretsmanager")]
+use ruststack_secretsmanager_core::handler::RustStackSecretsManagerHandler;
+#[cfg(feature = "secretsmanager")]
+use ruststack_secretsmanager_core::provider::RustStackSecretsManager;
+#[cfg(feature = "secretsmanager")]
+use ruststack_secretsmanager_http::service::{SecretsManagerHttpConfig, SecretsManagerHttpService};
+#[cfg(feature = "ses")]
+use ruststack_ses_core::config::SesConfig;
+#[cfg(feature = "ses")]
+use ruststack_ses_core::handler::RustStackSesHandler;
+#[cfg(feature = "ses")]
+use ruststack_ses_core::provider::RustStackSes;
+#[cfg(feature = "ses")]
+use ruststack_ses_http::service::{SesHttpConfig, SesHttpService};
+#[cfg(feature = "ses")]
+use ruststack_ses_http::v2::SesV2HttpService;
+#[cfg(feature = "sns")]
+use ruststack_sns_core::config::SnsConfig;
+#[cfg(feature = "sns")]
+use ruststack_sns_core::handler::RustStackSnsHandler;
+#[cfg(feature = "sns")]
+use ruststack_sns_core::provider::RustStackSns;
+#[cfg(feature = "sns")]
+use ruststack_sns_http::service::{SnsHttpConfig, SnsHttpService};
+#[cfg(feature = "sqs")]
+use ruststack_sqs_core::config::SqsConfig;
+#[cfg(feature = "sqs")]
+use ruststack_sqs_core::handler::RustStackSqsHandler;
+#[cfg(feature = "sqs")]
+use ruststack_sqs_core::provider::RustStackSqs;
+#[cfg(feature = "sqs")]
+use ruststack_sqs_http::service::{SqsHttpConfig, SqsHttpService};
+#[cfg(feature = "ssm")]
+use ruststack_ssm_core::config::SsmConfig;
+#[cfg(feature = "ssm")]
+use ruststack_ssm_core::handler::RustStackSsmHandler;
+#[cfg(feature = "ssm")]
+use ruststack_ssm_core::provider::RustStackSsm;
+#[cfg(feature = "ssm")]
+use ruststack_ssm_http::service::{SsmHttpConfig, SsmHttpService};
 #[cfg(feature = "sts")]
 use ruststack_sts_core::config::StsConfig;
 #[cfg(feature = "sts")]
@@ -199,14 +181,15 @@ use ruststack_sts_core::handler::RustStackStsHandler;
 use ruststack_sts_core::provider::RustStackSts;
 #[cfg(feature = "sts")]
 use ruststack_sts_http::service::{StsHttpConfig, StsHttpService};
+use tokio::net::TcpListener;
+use tracing::{info, warn};
+use tracing_subscriber::EnvFilter;
 
-#[cfg(feature = "s3")]
-use ruststack_s3_core::{RustStackS3, S3Config};
-#[cfg(feature = "s3")]
-use ruststack_s3_http::service::{S3HttpConfig, S3HttpService};
-
-use crate::gateway::GatewayService;
-use crate::service::ServiceRouter;
+#[cfg(feature = "events")]
+use crate::events_bridge::LocalTargetDelivery;
+#[cfg(feature = "sns")]
+use crate::sns_bridge::RustStackSqsPublisher;
+use crate::{gateway::GatewayService, service::ServiceRouter};
 
 /// Server version reported in health check responses.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -630,8 +613,10 @@ fn parse_services_value(raw: &str) -> Vec<String> {
 /// Exits with code 0 if the response is 200 OK and contains at least one
 /// running service, 1 otherwise.
 async fn run_health_check(addr: &str) -> Result<()> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpStream;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpStream,
+    };
 
     let mut stream = TcpStream::connect(addr)
         .await
@@ -1029,8 +1014,8 @@ async fn main() -> Result<()> {
 
     if services.is_empty() {
         anyhow::bail!(
-            "no services enabled. Check the SERVICES environment variable \
-             and compiled feature flags."
+            "no services enabled. Check the SERVICES environment variable and compiled feature \
+             flags."
         );
     }
 

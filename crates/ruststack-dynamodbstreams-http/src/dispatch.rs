@@ -1,12 +1,11 @@
 //! DynamoDB Streams handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_dynamodbstreams_model::error::DynamoDBStreamsError;
-use ruststack_dynamodbstreams_model::operations::DynamoDBStreamsOperation;
+use ruststack_dynamodbstreams_model::{
+    error::DynamoDBStreamsError, operations::DynamoDBStreamsOperation,
+};
 
 use crate::body::DynamoDBStreamsResponseBody;
 

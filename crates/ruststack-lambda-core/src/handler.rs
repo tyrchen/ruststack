@@ -6,24 +6,29 @@
 //! Uses manual `Pin<Box<dyn Future>>` return types because the `LambdaHandler`
 //! trait requires object safety for `Arc<dyn LambdaHandler>`.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_lambda_http::body::LambdaResponseBody;
-use ruststack_lambda_http::dispatch::LambdaHandler;
-use ruststack_lambda_http::response::{empty_response, json_response};
-use ruststack_lambda_http::router::PathParams;
-use ruststack_lambda_model::error::LambdaError;
-use ruststack_lambda_model::input::{
-    AddPermissionInput, CreateAliasInput, CreateFunctionInput, CreateFunctionUrlConfigInput,
-    PublishVersionInput, TagResourceInput, UpdateAliasInput, UpdateFunctionCodeInput,
-    UpdateFunctionConfigurationInput, UpdateFunctionUrlConfigInput,
+use ruststack_lambda_http::{
+    body::LambdaResponseBody,
+    dispatch::LambdaHandler,
+    response::{empty_response, json_response},
+    router::PathParams,
 };
-use ruststack_lambda_model::operations::LambdaOperation;
-use ruststack_lambda_model::types::InvocationType;
+use ruststack_lambda_model::{
+    error::LambdaError,
+    input::{
+        AddLayerVersionPermissionInput, AddPermissionInput, CreateAliasInput,
+        CreateEventSourceMappingInput, CreateFunctionInput, CreateFunctionUrlConfigInput,
+        EventInvokeConfigInput, PublishLayerVersionInput, PublishVersionInput,
+        PutFunctionConcurrencyInput, TagResourceInput, UpdateAliasInput,
+        UpdateEventSourceMappingInput, UpdateFunctionCodeInput, UpdateFunctionConfigurationInput,
+        UpdateFunctionUrlConfigInput,
+    },
+    operations::LambdaOperation,
+    output::ListFunctionEventInvokeConfigsOutput,
+    types::InvocationType,
+};
 
 use crate::provider::RustStackLambda;
 
@@ -430,6 +435,258 @@ async fn dispatch(
             let output = provider
                 .list_function_url_configs(function_name)
                 .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        // ---- Phase 2b: Lambda Layers ----
+        LambdaOperation::PublishLayerVersion => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let input: PublishLayerVersionInput = serde_json::from_slice(body).map_err(|e| {
+                LambdaError::invalid_parameter(format!("Invalid request body: {e}"))
+            })?;
+            let output = provider
+                .publish_layer_version(layer_name, &input)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(201, &output)
+        }
+
+        LambdaOperation::GetLayerVersion => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let version_number = require_path_param(path_params, "VersionNumber")?;
+            let version: u64 = version_number.parse().map_err(|_| {
+                LambdaError::invalid_parameter(format!("Invalid version number: {version_number}"))
+            })?;
+            let output = provider
+                .get_layer_version(layer_name, version)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::GetLayerVersionByArn => {
+            // The ARN is passed as a query parameter.
+            let arn = get_query_param(&query_params, "Arn")
+                .ok_or_else(|| LambdaError::invalid_parameter("Arn query parameter is required"))?;
+            let output = provider
+                .get_layer_version_by_arn(arn)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::ListLayerVersions => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let marker = get_query_param(&query_params, "Marker");
+            let max_items =
+                get_query_param(&query_params, "MaxItems").and_then(|v| v.parse::<usize>().ok());
+            let output = provider
+                .list_layer_versions(layer_name, marker, max_items)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::ListLayers => {
+            let marker = get_query_param(&query_params, "Marker");
+            let max_items =
+                get_query_param(&query_params, "MaxItems").and_then(|v| v.parse::<usize>().ok());
+            let output = provider.list_layers(marker, max_items);
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::DeleteLayerVersion => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let version_number = require_path_param(path_params, "VersionNumber")?;
+            let version: u64 = version_number.parse().map_err(|_| {
+                LambdaError::invalid_parameter(format!("Invalid version number: {version_number}"))
+            })?;
+            provider
+                .delete_layer_version(layer_name, version)
+                .map_err(LambdaError::from)?;
+            wrap_empty_response(204)
+        }
+
+        LambdaOperation::AddLayerVersionPermission => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let version_number = require_path_param(path_params, "VersionNumber")?;
+            let version: u64 = version_number.parse().map_err(|_| {
+                LambdaError::invalid_parameter(format!("Invalid version number: {version_number}"))
+            })?;
+            let input: AddLayerVersionPermissionInput =
+                serde_json::from_slice(body).map_err(|e| {
+                    LambdaError::invalid_parameter(format!("Invalid request body: {e}"))
+                })?;
+            let output = provider
+                .add_layer_version_permission(layer_name, version, &input)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(201, &output)
+        }
+
+        LambdaOperation::GetLayerVersionPolicy => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let version_number = require_path_param(path_params, "VersionNumber")?;
+            let version: u64 = version_number.parse().map_err(|_| {
+                LambdaError::invalid_parameter(format!("Invalid version number: {version_number}"))
+            })?;
+            let output = provider
+                .get_layer_version_policy(layer_name, version)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::RemoveLayerVersionPermission => {
+            let layer_name = require_path_param(path_params, "LayerName")?;
+            let version_number = require_path_param(path_params, "VersionNumber")?;
+            let version: u64 = version_number.parse().map_err(|_| {
+                LambdaError::invalid_parameter(format!("Invalid version number: {version_number}"))
+            })?;
+            let statement_id = require_path_param(path_params, "StatementId")?;
+            provider
+                .remove_layer_version_permission(layer_name, version, statement_id)
+                .map_err(LambdaError::from)?;
+            wrap_empty_response(204)
+        }
+
+        // ---- Phase 3: Event Source Mappings ----
+        LambdaOperation::CreateEventSourceMapping => {
+            let input: CreateEventSourceMappingInput =
+                serde_json::from_slice(body).map_err(|e| {
+                    LambdaError::invalid_parameter(format!("Invalid request body: {e}"))
+                })?;
+            let output = provider
+                .create_event_source_mapping(&input)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(202, &output)
+        }
+
+        LambdaOperation::GetEventSourceMapping => {
+            let uuid = require_path_param(path_params, "UUID")?;
+            let output = provider
+                .get_event_source_mapping(uuid)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::UpdateEventSourceMapping => {
+            let uuid = require_path_param(path_params, "UUID")?;
+            let input: UpdateEventSourceMappingInput =
+                serde_json::from_slice(body).map_err(|e| {
+                    LambdaError::invalid_parameter(format!("Invalid request body: {e}"))
+                })?;
+            let output = provider
+                .update_event_source_mapping(uuid, &input)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(202, &output)
+        }
+
+        LambdaOperation::DeleteEventSourceMapping => {
+            let uuid = require_path_param(path_params, "UUID")?;
+            let output = provider
+                .delete_event_source_mapping(uuid)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(202, &output)
+        }
+
+        LambdaOperation::ListEventSourceMappings => {
+            let function_name = get_query_param(&query_params, "FunctionName");
+            let event_source_arn = get_query_param(&query_params, "EventSourceArn");
+            let marker = get_query_param(&query_params, "Marker");
+            let max_items =
+                get_query_param(&query_params, "MaxItems").and_then(|v| v.parse::<usize>().ok());
+            let output = provider.list_event_source_mappings(
+                function_name,
+                event_source_arn,
+                marker,
+                max_items,
+            );
+            wrap_json_response(200, &output)
+        }
+
+        // ---- Phase 6: Concurrency ----
+        LambdaOperation::PutFunctionConcurrency => {
+            let function_name = require_path_param(path_params, "FunctionName")?;
+            let input: PutFunctionConcurrencyInput = serde_json::from_slice(body).map_err(|e| {
+                LambdaError::invalid_parameter(format!("Invalid request body: {e}"))
+            })?;
+            let output = provider
+                .put_function_concurrency(function_name, input.reserved_concurrent_executions)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::GetFunctionConcurrency => {
+            let function_name = require_path_param(path_params, "FunctionName")?;
+            let output = provider
+                .get_function_concurrency(function_name)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::DeleteFunctionConcurrency => {
+            let function_name = require_path_param(path_params, "FunctionName")?;
+            provider
+                .delete_function_concurrency(function_name)
+                .map_err(LambdaError::from)?;
+            wrap_empty_response(204)
+        }
+
+        // ---- Phase 6: Event Invoke Config ----
+        LambdaOperation::PutFunctionEventInvokeConfig => {
+            let function_name = require_path_param(path_params, "FunctionName")?;
+            let input: EventInvokeConfigInput = if body.is_empty() {
+                EventInvokeConfigInput::default()
+            } else {
+                serde_json::from_slice(body).map_err(|e| {
+                    LambdaError::invalid_parameter(format!("Invalid request body: {e}"))
+                })?
+            };
+            let output = provider
+                .put_function_event_invoke_config(function_name, qualifier, &input)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::GetFunctionEventInvokeConfig => {
+            let function_name = require_path_param(path_params, "FunctionName")?;
+            let output = provider
+                .get_function_event_invoke_config(function_name, qualifier)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::UpdateFunctionEventInvokeConfig => {
+            let function_name = require_path_param(path_params, "FunctionName")?;
+            let input: EventInvokeConfigInput = if body.is_empty() {
+                EventInvokeConfigInput::default()
+            } else {
+                serde_json::from_slice(body).map_err(|e| {
+                    LambdaError::invalid_parameter(format!("Invalid request body: {e}"))
+                })?
+            };
+            let output = provider
+                .update_function_event_invoke_config(function_name, qualifier, &input)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::DeleteFunctionEventInvokeConfig => {
+            let function_name = require_path_param(path_params, "FunctionName")?;
+            provider
+                .delete_function_event_invoke_config(function_name, qualifier)
+                .map_err(LambdaError::from)?;
+            wrap_empty_response(204)
+        }
+
+        LambdaOperation::ListFunctionEventInvokeConfigs => {
+            let function_name = require_path_param(path_params, "FunctionName")?;
+            let configs = provider
+                .list_function_event_invoke_configs(function_name)
+                .map_err(LambdaError::from)?;
+            let output = ListFunctionEventInvokeConfigsOutput {
+                function_event_invoke_configs: if configs.is_empty() {
+                    None
+                } else {
+                    Some(configs)
+                },
+                next_marker: None,
+            };
             wrap_json_response(200, &output)
         }
 

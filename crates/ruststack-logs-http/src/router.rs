@@ -7,8 +7,7 @@
 //! X-Amz-Target: Logs_20140328.CreateLogGroup
 //! ```
 
-use ruststack_logs_model::error::LogsError;
-use ruststack_logs_model::operations::LogsOperation;
+use ruststack_logs_model::{error::LogsError, operations::LogsOperation};
 
 /// The expected prefix for the `X-Amz-Target` header value.
 const TARGET_PREFIX: &str = "Logs_20140328.";

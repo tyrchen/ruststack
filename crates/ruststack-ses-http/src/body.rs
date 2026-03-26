@@ -1,7 +1,9 @@
 //! SES HTTP response body type.
 
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use bytes::Bytes;
 use http_body_util::Full;

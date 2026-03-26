@@ -7,8 +7,7 @@
 //! X-Amz-Target: AmazonSSM.PutParameter
 //! ```
 
-use ruststack_ssm_model::error::SsmError;
-use ruststack_ssm_model::operations::SsmOperation;
+use ruststack_ssm_model::{error::SsmError, operations::SsmOperation};
 
 /// The expected prefix for the `X-Amz-Target` header value.
 const TARGET_PREFIX: &str = "AmazonSSM.";

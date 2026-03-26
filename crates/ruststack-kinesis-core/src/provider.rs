@@ -1,43 +1,47 @@
 //! Kinesis service provider implementing all operations.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
+use ruststack_kinesis_model::{
+    error::{KinesisError, KinesisErrorCode},
+    input::{
+        AddTagsToStreamInput, CreateStreamInput, DecreaseStreamRetentionPeriodInput,
+        DeleteResourcePolicyInput, DeleteStreamInput, DeregisterStreamConsumerInput,
+        DescribeLimitsInput, DescribeStreamConsumerInput, DescribeStreamInput,
+        DescribeStreamSummaryInput, GetRecordsInput, GetResourcePolicyInput, GetShardIteratorInput,
+        IncreaseStreamRetentionPeriodInput, ListShardsInput, ListStreamConsumersInput,
+        ListStreamsInput, ListTagsForStreamInput, MergeShardsInput, PutRecordInput,
+        PutRecordsInput, PutResourcePolicyInput, RegisterStreamConsumerInput,
+        RemoveTagsFromStreamInput, SplitShardInput, StartStreamEncryptionInput,
+        StopStreamEncryptionInput, SubscribeToShardInput, UpdateShardCountInput,
+    },
+    output::{
+        DescribeLimitsOutput, DescribeStreamConsumerOutput, DescribeStreamOutput,
+        DescribeStreamSummaryOutput, GetRecordsOutput, GetResourcePolicyOutput,
+        GetShardIteratorOutput, ListShardsOutput, ListStreamConsumersOutput, ListStreamsOutput,
+        ListTagsForStreamOutput, PutRecordOutput, PutRecordsOutput, RegisterStreamConsumerOutput,
+        UpdateShardCountOutput,
+    },
+    types::{
+        Consumer, ConsumerDescription, ConsumerStatus, EncryptionType, EnhancedMetrics,
+        PutRecordsResultEntry, Record, SequenceNumberRange, Shard, ShardFilterType,
+        ShardIteratorType, StreamDescription, StreamDescriptionSummary, StreamMode,
+        StreamModeDetails, StreamStatus, StreamSummary, Tag,
+    },
+};
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
-use ruststack_kinesis_model::error::{KinesisError, KinesisErrorCode};
-use ruststack_kinesis_model::input::{
-    AddTagsToStreamInput, CreateStreamInput, DecreaseStreamRetentionPeriodInput,
-    DeleteResourcePolicyInput, DeleteStreamInput, DeregisterStreamConsumerInput,
-    DescribeLimitsInput, DescribeStreamConsumerInput, DescribeStreamInput,
-    DescribeStreamSummaryInput, GetRecordsInput, GetResourcePolicyInput, GetShardIteratorInput,
-    IncreaseStreamRetentionPeriodInput, ListShardsInput, ListStreamConsumersInput,
-    ListStreamsInput, ListTagsForStreamInput, MergeShardsInput, PutRecordInput, PutRecordsInput,
-    PutResourcePolicyInput, RegisterStreamConsumerInput, RemoveTagsFromStreamInput,
-    SplitShardInput, StartStreamEncryptionInput, StopStreamEncryptionInput, SubscribeToShardInput,
-    UpdateShardCountInput,
+use crate::{
+    config::KinesisConfig,
+    shard::{
+        actor::{IteratorRequest, ShardCommand, ShardHandle, ShardInfo},
+        hash::{HashKey, HashKeyRange},
+        iterator::ShardIteratorToken,
+    },
 };
-use ruststack_kinesis_model::output::{
-    DescribeLimitsOutput, DescribeStreamConsumerOutput, DescribeStreamOutput,
-    DescribeStreamSummaryOutput, GetRecordsOutput, GetResourcePolicyOutput, GetShardIteratorOutput,
-    ListShardsOutput, ListStreamConsumersOutput, ListStreamsOutput, ListTagsForStreamOutput,
-    PutRecordOutput, PutRecordsOutput, RegisterStreamConsumerOutput, UpdateShardCountOutput,
-};
-use ruststack_kinesis_model::types::{
-    Consumer, ConsumerDescription, ConsumerStatus, EncryptionType, EnhancedMetrics,
-    PutRecordsResultEntry, Record, SequenceNumberRange, Shard, ShardFilterType, ShardIteratorType,
-    StreamDescription, StreamDescriptionSummary, StreamMode, StreamModeDetails, StreamStatus,
-    StreamSummary, Tag,
-};
-
-use crate::config::KinesisConfig;
-use crate::shard::actor::{IteratorRequest, ShardCommand, ShardHandle, ShardInfo};
-use crate::shard::hash::{HashKey, HashKeyRange};
-use crate::shard::iterator::ShardIteratorToken;
 
 /// Internal consumer metadata.
 #[derive(Debug, Clone)]

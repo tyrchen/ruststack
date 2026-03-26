@@ -4,8 +4,7 @@
 //! that need to be deserialized from XML request bodies. The deserialization follows the
 //! AWS S3 RestXml protocol conventions.
 
-use quick_xml::Reader;
-use quick_xml::events::Event;
+use quick_xml::{Reader, events::Event};
 
 use crate::error::XmlError;
 
@@ -147,26 +146,23 @@ fn parse_timestamp(s: &str) -> Result<chrono::DateTime<chrono::Utc>, XmlError> {
 
 use ruststack_s3_model::types::{
     AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy,
-    BucketAccelerateStatus, BucketInfo, BucketLifecycleConfiguration, BucketLoggingStatus,
-    BucketLogsPermission, BucketVersioningStatus, CORSConfiguration, CORSRule,
-    CompletedMultipartUpload, CompletedPart, Condition, CreateBucketConfiguration,
-    DefaultRetention, Delete, ErrorDocument, EventBridgeConfiguration, ExpirationStatus,
-    FilterRule, FilterRuleName, Grant, Grantee, IndexDocument, LambdaFunctionConfiguration,
-    LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
-    LocationInfo, LoggingEnabled, MFADelete, NoncurrentVersionExpiration,
-    NoncurrentVersionTransition, NotificationConfiguration, NotificationConfigurationFilter,
-    ObjectIdentifier, ObjectLockConfiguration, ObjectLockEnabled, ObjectLockLegalHold,
-    ObjectLockLegalHoldStatus, ObjectLockRetention, ObjectLockRetentionMode, ObjectLockRule,
-    ObjectOwnership, Owner, OwnershipControls, OwnershipControlsRule, PartitionedPrefix, Payer,
-    Permission, Protocol, PublicAccessBlockConfiguration, QueueConfiguration, Redirect,
-    RedirectAllRequestsTo, RequestPaymentConfiguration, RoutingRule, S3KeyFilter,
-    ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule,
-    SimplePrefix, Tag, Tagging, TargetGrant, TargetObjectKeyFormat, TopicConfiguration, Transition,
-    TransitionStorageClass, VersioningConfiguration, WebsiteConfiguration,
-};
-use ruststack_s3_model::types::{
-    BucketLocationConstraint, BucketType, DataRedundancy, Event as S3Event, LocationType,
-    ServerSideEncryption,
+    BucketAccelerateStatus, BucketInfo, BucketLifecycleConfiguration, BucketLocationConstraint,
+    BucketLoggingStatus, BucketLogsPermission, BucketType, BucketVersioningStatus,
+    CORSConfiguration, CORSRule, CompletedMultipartUpload, CompletedPart, Condition,
+    CreateBucketConfiguration, DataRedundancy, DefaultRetention, Delete, ErrorDocument,
+    Event as S3Event, EventBridgeConfiguration, ExpirationStatus, FilterRule, FilterRuleName,
+    Grant, Grantee, IndexDocument, LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule,
+    LifecycleRuleAndOperator, LifecycleRuleFilter, LocationInfo, LocationType, LoggingEnabled,
+    MFADelete, NoncurrentVersionExpiration, NoncurrentVersionTransition, NotificationConfiguration,
+    NotificationConfigurationFilter, ObjectIdentifier, ObjectLockConfiguration, ObjectLockEnabled,
+    ObjectLockLegalHold, ObjectLockLegalHoldStatus, ObjectLockRetention, ObjectLockRetentionMode,
+    ObjectLockRule, ObjectOwnership, Owner, OwnershipControls, OwnershipControlsRule,
+    PartitionedPrefix, Payer, Permission, Protocol, PublicAccessBlockConfiguration,
+    QueueConfiguration, Redirect, RedirectAllRequestsTo, RequestPaymentConfiguration, RoutingRule,
+    S3KeyFilter, ServerSideEncryption, ServerSideEncryptionByDefault,
+    ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix, Tag, Tagging,
+    TargetGrant, TargetObjectKeyFormat, TopicConfiguration, Transition, TransitionStorageClass,
+    VersioningConfiguration, WebsiteConfiguration,
 };
 
 impl S3Deserialize for Tag {

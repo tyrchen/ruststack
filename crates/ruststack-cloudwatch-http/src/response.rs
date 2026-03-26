@@ -50,14 +50,9 @@ pub fn error_to_xml(error: &CloudWatchError, request_id: &str) -> String {
         "Sender"
     };
     format!(
-        "<ErrorResponse xmlns=\"{XML_NS}\">\
-         <Error>\
-         <Type>{fault}</Type>\
-         <Code>{}</Code>\
-         <Message>{}</Message>\
-         </Error>\
-         <RequestId>{}</RequestId>\
-         </ErrorResponse>",
+        "<ErrorResponse \
+         xmlns=\"{XML_NS}\"><Error><Type>{fault}</Type><Code>{}</Code><Message>{}</Message></\
+         Error><RequestId>{}</RequestId></ErrorResponse>",
         xml_escape(&error.code.to_string()),
         xml_escape(&error.message),
         xml_escape(request_id),

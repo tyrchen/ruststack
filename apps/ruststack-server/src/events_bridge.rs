@@ -7,7 +7,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-
 use ruststack_events_core::delivery::{DeliveryError, TargetDelivery};
 use ruststack_sqs_core::provider::RustStackSqs;
 use ruststack_sqs_model::input::SendMessageInput;

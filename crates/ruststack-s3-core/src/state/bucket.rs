@@ -16,9 +16,11 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use super::keystore::ObjectStore;
-use super::multipart::MultipartUpload;
-use super::object::{CannedAcl, Owner};
+use super::{
+    keystore::ObjectStore,
+    multipart::MultipartUpload,
+    object::{CannedAcl, Owner},
+};
 
 // ---------------------------------------------------------------------------
 // Supporting configuration types

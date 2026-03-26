@@ -6,18 +6,13 @@
 //! Covers all four phases: users/roles/policies, groups/instance profiles,
 //! policy versions/inline policies, and tagging/service-linked roles.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_iam_http::body::IamResponseBody;
-use ruststack_iam_http::dispatch::IamHandler;
-use ruststack_iam_http::request::parse_form_params;
-use ruststack_iam_http::response::xml_response;
-use ruststack_iam_model::error::IamError;
-use ruststack_iam_model::operations::IamOperation;
+use ruststack_iam_http::{
+    body::IamResponseBody, dispatch::IamHandler, request::parse_form_params, response::xml_response,
+};
+use ruststack_iam_model::{error::IamError, operations::IamOperation};
 
 use crate::provider::RustStackIam;
 
@@ -180,6 +175,28 @@ fn dispatch(
         IamOperation::GetAccountAuthorizationDetails => {
             provider.get_account_authorization_details(&params)?
         }
+
+        // Phase 4: OIDC Providers
+        IamOperation::CreateOpenIDConnectProvider => {
+            provider.create_open_id_connect_provider(&params)?
+        }
+        IamOperation::GetOpenIDConnectProvider => provider.get_open_id_connect_provider(&params)?,
+        IamOperation::DeleteOpenIDConnectProvider => {
+            provider.delete_open_id_connect_provider(&params)?
+        }
+        IamOperation::ListOpenIDConnectProviders => {
+            provider.list_open_id_connect_providers(&params)?
+        }
+
+        // Phase 4: Policy Tags
+        IamOperation::TagPolicy => provider.tag_policy(&params)?,
+        IamOperation::UntagPolicy => provider.untag_policy(&params)?,
+        IamOperation::ListPolicyTags => provider.list_policy_tags(&params)?,
+
+        // Phase 4: Instance Profile Tags
+        IamOperation::TagInstanceProfile => provider.tag_instance_profile(&params)?,
+        IamOperation::UntagInstanceProfile => provider.untag_instance_profile(&params)?,
+        IamOperation::ListInstanceProfileTags => provider.list_instance_profile_tags(&params)?,
     };
 
     Ok(xml_response(xml, &request_id))

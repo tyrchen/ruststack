@@ -1,7 +1,9 @@
 //! Input validation for CloudWatch operations.
 
-use ruststack_cloudwatch_model::error::{CloudWatchError, CloudWatchErrorCode};
-use ruststack_cloudwatch_model::types::Dimension;
+use ruststack_cloudwatch_model::{
+    error::{CloudWatchError, CloudWatchErrorCode},
+    types::Dimension,
+};
 
 /// Validate a namespace string.
 pub fn validate_namespace(namespace: &str) -> Result<(), CloudWatchError> {

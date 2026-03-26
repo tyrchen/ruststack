@@ -2,8 +2,10 @@
 
 #[cfg(test)]
 mod tests {
-    use aws_sdk_s3::primitives::ByteStream;
-    use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+    use aws_sdk_s3::{
+        primitives::ByteStream,
+        types::{CompletedMultipartUpload, CompletedPart},
+    };
 
     use crate::{cleanup_bucket, create_test_bucket, s3_client};
 

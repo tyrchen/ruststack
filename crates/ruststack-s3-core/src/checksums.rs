@@ -10,11 +10,9 @@
 //! [`StreamingHasher`] to incrementally feed data and obtain the final
 //! results via [`HasherResult`].
 
-use std::fmt;
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use digest::Digest;
 
 // ---------------------------------------------------------------------------

@@ -3,10 +3,11 @@
 //! Stores configuration sets and their associated event destinations
 //! using `DashMap` for concurrent access.
 
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
-use ruststack_ses_model::error::{SesError, SesErrorCode};
-use ruststack_ses_model::types::EventDestination;
+use dashmap::{DashMap, mapref::entry::Entry};
+use ruststack_ses_model::{
+    error::{SesError, SesErrorCode},
+    types::EventDestination,
+};
 
 /// Internal configuration set record with event destinations.
 #[derive(Debug, Clone)]

@@ -3,20 +3,21 @@
 //! Implements `create_bucket`, `delete_bucket`, `head_bucket`, `list_buckets`,
 //! and `get_bucket_location`.
 
-use ruststack_s3_model::error::S3Error;
-use ruststack_s3_model::input::{
-    CreateBucketInput, DeleteBucketInput, GetBucketLocationInput, HeadBucketInput, ListBucketsInput,
+use ruststack_s3_model::{
+    error::S3Error,
+    input::{
+        CreateBucketInput, DeleteBucketInput, GetBucketLocationInput, HeadBucketInput,
+        ListBucketsInput,
+    },
+    output::{CreateBucketOutput, GetBucketLocationOutput, HeadBucketOutput, ListBucketsOutput},
+    types::{Bucket, BucketLocationConstraint, LocationType, Owner},
 };
-use ruststack_s3_model::output::{
-    CreateBucketOutput, GetBucketLocationOutput, HeadBucketOutput, ListBucketsOutput,
-};
-use ruststack_s3_model::types::{Bucket, BucketLocationConstraint, LocationType, Owner};
 use tracing::debug;
 
-use crate::error::S3ServiceError;
-use crate::provider::RustStackS3;
-use crate::state::object::Owner as InternalOwner;
-use crate::validation::validate_bucket_name;
+use crate::{
+    error::S3ServiceError, provider::RustStackS3, state::object::Owner as InternalOwner,
+    validation::validate_bucket_name,
+};
 
 /// Convert our internal [`InternalOwner`] to the model [`Owner`] type.
 pub(crate) fn to_model_owner(owner: &InternalOwner) -> Owner {

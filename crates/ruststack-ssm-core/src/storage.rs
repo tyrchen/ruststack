@@ -7,17 +7,19 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use dashmap::DashMap;
-
-use ruststack_ssm_model::error::{SsmError, SsmErrorCode};
-use ruststack_ssm_model::types::{
-    Parameter, ParameterHistory, ParameterInlinePolicy, ParameterMetadata, ParameterTier,
-    ParameterType, Tag,
+use ruststack_ssm_model::{
+    error::{SsmError, SsmErrorCode},
+    types::{
+        Parameter, ParameterHistory, ParameterInlinePolicy, ParameterMetadata, ParameterTier,
+        ParameterType, Tag,
+    },
 };
 
-use crate::filter::matches_filters;
-
-use crate::selector::ParameterSelector;
-use crate::validation::{MAX_LABELS_PER_VERSION, MAX_VERSIONS, is_valid_label};
+use crate::{
+    filter::matches_filters,
+    selector::ParameterSelector,
+    validation::{MAX_LABELS_PER_VERSION, MAX_VERSIONS, is_valid_label},
+};
 
 /// A snapshot of a single parameter version.
 #[derive(Debug, Clone)]
@@ -133,8 +135,8 @@ impl ParameterStore {
                     return Err(SsmError::with_message(
                         ruststack_ssm_model::error::SsmErrorCode::ParameterMaxVersionLimitExceeded,
                         format!(
-                            "Parameter {name} has reached the maximum number of \
-                             {MAX_VERSIONS} versions."
+                            "Parameter {name} has reached the maximum number of {MAX_VERSIONS} \
+                             versions."
                         ),
                     ));
                 }
@@ -545,8 +547,8 @@ impl ParameterStore {
             return Err(SsmError::with_message(
                 SsmErrorCode::ParameterVersionNotFound,
                 format!(
-                    "Systems Manager could not find version {target_version} of {name}. \
-                     Verify the version and try again."
+                    "Systems Manager could not find version {target_version} of {name}. Verify \
+                     the version and try again."
                 ),
             ));
         }
@@ -577,8 +579,8 @@ impl ParameterStore {
                 return Err(SsmError::with_message(
                     SsmErrorCode::ParameterVersionLabelLimitExceeded,
                     format!(
-                        "A parameter version can have a maximum of {MAX_LABELS_PER_VERSION} labels. \
-                         Move one or more labels to a different version and try again."
+                        "A parameter version can have a maximum of {MAX_LABELS_PER_VERSION} \
+                         labels. Move one or more labels to a different version and try again."
                     ),
                 ));
             }
@@ -627,8 +629,8 @@ impl ParameterStore {
             SsmError::with_message(
                 SsmErrorCode::ParameterVersionNotFound,
                 format!(
-                    "Systems Manager could not find version {version} of {name}. \
-                     Verify the version and try again."
+                    "Systems Manager could not find version {version} of {name}. Verify the \
+                     version and try again."
                 ),
             )
         })?;

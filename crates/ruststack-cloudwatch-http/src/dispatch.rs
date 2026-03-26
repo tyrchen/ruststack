@@ -1,12 +1,9 @@
 //! CloudWatch handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_cloudwatch_model::error::CloudWatchError;
-use ruststack_cloudwatch_model::operations::CloudWatchOperation;
+use ruststack_cloudwatch_model::{error::CloudWatchError, operations::CloudWatchOperation};
 
 use crate::body::CloudWatchResponseBody;
 

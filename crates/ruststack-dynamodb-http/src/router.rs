@@ -10,8 +10,7 @@
 //! This makes routing ~20 lines compared to S3's ~400 lines of path/query
 //! parsing and virtual-host resolution.
 
-use ruststack_dynamodb_model::error::DynamoDBError;
-use ruststack_dynamodb_model::operations::DynamoDBOperation;
+use ruststack_dynamodb_model::{error::DynamoDBError, operations::DynamoDBOperation};
 
 /// The expected prefix for the `X-Amz-Target` header value.
 const TARGET_PREFIX: &str = "DynamoDB_20120810.";

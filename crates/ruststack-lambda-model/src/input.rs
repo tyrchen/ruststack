@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    AliasRoutingConfiguration, Cors, DeadLetterConfig, Environment, EphemeralStorage, FunctionCode,
-    ImageConfig, LoggingConfig, SnapStart, TracingConfig, VpcConfig,
+    AliasRoutingConfiguration, Cors, DeadLetterConfig, DestinationConfig, Environment,
+    EphemeralStorage, FunctionCode, ImageConfig, LayerVersionContentInput, LoggingConfig,
+    SnapStart, TracingConfig, VpcConfig,
 };
 
 /// Input for `CreateFunction`.
@@ -273,4 +274,153 @@ pub struct UpdateFunctionUrlConfigInput {
     /// Invoke mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invoke_mode: Option<String>,
+}
+
+/// Input for `PublishLayerVersion`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct PublishLayerVersionInput {
+    /// Layer name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_name: Option<String>,
+    /// Description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Layer code content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<LayerVersionContentInput>,
+    /// Compatible runtimes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatible_runtimes: Option<Vec<String>>,
+    /// License info (max 512 characters).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license_info: Option<String>,
+    /// Compatible architectures.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatible_architectures: Option<Vec<String>>,
+}
+
+/// Input for `CreateEventSourceMapping`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct CreateEventSourceMappingInput {
+    /// ARN of the event source (e.g., SQS queue, DynamoDB stream, Kinesis stream).
+    pub event_source_arn: String,
+    /// Function name or ARN.
+    pub function_name: String,
+    /// Whether the mapping is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Maximum number of records per batch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<i32>,
+    /// Maximum batching window in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_batching_window_in_seconds: Option<i32>,
+    /// Starting position for stream-based sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starting_position: Option<String>,
+    /// Timestamp for `AT_TIMESTAMP` starting position.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starting_position_timestamp: Option<String>,
+    /// Maximum age of a record in seconds before discarding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_record_age_in_seconds: Option<i32>,
+    /// Whether to split a batch on function error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bisect_batch_on_function_error: Option<bool>,
+    /// Maximum number of retry attempts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_retry_attempts: Option<i32>,
+    /// Parallelization factor (1-10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallelization_factor: Option<i32>,
+    /// Function response types (e.g., `ReportBatchItemFailures`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_response_types: Option<Vec<String>>,
+}
+
+/// Input for `UpdateEventSourceMapping`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UpdateEventSourceMappingInput {
+    /// Function name or ARN.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_name: Option<String>,
+    /// Whether the mapping is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Maximum number of records per batch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<i32>,
+    /// Maximum batching window in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_batching_window_in_seconds: Option<i32>,
+    /// Maximum age of a record in seconds before discarding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_record_age_in_seconds: Option<i32>,
+    /// Whether to split a batch on function error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bisect_batch_on_function_error: Option<bool>,
+    /// Maximum number of retry attempts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_retry_attempts: Option<i32>,
+    /// Parallelization factor (1-10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallelization_factor: Option<i32>,
+    /// Function response types (e.g., `ReportBatchItemFailures`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_response_types: Option<Vec<String>>,
+}
+
+/// Input for `AddLayerVersionPermission`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AddLayerVersionPermissionInput {
+    /// Statement ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub statement_id: Option<String>,
+    /// Action (e.g., `lambda:GetLayerVersion`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    /// Principal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub principal: Option<String>,
+    /// Organization ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub organization_id: Option<String>,
+    /// Revision ID for optimistic concurrency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision_id: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Concurrency
+// ---------------------------------------------------------------------------
+
+/// Input for `PutFunctionConcurrency`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct PutFunctionConcurrencyInput {
+    /// The number of reserved concurrent executions.
+    pub reserved_concurrent_executions: i32,
+}
+
+// ---------------------------------------------------------------------------
+// Event Invoke Config
+// ---------------------------------------------------------------------------
+
+/// Input for `PutFunctionEventInvokeConfig` and `UpdateFunctionEventInvokeConfig`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct EventInvokeConfigInput {
+    /// Maximum retry attempts (0-2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_retry_attempts: Option<i32>,
+    /// Maximum event age in seconds (60-21600).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_event_age_in_seconds: Option<i32>,
+    /// Destination configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_config: Option<DestinationConfig>,
 }

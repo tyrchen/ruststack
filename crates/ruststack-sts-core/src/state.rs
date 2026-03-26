@@ -3,9 +3,11 @@
 use dashmap::DashMap;
 use ruststack_sts_model::types::Tag;
 
-use crate::config::StsConfig;
-use crate::identity::CallerIdentity;
-use crate::session::{SessionRecord, SessionTag};
+use crate::{
+    config::StsConfig,
+    identity::CallerIdentity,
+    session::{SessionRecord, SessionTag},
+};
 
 /// A record associating an access key with its identity.
 #[derive(Debug, Clone)]

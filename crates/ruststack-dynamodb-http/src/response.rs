@@ -26,6 +26,10 @@ pub fn error_to_json(error: &DynamoDBError) -> Vec<u8> {
     if let Some(ref item) = error.item {
         obj["Item"] = serde_json::to_value(item).expect("Item serialization cannot fail");
     }
+    if !error.cancellation_reasons.is_empty() {
+        obj["CancellationReasons"] = serde_json::to_value(&error.cancellation_reasons)
+            .expect("CancellationReasons serialization cannot fail");
+    }
     serde_json::to_vec(&obj).expect("JSON serialization of error cannot fail")
 }
 
@@ -75,8 +79,9 @@ pub fn json_response(json: Vec<u8>, request_id: &str) -> http::Response<DynamoDB
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ruststack_dynamodb_model::error::DynamoDBErrorCode;
+
+    use super::*;
 
     #[test]
     fn test_should_format_error_json() {

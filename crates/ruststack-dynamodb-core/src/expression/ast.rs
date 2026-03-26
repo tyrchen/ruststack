@@ -8,8 +8,7 @@
 //! name and value references from parsed ASTs, used for validating that all
 //! provided names/values are actually used in expressions.
 
-use std::collections::HashSet;
-use std::fmt;
+use std::{collections::HashSet, fmt};
 
 /// Expression AST node for condition, filter, and key-condition expressions.
 #[derive(Debug, Clone)]

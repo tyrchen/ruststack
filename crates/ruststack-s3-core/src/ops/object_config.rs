@@ -5,29 +5,29 @@
 //! `put_object_retention`, `get_object_legal_hold`, `put_object_legal_hold`,
 //! and `get_object_attributes`.
 
-use ruststack_s3_model::error::S3Error;
-use ruststack_s3_model::input::{
-    DeleteObjectTaggingInput, GetObjectAclInput, GetObjectAttributesInput, GetObjectLegalHoldInput,
-    GetObjectRetentionInput, GetObjectTaggingInput, PutObjectAclInput, PutObjectLegalHoldInput,
-    PutObjectRetentionInput, PutObjectTaggingInput,
-};
-use ruststack_s3_model::output::{
-    DeleteObjectTaggingOutput, GetObjectAclOutput, GetObjectAttributesOutput,
-    GetObjectLegalHoldOutput, GetObjectRetentionOutput, GetObjectTaggingOutput, PutObjectAclOutput,
-    PutObjectLegalHoldOutput, PutObjectRetentionOutput, PutObjectTaggingOutput,
-};
-use ruststack_s3_model::types::{
-    Checksum, ChecksumType, GetObjectAttributesParts, Grant, Grantee, ObjectLockLegalHold,
-    ObjectLockLegalHoldStatus, ObjectLockRetention, ObjectLockRetentionMode, Permission,
-    StorageClass, Tag, Type,
+use ruststack_s3_model::{
+    error::S3Error,
+    input::{
+        DeleteObjectTaggingInput, GetObjectAclInput, GetObjectAttributesInput,
+        GetObjectLegalHoldInput, GetObjectRetentionInput, GetObjectTaggingInput, PutObjectAclInput,
+        PutObjectLegalHoldInput, PutObjectRetentionInput, PutObjectTaggingInput,
+    },
+    output::{
+        DeleteObjectTaggingOutput, GetObjectAclOutput, GetObjectAttributesOutput,
+        GetObjectLegalHoldOutput, GetObjectRetentionOutput, GetObjectTaggingOutput,
+        PutObjectAclOutput, PutObjectLegalHoldOutput, PutObjectRetentionOutput,
+        PutObjectTaggingOutput,
+    },
+    types::{
+        Checksum, ChecksumType, GetObjectAttributesParts, Grant, Grantee, ObjectLockLegalHold,
+        ObjectLockLegalHoldStatus, ObjectLockRetention, ObjectLockRetentionMode, Permission,
+        StorageClass, Tag, Type,
+    },
 };
 use tracing::debug;
 
-use crate::error::S3ServiceError;
-use crate::provider::RustStackS3;
-use crate::state::object::CannedAcl;
-
 use super::bucket::to_model_owner;
+use crate::{error::S3ServiceError, provider::RustStackS3, state::object::CannedAcl};
 
 // AWS S3 DTOs use signed integers (i32/i64) for inherently non-negative values.
 // These handler methods must remain async for consistency.

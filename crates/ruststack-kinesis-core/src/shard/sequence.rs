@@ -1,7 +1,9 @@
 //! Sequence number generation for Kinesis records.
 
-use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    str::FromStr,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 /// A 128-bit sequence number for a Kinesis record.
 ///

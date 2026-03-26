@@ -4,22 +4,20 @@
 //! `application/x-www-form-urlencoded` and the response is `text/xml`.
 //! The `Action=` form parameter routes to the appropriate operation.
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
-
 use ruststack_sts_model::error::StsError;
 
-use crate::body::StsResponseBody;
-use crate::dispatch::{StsHandler, dispatch_operation};
-use crate::request::{extract_access_key_from_auth, parse_form_params};
-use crate::response::{CONTENT_TYPE, error_to_response};
-use crate::router::resolve_operation;
+use crate::{
+    body::StsResponseBody,
+    dispatch::{StsHandler, dispatch_operation},
+    request::{extract_access_key_from_auth, parse_form_params},
+    response::{CONTENT_TYPE, error_to_response},
+    router::resolve_operation,
+};
 
 /// Configuration for the STS HTTP service.
 #[derive(Clone)]

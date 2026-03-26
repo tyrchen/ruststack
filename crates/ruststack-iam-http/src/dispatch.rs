@@ -1,12 +1,9 @@
 //! IAM handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_iam_model::error::IamError;
-use ruststack_iam_model::operations::IamOperation;
+use ruststack_iam_model::{error::IamError, operations::IamOperation};
 
 use crate::body::IamResponseBody;
 

@@ -7,8 +7,10 @@
 
 use serde_json::Value;
 
-use super::operators::match_single_value;
-use super::value::{EventPattern, FieldMatcher, MatchCondition, PatternNode};
+use super::{
+    operators::match_single_value,
+    value::{EventPattern, FieldMatcher, MatchCondition, PatternNode},
+};
 
 /// Match an event pattern against a JSON event.
 ///

@@ -16,39 +16,53 @@ const MAX_ZIP_SIZE: u64 = 50 * 1024 * 1024;
 /// Maximum synchronous invoke payload size (6 MB, per Appendix C).
 const MAX_SYNC_PAYLOAD: usize = 6 * 1024 * 1024;
 
-use ruststack_lambda_model::input::{
-    AddPermissionInput, CreateAliasInput, CreateFunctionInput, CreateFunctionUrlConfigInput,
-    PublishVersionInput, TagResourceInput, UpdateAliasInput, UpdateFunctionCodeInput,
-    UpdateFunctionConfigurationInput, UpdateFunctionUrlConfigInput,
-};
-use ruststack_lambda_model::output::{
-    AccountLimit, AccountUsage, AddPermissionOutput, GetAccountSettingsOutput, GetFunctionOutput,
-    GetPolicyOutput, ListAliasesOutput, ListFunctionUrlConfigsOutput, ListFunctionsOutput,
-    ListTagsOutput, ListVersionsOutput,
-};
-use ruststack_lambda_model::types::{
-    AliasConfiguration, AliasRoutingConfiguration, EnvironmentResponse, EphemeralStorage,
-    FunctionCodeLocation, FunctionConfiguration, FunctionUrlConfig, ImageConfigResponse, Layer,
-    SnapStartResponse, TracingConfigResponse, VpcConfigResponse,
+use ruststack_lambda_model::{
+    input::{
+        AddLayerVersionPermissionInput, AddPermissionInput, CreateAliasInput,
+        CreateEventSourceMappingInput, CreateFunctionInput, CreateFunctionUrlConfigInput,
+        EventInvokeConfigInput, PublishLayerVersionInput, PublishVersionInput, TagResourceInput,
+        UpdateAliasInput, UpdateEventSourceMappingInput, UpdateFunctionCodeInput,
+        UpdateFunctionConfigurationInput, UpdateFunctionUrlConfigInput,
+    },
+    output::{
+        AccountLimit, AccountUsage, AddLayerVersionPermissionOutput, AddPermissionOutput,
+        GetAccountSettingsOutput, GetFunctionOutput, GetLayerVersionPolicyOutput, GetPolicyOutput,
+        ListAliasesOutput, ListEventSourceMappingsOutput, ListFunctionUrlConfigsOutput,
+        ListFunctionsOutput, ListLayerVersionsOutput, ListLayersOutput, ListTagsOutput,
+        ListVersionsOutput, PublishLayerVersionOutput,
+    },
+    types::{
+        AliasConfiguration, AliasRoutingConfiguration, Concurrency, EnvironmentResponse,
+        EphemeralStorage, EventSourceMappingConfiguration, FunctionCodeLocation,
+        FunctionConfiguration, FunctionEventInvokeConfig, FunctionUrlConfig, ImageConfigResponse,
+        Layer, LayerVersionContentOutput, LayerVersionsListItem, LayersListItem, SnapStartResponse,
+        TracingConfigResponse, VpcConfigResponse,
+    },
 };
 
-use crate::config::LambdaConfig;
-use crate::error::LambdaServiceError;
-use crate::resolver::{
-    alias_arn, function_arn, function_version_arn, resolve_function_ref, resolve_version,
-};
-use crate::storage::{
-    AliasRecord, FunctionRecord, FunctionStore, FunctionUrlConfigRecord, PolicyDocument,
-    PolicyStatement, VersionRecord, compute_sha256,
+use crate::{
+    config::LambdaConfig,
+    error::LambdaServiceError,
+    resolver::{
+        alias_arn, function_arn, function_version_arn, layer_arn, layer_version_arn,
+        parse_layer_version_arn, resolve_function_ref, resolve_version,
+    },
+    storage::{
+        AliasRecord, EventInvokeConfigRecord, EventSourceMappingRecord, EventSourceMappingStore,
+        FunctionRecord, FunctionStore, FunctionUrlConfigRecord, LayerStore, LayerVersionRecord,
+        PolicyDocument, PolicyStatement, VersionRecord, compute_sha256,
+    },
 };
 
 /// Lambda business logic provider.
 ///
-/// Holds the function store and service configuration. All operations
-/// are implemented as async methods that return domain types or errors.
+/// Holds the function store, layer store, and service configuration.
+/// All operations are implemented as methods that return domain types or errors.
 #[derive(Debug)]
 pub struct RustStackLambda {
     store: FunctionStore,
+    layer_store: LayerStore,
+    esm_store: EventSourceMappingStore,
     config: LambdaConfig,
 }
 
@@ -56,7 +70,12 @@ impl RustStackLambda {
     /// Create a new Lambda provider with the given store and config.
     #[must_use]
     pub fn with_store(store: FunctionStore, config: LambdaConfig) -> Self {
-        Self { store, config }
+        Self {
+            store,
+            layer_store: LayerStore::new(),
+            esm_store: EventSourceMappingStore::new(),
+            config,
+        }
     }
 
     /// Create a new Lambda provider from config, using a temp directory for code.
@@ -64,13 +83,30 @@ impl RustStackLambda {
     pub fn new(config: LambdaConfig) -> Self {
         let code_dir = std::env::temp_dir().join("ruststack-lambda-code");
         let store = FunctionStore::new(code_dir);
-        Self { store, config }
+        Self {
+            store,
+            layer_store: LayerStore::new(),
+            esm_store: EventSourceMappingStore::new(),
+            config,
+        }
     }
 
     /// Returns a reference to the underlying function store.
     #[must_use]
     pub fn store(&self) -> &FunctionStore {
         &self.store
+    }
+
+    /// Returns a reference to the layer store.
+    #[must_use]
+    pub fn layer_store(&self) -> &LayerStore {
+        &self.layer_store
+    }
+
+    /// Returns a reference to the event source mapping store.
+    #[must_use]
+    pub fn esm_store(&self) -> &EventSourceMappingStore {
+        &self.esm_store
     }
 
     /// Returns a reference to the service configuration.
@@ -277,6 +313,8 @@ impl RustStackLambda {
             policy: PolicyDocument::default(),
             tags: input.tags.clone().unwrap_or_default(),
             url_config: None,
+            reserved_concurrent_executions: None,
+            event_invoke_configs: HashMap::new(),
             created_at: now,
         };
 
@@ -609,7 +647,8 @@ impl RustStackLambda {
             let payload_len = payload.len();
             return Err(LambdaServiceError::RequestTooLarge {
                 message: format!(
-                    "Request payload size {payload_len} exceeds the synchronous invoke limit of {MAX_SYNC_PAYLOAD} bytes",
+                    "Request payload size {payload_len} exceeds the synchronous invoke limit of \
+                     {MAX_SYNC_PAYLOAD} bytes",
                 ),
             });
         }
@@ -1403,8 +1442,879 @@ impl RustStackLambda {
     }
 
     // ---------------------------------------------------------------
+    // Phase 2b: Lambda Layers
+    // ---------------------------------------------------------------
+
+    /// Publish a new layer version.
+    pub fn publish_layer_version(
+        &self,
+        layer_name: &str,
+        input: &PublishLayerVersionInput,
+    ) -> Result<PublishLayerVersionOutput, LambdaServiceError> {
+        if layer_name.is_empty() || layer_name.len() > 140 {
+            return Err(LambdaServiceError::InvalidParameter {
+                message: "Layer name must be between 1 and 140 characters".to_owned(),
+            });
+        }
+
+        if let Some(ref license) = input.license_info {
+            if license.len() > 512 {
+                return Err(LambdaServiceError::InvalidParameter {
+                    message: "License info must be at most 512 characters".to_owned(),
+                });
+            }
+        }
+
+        // Process layer code.
+        let (code_sha256, code_size) = if let Some(ref content) = input.content {
+            if let Some(ref b64) = content.zip_file {
+                use base64::Engine;
+                let zip_bytes = base64::engine::general_purpose::STANDARD
+                    .decode(b64)
+                    .map_err(|e| LambdaServiceError::InvalidZipFile {
+                        message: format!("Invalid base64 encoding: {e}"),
+                    })?;
+                let sha256 = compute_sha256(&zip_bytes);
+                let size = zip_bytes.len() as u64;
+                (sha256, size)
+            } else {
+                // S3 source accepted but not functional; use empty hash.
+                (compute_sha256(b""), 0)
+            }
+        } else {
+            (compute_sha256(b""), 0)
+        };
+
+        let now = now_iso8601();
+        let la = layer_arn(
+            &self.config.default_region,
+            &self.config.account_id,
+            layer_name,
+        );
+
+        // Create a temporary version record; the store will assign the actual version number.
+        let version_record = LayerVersionRecord {
+            version: 0, // will be overwritten
+            description: input.description.clone().unwrap_or_default(),
+            compatible_runtimes: input.compatible_runtimes.clone().unwrap_or_default(),
+            compatible_architectures: input.compatible_architectures.clone().unwrap_or_default(),
+            license_info: input.license_info.clone(),
+            code_sha256: code_sha256.clone(),
+            code_size,
+            created_date: now.clone(),
+            layer_arn: la.clone(),
+            layer_version_arn: String::new(), // will be overwritten
+            policy: PolicyDocument::default(),
+        };
+
+        let version_num = self
+            .layer_store
+            .publish_version(layer_name, &la, version_record);
+
+        // Update the version number and ARN in the stored record.
+        let lva = layer_version_arn(
+            &self.config.default_region,
+            &self.config.account_id,
+            layer_name,
+            version_num,
+        );
+        self.layer_store
+            .update_version(layer_name, version_num, |ver| {
+                ver.version = version_num;
+                ver.layer_version_arn.clone_from(&lva);
+            })?;
+
+        info!(layer_name = %layer_name, version = %version_num, "published layer version");
+
+        #[allow(clippy::cast_possible_wrap)]
+        Ok(PublishLayerVersionOutput {
+            content: Some(LayerVersionContentOutput {
+                code_sha256: Some(code_sha256),
+                code_size: Some(code_size as i64),
+                ..Default::default()
+            }),
+            layer_arn: Some(la),
+            layer_version_arn: Some(lva),
+            description: input.description.clone(),
+            created_date: Some(now),
+            version: Some(version_num as i64),
+            compatible_runtimes: input.compatible_runtimes.clone(),
+            license_info: input.license_info.clone(),
+            compatible_architectures: input.compatible_architectures.clone(),
+        })
+    }
+
+    /// Get a specific layer version.
+    pub fn get_layer_version(
+        &self,
+        layer_name: &str,
+        version_number: u64,
+    ) -> Result<PublishLayerVersionOutput, LambdaServiceError> {
+        let ver = self
+            .layer_store
+            .get_version(layer_name, version_number)
+            .ok_or(LambdaServiceError::InvalidParameter {
+                message: format!("Layer version not found: {layer_name}:{version_number}"),
+            })?;
+
+        Ok(Self::build_layer_version_output(&ver))
+    }
+
+    /// Get a layer version by its full ARN.
+    pub fn get_layer_version_by_arn(
+        &self,
+        arn: &str,
+    ) -> Result<PublishLayerVersionOutput, LambdaServiceError> {
+        let (name, version) = parse_layer_version_arn(arn)?;
+        self.get_layer_version(&name, version)
+    }
+
+    /// List versions of a layer.
+    pub fn list_layer_versions(
+        &self,
+        layer_name: &str,
+        marker: Option<&str>,
+        max_items: Option<usize>,
+    ) -> Result<ListLayerVersionsOutput, LambdaServiceError> {
+        let versions = self.layer_store.list_versions(layer_name);
+        let max = max_items.unwrap_or(50).min(10_000);
+
+        let start = marker
+            .and_then(|m| m.parse::<u64>().ok())
+            .and_then(|marker_ver| versions.iter().position(|v| v.version > marker_ver))
+            .unwrap_or(0);
+
+        #[allow(clippy::cast_possible_wrap)]
+        let page: Vec<LayerVersionsListItem> = versions
+            .iter()
+            .skip(start)
+            .take(max)
+            .map(|v| LayerVersionsListItem {
+                layer_version_arn: Some(v.layer_version_arn.clone()),
+                version: Some(v.version as i64),
+                description: if v.description.is_empty() {
+                    None
+                } else {
+                    Some(v.description.clone())
+                },
+                created_date: Some(v.created_date.clone()),
+                compatible_runtimes: if v.compatible_runtimes.is_empty() {
+                    None
+                } else {
+                    Some(v.compatible_runtimes.clone())
+                },
+                license_info: v.license_info.clone(),
+                compatible_architectures: if v.compatible_architectures.is_empty() {
+                    None
+                } else {
+                    Some(v.compatible_architectures.clone())
+                },
+            })
+            .collect();
+
+        let next_marker = if start + max < versions.len() {
+            page.last()
+                .and_then(|v| v.version.map(|ver| ver.to_string()))
+        } else {
+            None
+        };
+
+        Ok(ListLayerVersionsOutput {
+            layer_versions: Some(page),
+            next_marker,
+        })
+    }
+
+    /// List all layers.
+    #[must_use]
+    pub fn list_layers(&self, marker: Option<&str>, max_items: Option<usize>) -> ListLayersOutput {
+        let all = self.layer_store.list_layers();
+        let max = max_items.unwrap_or(50).min(10_000);
+
+        let start = marker
+            .and_then(|m| all.iter().position(|r| r.name.as_str() > m))
+            .unwrap_or(0);
+
+        #[allow(clippy::cast_possible_wrap)]
+        let page: Vec<LayersListItem> = all
+            .iter()
+            .skip(start)
+            .take(max)
+            .map(|r| {
+                let latest = r
+                    .versions
+                    .values()
+                    .next_back()
+                    .map(|v| LayerVersionsListItem {
+                        layer_version_arn: Some(v.layer_version_arn.clone()),
+                        version: Some(v.version as i64),
+                        description: if v.description.is_empty() {
+                            None
+                        } else {
+                            Some(v.description.clone())
+                        },
+                        created_date: Some(v.created_date.clone()),
+                        compatible_runtimes: if v.compatible_runtimes.is_empty() {
+                            None
+                        } else {
+                            Some(v.compatible_runtimes.clone())
+                        },
+                        license_info: v.license_info.clone(),
+                        compatible_architectures: if v.compatible_architectures.is_empty() {
+                            None
+                        } else {
+                            Some(v.compatible_architectures.clone())
+                        },
+                    });
+                LayersListItem {
+                    layer_name: Some(r.name.clone()),
+                    layer_arn: Some(r.layer_arn.clone()),
+                    latest_matching_version: latest,
+                }
+            })
+            .collect();
+
+        let next_marker = if start + max < all.len() {
+            page.last().and_then(|l| l.layer_name.clone())
+        } else {
+            None
+        };
+
+        ListLayersOutput {
+            layers: Some(page),
+            next_marker,
+        }
+    }
+
+    /// Delete a layer version.
+    pub fn delete_layer_version(
+        &self,
+        layer_name: &str,
+        version_number: u64,
+    ) -> Result<(), LambdaServiceError> {
+        // AWS silently succeeds even if the version doesn't exist.
+        let _ = self.layer_store.delete_version(layer_name, version_number);
+        info!(layer_name = %layer_name, version = %version_number, "deleted layer version");
+        Ok(())
+    }
+
+    /// Add a permission to a layer version's resource policy.
+    pub fn add_layer_version_permission(
+        &self,
+        layer_name: &str,
+        version_number: u64,
+        input: &AddLayerVersionPermissionInput,
+    ) -> Result<AddLayerVersionPermissionOutput, LambdaServiceError> {
+        // Validate required fields.
+        let sid = match &input.statement_id {
+            Some(s) if !s.is_empty() => s.clone(),
+            _ => {
+                return Err(LambdaServiceError::InvalidParameter {
+                    message: "StatementId is required".to_owned(),
+                });
+            }
+        };
+        let action = match &input.action {
+            Some(a) if !a.is_empty() => a.clone(),
+            _ => {
+                return Err(LambdaServiceError::InvalidParameter {
+                    message: "Action is required".to_owned(),
+                });
+            }
+        };
+        let principal = match &input.principal {
+            Some(p) if !p.is_empty() => p.clone(),
+            _ => {
+                return Err(LambdaServiceError::InvalidParameter {
+                    message: "Principal is required".to_owned(),
+                });
+            }
+        };
+
+        let lva = layer_version_arn(
+            &self.config.default_region,
+            &self.config.account_id,
+            layer_name,
+            version_number,
+        );
+
+        let statement = PolicyStatement {
+            sid: sid.clone(),
+            effect: "Allow".to_owned(),
+            principal: principal.clone(),
+            action: action.clone(),
+            resource: lva,
+            condition: None,
+        };
+
+        let statement_json = serde_json::json!({
+            "Sid": sid,
+            "Effect": "Allow",
+            "Principal": { "Service": principal },
+            "Action": action,
+            "Resource": statement.resource,
+        });
+
+        let revision_id = self.layer_store.update_version(
+            layer_name,
+            version_number,
+            |ver| -> Result<String, LambdaServiceError> {
+                if ver.policy.statements.iter().any(|s| s.sid == sid) {
+                    return Err(LambdaServiceError::ResourceConflict {
+                        message: format!("The statement id ({sid}) provided already exists."),
+                    });
+                }
+                ver.policy.statements.push(statement);
+                Ok(uuid::Uuid::new_v4().to_string())
+            },
+        )??;
+
+        Ok(AddLayerVersionPermissionOutput {
+            statement: Some(statement_json.to_string()),
+            revision_id: Some(revision_id),
+        })
+    }
+
+    /// Get the resource policy for a layer version.
+    pub fn get_layer_version_policy(
+        &self,
+        layer_name: &str,
+        version_number: u64,
+    ) -> Result<GetLayerVersionPolicyOutput, LambdaServiceError> {
+        let ver = self
+            .layer_store
+            .get_version(layer_name, version_number)
+            .ok_or(LambdaServiceError::InvalidParameter {
+                message: format!("Layer version not found: {layer_name}:{version_number}"),
+            })?;
+
+        if ver.policy.statements.is_empty() {
+            return Err(LambdaServiceError::PolicyNotFound {
+                sid: format!("{layer_name}:{version_number}"),
+            });
+        }
+
+        let statements: Vec<serde_json::Value> = ver
+            .policy
+            .statements
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "Sid": s.sid,
+                    "Effect": s.effect,
+                    "Principal": { "Service": s.principal },
+                    "Action": s.action,
+                    "Resource": s.resource,
+                })
+            })
+            .collect();
+
+        let policy = serde_json::json!({
+            "Version": "2012-10-17",
+            "Id": "default",
+            "Statement": statements,
+        });
+
+        Ok(GetLayerVersionPolicyOutput {
+            policy: Some(policy.to_string()),
+            revision_id: Some(uuid::Uuid::new_v4().to_string()),
+        })
+    }
+
+    /// Remove a permission from a layer version's resource policy.
+    pub fn remove_layer_version_permission(
+        &self,
+        layer_name: &str,
+        version_number: u64,
+        statement_id: &str,
+    ) -> Result<(), LambdaServiceError> {
+        self.layer_store.update_version(
+            layer_name,
+            version_number,
+            |ver| -> Result<(), LambdaServiceError> {
+                let initial_len = ver.policy.statements.len();
+                ver.policy.statements.retain(|s| s.sid != statement_id);
+                if ver.policy.statements.len() == initial_len {
+                    return Err(LambdaServiceError::PolicyNotFound {
+                        sid: statement_id.to_owned(),
+                    });
+                }
+                Ok(())
+            },
+        )??;
+
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------
+    // Phase 3: Event Source Mappings
+    // ---------------------------------------------------------------
+
+    /// Create an event source mapping.
+    ///
+    /// Validates the function exists, generates a UUID, and stores the mapping.
+    /// Defaults: `batch_size=10`, `enabled=true`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FunctionNotFound` if the specified function does not exist.
+    /// Returns `InvalidParameter` if `event_source_arn` is empty.
+    pub fn create_event_source_mapping(
+        &self,
+        input: &CreateEventSourceMappingInput,
+    ) -> Result<EventSourceMappingConfiguration, LambdaServiceError> {
+        if input.event_source_arn.is_empty() {
+            return Err(LambdaServiceError::InvalidParameter {
+                message: "eventSourceArn is required".to_owned(),
+            });
+        }
+
+        // Resolve function name to ARN; validates the function exists.
+        let (name, _) = resolve_function_ref(&input.function_name)?;
+        let _record = self.get_record(&name)?;
+        let func_arn = function_arn(&self.config.default_region, &self.config.account_id, &name);
+
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let enabled = input.enabled.unwrap_or(true);
+        let batch_size = input.batch_size.unwrap_or(10);
+        let max_batching_window = input.maximum_batching_window_in_seconds.unwrap_or(0);
+        let state = if enabled { "Enabled" } else { "Disabled" }.to_owned();
+        let now = chrono::Utc::now().timestamp();
+
+        let esm_record = EventSourceMappingRecord {
+            uuid: uuid.clone(),
+            event_source_arn: input.event_source_arn.clone(),
+            function_arn: func_arn,
+            enabled,
+            batch_size,
+            maximum_batching_window_in_seconds: max_batching_window,
+            starting_position: input.starting_position.clone(),
+            starting_position_timestamp: input.starting_position_timestamp.clone(),
+            maximum_record_age_in_seconds: input.maximum_record_age_in_seconds,
+            bisect_batch_on_function_error: input.bisect_batch_on_function_error,
+            maximum_retry_attempts: input.maximum_retry_attempts,
+            parallelization_factor: input.parallelization_factor,
+            function_response_types: input.function_response_types.clone().unwrap_or_default(),
+            state,
+            state_transition_reason: "User action".to_owned(),
+            last_modified: now,
+            last_processing_result: "No records processed".to_owned(),
+        };
+
+        let config = Self::record_to_configuration(&esm_record);
+        self.esm_store.create(esm_record);
+
+        info!(uuid = %uuid, function_name = %name, "Created event source mapping");
+
+        Ok(config)
+    }
+
+    /// Get an event source mapping by UUID.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EventSourceMappingNotFound` if the UUID does not exist.
+    pub fn get_event_source_mapping(
+        &self,
+        uuid: &str,
+    ) -> Result<EventSourceMappingConfiguration, LambdaServiceError> {
+        let record = self.esm_store.get(uuid).ok_or_else(|| {
+            LambdaServiceError::EventSourceMappingNotFound {
+                uuid: uuid.to_owned(),
+            }
+        })?;
+        Ok(Self::record_to_configuration(&record))
+    }
+
+    /// Update an event source mapping.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EventSourceMappingNotFound` if the UUID does not exist.
+    /// Returns `FunctionNotFound` if a new function name is provided that does not exist.
+    pub fn update_event_source_mapping(
+        &self,
+        uuid: &str,
+        input: &UpdateEventSourceMappingInput,
+    ) -> Result<EventSourceMappingConfiguration, LambdaServiceError> {
+        // If a new function name is provided, validate it exists and resolve the ARN.
+        let new_function_arn = if let Some(ref fn_name) = input.function_name {
+            let (name, _) = resolve_function_ref(fn_name)?;
+            let _record = self.get_record(&name)?;
+            Some(function_arn(
+                &self.config.default_region,
+                &self.config.account_id,
+                &name,
+            ))
+        } else {
+            None
+        };
+
+        let now = chrono::Utc::now().timestamp();
+
+        let updated = self.esm_store.update(uuid, |record| {
+            if let Some(ref arn) = new_function_arn {
+                record.function_arn.clone_from(arn);
+            }
+            if let Some(enabled) = input.enabled {
+                record.enabled = enabled;
+                if enabled { "Enabled" } else { "Disabled" }.clone_into(&mut record.state);
+            }
+            if let Some(batch_size) = input.batch_size {
+                record.batch_size = batch_size;
+            }
+            if let Some(max_window) = input.maximum_batching_window_in_seconds {
+                record.maximum_batching_window_in_seconds = max_window;
+            }
+            if let Some(max_age) = input.maximum_record_age_in_seconds {
+                record.maximum_record_age_in_seconds = Some(max_age);
+            }
+            if let Some(bisect) = input.bisect_batch_on_function_error {
+                record.bisect_batch_on_function_error = Some(bisect);
+            }
+            if let Some(retries) = input.maximum_retry_attempts {
+                record.maximum_retry_attempts = Some(retries);
+            }
+            if let Some(factor) = input.parallelization_factor {
+                record.parallelization_factor = Some(factor);
+            }
+            if let Some(ref types) = input.function_response_types {
+                record.function_response_types.clone_from(types);
+            }
+            record.last_modified = now;
+            "User action".clone_into(&mut record.state_transition_reason);
+            Self::record_to_configuration(record)
+        })?;
+
+        info!(uuid = %uuid, "Updated event source mapping");
+
+        Ok(updated)
+    }
+
+    /// Delete an event source mapping.
+    ///
+    /// Returns the final configuration with state set to `Deleting`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EventSourceMappingNotFound` if the UUID does not exist.
+    pub fn delete_event_source_mapping(
+        &self,
+        uuid: &str,
+    ) -> Result<EventSourceMappingConfiguration, LambdaServiceError> {
+        let record = self.esm_store.delete(uuid).ok_or_else(|| {
+            LambdaServiceError::EventSourceMappingNotFound {
+                uuid: uuid.to_owned(),
+            }
+        })?;
+
+        info!(uuid = %uuid, "Deleted event source mapping");
+
+        let mut config = Self::record_to_configuration(&record);
+        config.state = Some("Deleting".to_owned());
+        Ok(config)
+    }
+
+    /// List event source mappings with optional filters and pagination.
+    ///
+    /// Supports filtering by `function_name` and `event_source_arn`.
+    #[must_use]
+    pub fn list_event_source_mappings(
+        &self,
+        function_name: Option<&str>,
+        event_source_arn: Option<&str>,
+        marker: Option<&str>,
+        max_items: Option<usize>,
+    ) -> ListEventSourceMappingsOutput {
+        let all = self.esm_store.list(function_name, event_source_arn);
+        let max = max_items.unwrap_or(100);
+
+        // Find start index from marker.
+        let start = marker
+            .and_then(|m| all.iter().position(|r| r.uuid == m))
+            .map_or(0, |pos| pos + 1);
+
+        let page: Vec<EventSourceMappingConfiguration> = all
+            .iter()
+            .skip(start)
+            .take(max)
+            .map(Self::record_to_configuration)
+            .collect();
+
+        let next_marker = if start + max < all.len() {
+            all.get(start + max - 1).map(|r| r.uuid.clone())
+        } else {
+            None
+        };
+
+        ListEventSourceMappingsOutput {
+            event_source_mappings: Some(page),
+            next_marker,
+        }
+    }
+
+    /// Convert an `EventSourceMappingRecord` to an `EventSourceMappingConfiguration`.
+    fn record_to_configuration(
+        record: &EventSourceMappingRecord,
+    ) -> EventSourceMappingConfiguration {
+        #[allow(clippy::cast_precision_loss)]
+        let last_modified_f64 = record.last_modified as f64;
+
+        EventSourceMappingConfiguration {
+            uuid: Some(record.uuid.clone()),
+            event_source_arn: Some(record.event_source_arn.clone()),
+            function_arn: Some(record.function_arn.clone()),
+            state: Some(record.state.clone()),
+            state_transition_reason: Some(record.state_transition_reason.clone()),
+            last_modified: Some(last_modified_f64),
+            last_processing_result: Some(record.last_processing_result.clone()),
+            batch_size: Some(record.batch_size),
+            maximum_batching_window_in_seconds: Some(record.maximum_batching_window_in_seconds),
+            starting_position: record.starting_position.clone(),
+            starting_position_timestamp: record.starting_position_timestamp.clone(),
+            maximum_record_age_in_seconds: record.maximum_record_age_in_seconds,
+            bisect_batch_on_function_error: record.bisect_batch_on_function_error,
+            maximum_retry_attempts: record.maximum_retry_attempts,
+            parallelization_factor: record.parallelization_factor,
+            function_response_types: if record.function_response_types.is_empty() {
+                None
+            } else {
+                Some(record.function_response_types.clone())
+            },
+        }
+    }
+
+    // ---------------------------------------------------------------
     // Internal helpers
     // ---------------------------------------------------------------
+
+    /// Build a `PublishLayerVersionOutput` from a `LayerVersionRecord`.
+    #[allow(clippy::cast_possible_wrap)]
+    fn build_layer_version_output(ver: &LayerVersionRecord) -> PublishLayerVersionOutput {
+        PublishLayerVersionOutput {
+            content: Some(LayerVersionContentOutput {
+                code_sha256: Some(ver.code_sha256.clone()),
+                code_size: Some(ver.code_size as i64),
+                ..Default::default()
+            }),
+            layer_arn: Some(ver.layer_arn.clone()),
+            layer_version_arn: Some(ver.layer_version_arn.clone()),
+            description: if ver.description.is_empty() {
+                None
+            } else {
+                Some(ver.description.clone())
+            },
+            created_date: Some(ver.created_date.clone()),
+            version: Some(ver.version as i64),
+            compatible_runtimes: if ver.compatible_runtimes.is_empty() {
+                None
+            } else {
+                Some(ver.compatible_runtimes.clone())
+            },
+            license_info: ver.license_info.clone(),
+            compatible_architectures: if ver.compatible_architectures.is_empty() {
+                None
+            } else {
+                Some(ver.compatible_architectures.clone())
+            },
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 6: Concurrency
+    // -----------------------------------------------------------------
+
+    /// Put (set) reserved concurrency for a function.
+    pub fn put_function_concurrency(
+        &self,
+        function_ref: &str,
+        reserved: i32,
+    ) -> Result<Concurrency, LambdaServiceError> {
+        let (name, _) = resolve_function_ref(function_ref)?;
+        let _ = self.get_record(&name)?;
+
+        self.store.update(&name, |rec| {
+            rec.reserved_concurrent_executions = Some(reserved);
+        })?;
+
+        Ok(Concurrency {
+            reserved_concurrent_executions: Some(reserved),
+        })
+    }
+
+    /// Get reserved concurrency for a function.
+    pub fn get_function_concurrency(
+        &self,
+        function_ref: &str,
+    ) -> Result<Concurrency, LambdaServiceError> {
+        let (name, _) = resolve_function_ref(function_ref)?;
+        let record = self.get_record(&name)?;
+        Ok(Concurrency {
+            reserved_concurrent_executions: record.reserved_concurrent_executions,
+        })
+    }
+
+    /// Delete reserved concurrency for a function.
+    pub fn delete_function_concurrency(
+        &self,
+        function_ref: &str,
+    ) -> Result<(), LambdaServiceError> {
+        let (name, _) = resolve_function_ref(function_ref)?;
+        let _ = self.get_record(&name)?;
+        self.store.update(&name, |rec| {
+            rec.reserved_concurrent_executions = None;
+        })?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 6: Event Invoke Config
+    // -----------------------------------------------------------------
+
+    /// Put (create/replace) an event invoke config for a function qualifier.
+    pub fn put_function_event_invoke_config(
+        &self,
+        function_ref: &str,
+        qualifier: Option<&str>,
+        input: &EventInvokeConfigInput,
+    ) -> Result<FunctionEventInvokeConfig, LambdaServiceError> {
+        let (name, ref_qualifier) = resolve_function_ref(function_ref)?;
+        let qualifier = qualifier.or(ref_qualifier.as_deref()).unwrap_or("$LATEST");
+        let record = self.get_record(&name)?;
+        let fn_arn = self.build_qualified_arn(&name, qualifier);
+        let now = chrono::Utc::now();
+        let now_iso = now.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
+        let epoch_millis = millis_to_f64(now.timestamp_millis());
+
+        let config_record = EventInvokeConfigRecord {
+            function_arn: fn_arn.clone(),
+            qualifier: qualifier.to_owned(),
+            maximum_retry_attempts: input.maximum_retry_attempts,
+            maximum_event_age_in_seconds: input.maximum_event_age_in_seconds,
+            last_modified: now_iso,
+            destination_config: input.destination_config.clone(),
+        };
+
+        drop(record);
+        self.store.update(&name, |rec| {
+            rec.event_invoke_configs
+                .insert(qualifier.to_owned(), config_record.clone());
+        })?;
+
+        Ok(build_event_invoke_config(&config_record, epoch_millis))
+    }
+
+    /// Get an event invoke config for a function qualifier.
+    pub fn get_function_event_invoke_config(
+        &self,
+        function_ref: &str,
+        qualifier: Option<&str>,
+    ) -> Result<FunctionEventInvokeConfig, LambdaServiceError> {
+        let (name, ref_qualifier) = resolve_function_ref(function_ref)?;
+        let qualifier = qualifier.or(ref_qualifier.as_deref()).unwrap_or("$LATEST");
+        let record = self.get_record(&name)?;
+
+        let config_record = record.event_invoke_configs.get(qualifier).ok_or_else(|| {
+            LambdaServiceError::EventInvokeConfigNotFound {
+                function_name: name.clone(),
+                qualifier: qualifier.to_owned(),
+            }
+        })?;
+
+        let epoch_millis = parse_epoch_millis(&config_record.last_modified);
+
+        Ok(build_event_invoke_config(config_record, epoch_millis))
+    }
+
+    /// Update (merge) an event invoke config for a function qualifier.
+    pub fn update_function_event_invoke_config(
+        &self,
+        function_ref: &str,
+        qualifier: Option<&str>,
+        input: &EventInvokeConfigInput,
+    ) -> Result<FunctionEventInvokeConfig, LambdaServiceError> {
+        let (name, ref_qualifier) = resolve_function_ref(function_ref)?;
+        let qualifier = qualifier.or(ref_qualifier.as_deref()).unwrap_or("$LATEST");
+        let _ = self.get_record(&name)?;
+        let fn_arn = self.build_qualified_arn(&name, qualifier);
+        let now = chrono::Utc::now();
+        let now_iso = now.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
+        let epoch_millis = millis_to_f64(now.timestamp_millis());
+
+        let result = self.store.update(&name, |rec| {
+            let entry = rec
+                .event_invoke_configs
+                .entry(qualifier.to_owned())
+                .or_insert_with(|| EventInvokeConfigRecord {
+                    function_arn: fn_arn.clone(),
+                    qualifier: qualifier.to_owned(),
+                    maximum_retry_attempts: None,
+                    maximum_event_age_in_seconds: None,
+                    last_modified: now_iso.clone(),
+                    destination_config: None,
+                });
+
+            if let Some(v) = input.maximum_retry_attempts {
+                entry.maximum_retry_attempts = Some(v);
+            }
+            if let Some(v) = input.maximum_event_age_in_seconds {
+                entry.maximum_event_age_in_seconds = Some(v);
+            }
+            if let Some(ref dc) = input.destination_config {
+                entry.destination_config = Some(dc.clone());
+            }
+            entry.last_modified.clone_from(&now_iso);
+            entry.clone()
+        })?;
+
+        Ok(build_event_invoke_config(&result, epoch_millis))
+    }
+
+    /// Delete an event invoke config for a function qualifier.
+    pub fn delete_function_event_invoke_config(
+        &self,
+        function_ref: &str,
+        qualifier: Option<&str>,
+    ) -> Result<(), LambdaServiceError> {
+        let (name, ref_qualifier) = resolve_function_ref(function_ref)?;
+        let qualifier = qualifier.or(ref_qualifier.as_deref()).unwrap_or("$LATEST");
+        let _ = self.get_record(&name)?;
+
+        self.store.update(&name, |rec| {
+            rec.event_invoke_configs.remove(qualifier);
+        })?;
+        Ok(())
+    }
+
+    /// List all event invoke configs for a function.
+    pub fn list_function_event_invoke_configs(
+        &self,
+        function_ref: &str,
+    ) -> Result<Vec<FunctionEventInvokeConfig>, LambdaServiceError> {
+        let (name, _) = resolve_function_ref(function_ref)?;
+        let record = self.get_record(&name)?;
+
+        let configs: Vec<FunctionEventInvokeConfig> = record
+            .event_invoke_configs
+            .values()
+            .map(|cr| {
+                let epoch_millis = parse_epoch_millis(&cr.last_modified);
+                build_event_invoke_config(cr, epoch_millis)
+            })
+            .collect();
+
+        Ok(configs)
+    }
+
+    /// Build a qualified ARN for a function + qualifier.
+    fn build_qualified_arn(&self, function_name: &str, qualifier: &str) -> String {
+        function_version_arn(
+            &self.config.default_region,
+            &self.config.account_id,
+            function_name,
+            qualifier,
+        )
+    }
 
     /// Get a function record by name, returning `FunctionNotFound` if absent.
     fn get_record(&self, name: &str) -> Result<FunctionRecord, LambdaServiceError> {
@@ -1586,6 +2496,37 @@ fn now_iso8601() -> String {
     chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3f+0000")
         .to_string()
+}
+
+/// Convert an `i64` millis timestamp to `f64` for the API response.
+///
+/// The AWS Lambda API returns `LastModified` as epoch milliseconds in a float.
+/// Precision loss is acceptable since timestamps fit well within f64 mantissa range
+/// for any reasonable date (up to year ~285,000).
+#[allow(clippy::cast_precision_loss)]
+fn millis_to_f64(millis: i64) -> f64 {
+    millis as f64
+}
+
+/// Parse an ISO 8601 timestamp string into epoch millis as `f64`.
+fn parse_epoch_millis(iso: &str) -> f64 {
+    chrono::DateTime::parse_from_str(iso, "%Y-%m-%dT%H:%M:%S%.3f%z")
+        .map(|dt| millis_to_f64(dt.timestamp_millis()))
+        .unwrap_or(0.0)
+}
+
+/// Convert an `EventInvokeConfigRecord` to the output type.
+fn build_event_invoke_config(
+    record: &EventInvokeConfigRecord,
+    epoch_millis: f64,
+) -> FunctionEventInvokeConfig {
+    FunctionEventInvokeConfig {
+        function_arn: Some(record.function_arn.clone()),
+        maximum_retry_attempts: record.maximum_retry_attempts,
+        maximum_event_age_in_seconds: record.maximum_event_age_in_seconds,
+        last_modified: Some(epoch_millis),
+        destination_config: record.destination_config.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -1886,6 +2827,206 @@ mod tests {
         assert!(matches!(err, LambdaServiceError::ResourceConflict { .. }));
     }
 
+    // ---- Layer operation tests ----
+
+    #[test]
+    fn test_should_publish_and_get_layer_version() {
+        use base64::Engine;
+        let provider = test_provider();
+        let zip_data = base64::engine::general_purpose::STANDARD.encode(b"PK\x03\x04layer");
+        let input = PublishLayerVersionInput {
+            description: Some("Test layer".to_owned()),
+            content: Some(ruststack_lambda_model::types::LayerVersionContentInput {
+                zip_file: Some(zip_data),
+                ..Default::default()
+            }),
+            compatible_runtimes: Some(vec!["python3.12".to_owned()]),
+            ..Default::default()
+        };
+
+        let output = provider.publish_layer_version("my-layer", &input).unwrap();
+        assert_eq!(output.version, Some(1));
+        assert_eq!(output.description, Some("Test layer".to_owned()));
+        assert!(
+            output
+                .layer_arn
+                .as_ref()
+                .unwrap()
+                .contains("layer:my-layer")
+        );
+        assert!(
+            output
+                .layer_version_arn
+                .as_ref()
+                .unwrap()
+                .contains("layer:my-layer:1")
+        );
+
+        // Get the layer version.
+        let get_output = provider.get_layer_version("my-layer", 1).unwrap();
+        assert_eq!(get_output.version, Some(1));
+        assert_eq!(get_output.description, Some("Test layer".to_owned()));
+    }
+
+    #[test]
+    fn test_should_publish_multiple_layer_versions() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+
+        let v1 = provider.publish_layer_version("my-layer", &input).unwrap();
+        let v2 = provider.publish_layer_version("my-layer", &input).unwrap();
+
+        assert_eq!(v1.version, Some(1));
+        assert_eq!(v2.version, Some(2));
+    }
+
+    #[test]
+    fn test_should_list_layer_versions() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+
+        provider.publish_layer_version("my-layer", &input).unwrap();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+
+        let output = provider
+            .list_layer_versions("my-layer", None, None)
+            .unwrap();
+        assert_eq!(output.layer_versions.as_ref().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_should_list_layers() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+
+        provider
+            .publish_layer_version("alpha-layer", &input)
+            .unwrap();
+        provider
+            .publish_layer_version("bravo-layer", &input)
+            .unwrap();
+
+        let output = provider.list_layers(None, None);
+        let layers = output.layers.as_ref().unwrap();
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0].layer_name, Some("alpha-layer".to_owned()),);
+        assert_eq!(layers[1].layer_name, Some("bravo-layer".to_owned()),);
+    }
+
+    #[test]
+    fn test_should_delete_layer_version() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+
+        provider.publish_layer_version("my-layer", &input).unwrap();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+
+        provider.delete_layer_version("my-layer", 1).unwrap();
+
+        // Version 1 should be gone.
+        let err = provider.get_layer_version("my-layer", 1);
+        assert!(err.is_err());
+
+        // Version 2 should still exist.
+        let output = provider.get_layer_version("my-layer", 2).unwrap();
+        assert_eq!(output.version, Some(2));
+    }
+
+    #[test]
+    fn test_should_delete_nonexistent_layer_version_silently() {
+        let provider = test_provider();
+        // Should not error even if layer doesn't exist.
+        provider.delete_layer_version("nonexistent", 99).unwrap();
+    }
+
+    #[test]
+    fn test_should_add_and_get_layer_version_policy() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+
+        let perm_input = AddLayerVersionPermissionInput {
+            statement_id: Some("stmt-1".to_owned()),
+            action: Some("lambda:GetLayerVersion".to_owned()),
+            principal: Some("*".to_owned()),
+            ..Default::default()
+        };
+        let output = provider
+            .add_layer_version_permission("my-layer", 1, &perm_input)
+            .unwrap();
+        assert!(output.statement.is_some());
+
+        let policy = provider.get_layer_version_policy("my-layer", 1).unwrap();
+        assert!(policy.policy.as_ref().unwrap().contains("stmt-1"));
+    }
+
+    #[test]
+    fn test_should_reject_duplicate_layer_permission_sid() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+
+        let perm_input = AddLayerVersionPermissionInput {
+            statement_id: Some("stmt-1".to_owned()),
+            action: Some("lambda:GetLayerVersion".to_owned()),
+            principal: Some("*".to_owned()),
+            ..Default::default()
+        };
+        provider
+            .add_layer_version_permission("my-layer", 1, &perm_input)
+            .unwrap();
+
+        let err = provider
+            .add_layer_version_permission("my-layer", 1, &perm_input)
+            .unwrap_err();
+        assert!(matches!(err, LambdaServiceError::ResourceConflict { .. }));
+    }
+
+    #[test]
+    fn test_should_remove_layer_version_permission() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+
+        let perm_input = AddLayerVersionPermissionInput {
+            statement_id: Some("stmt-1".to_owned()),
+            action: Some("lambda:GetLayerVersion".to_owned()),
+            principal: Some("*".to_owned()),
+            ..Default::default()
+        };
+        provider
+            .add_layer_version_permission("my-layer", 1, &perm_input)
+            .unwrap();
+
+        provider
+            .remove_layer_version_permission("my-layer", 1, "stmt-1")
+            .unwrap();
+
+        // Policy should now be empty.
+        let err = provider.get_layer_version_policy("my-layer", 1);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_should_get_layer_version_by_arn() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+        provider.publish_layer_version("my-layer", &input).unwrap();
+
+        let arn = "arn:aws:lambda:us-east-1:000000000000:layer:my-layer:1";
+        let output = provider.get_layer_version_by_arn(arn).unwrap();
+        assert_eq!(output.version, Some(1));
+    }
+
+    #[test]
+    fn test_should_error_on_empty_layer_name() {
+        let provider = test_provider();
+        let input = PublishLayerVersionInput::default();
+        let err = provider.publish_layer_version("", &input).unwrap_err();
+        assert!(matches!(err, LambdaServiceError::InvalidParameter { .. }));
+    }
+
     #[tokio::test]
     async fn test_should_generate_local_function_url() {
         let provider = test_provider();
@@ -1935,5 +3076,236 @@ mod tests {
             .list_versions_by_function("my-func", output.next_marker.as_deref(), Some(2))
             .unwrap();
         assert_eq!(output2.versions.as_ref().unwrap().len(), 2);
+    }
+
+    // ---- Event Source Mapping tests ----
+
+    fn sample_esm_input() -> CreateEventSourceMappingInput {
+        CreateEventSourceMappingInput {
+            event_source_arn: "arn:aws:sqs:us-east-1:000000000000:my-queue".to_owned(),
+            function_name: "my-func".to_owned(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_should_create_event_source_mapping() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        let config = provider
+            .create_event_source_mapping(&sample_esm_input())
+            .unwrap();
+
+        assert!(config.uuid.is_some());
+        assert_eq!(
+            config.event_source_arn.as_deref(),
+            Some("arn:aws:sqs:us-east-1:000000000000:my-queue")
+        );
+        assert!(config.function_arn.is_some());
+        assert_eq!(config.state.as_deref(), Some("Enabled"));
+        assert_eq!(config.batch_size, Some(10));
+        assert_eq!(config.maximum_batching_window_in_seconds, Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_should_create_esm_disabled() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        let mut input = sample_esm_input();
+        input.enabled = Some(false);
+        input.batch_size = Some(50);
+
+        let config = provider.create_event_source_mapping(&input).unwrap();
+        assert_eq!(config.state.as_deref(), Some("Disabled"));
+        assert_eq!(config.batch_size, Some(50));
+    }
+
+    #[tokio::test]
+    async fn test_should_reject_esm_for_nonexistent_function() {
+        let provider = test_provider();
+        let err = provider
+            .create_event_source_mapping(&sample_esm_input())
+            .unwrap_err();
+        assert!(matches!(err, LambdaServiceError::FunctionNotFound { .. }));
+    }
+
+    #[test]
+    fn test_should_reject_esm_with_empty_event_source_arn() {
+        let provider = test_provider();
+        let input = CreateEventSourceMappingInput {
+            event_source_arn: String::new(),
+            function_name: "my-func".to_owned(),
+            ..Default::default()
+        };
+        let err = provider.create_event_source_mapping(&input).unwrap_err();
+        assert!(matches!(err, LambdaServiceError::InvalidParameter { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_should_get_event_source_mapping() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        let created = provider
+            .create_event_source_mapping(&sample_esm_input())
+            .unwrap();
+        let uuid = created.uuid.as_ref().unwrap();
+
+        let retrieved = provider.get_event_source_mapping(uuid).unwrap();
+        assert_eq!(retrieved.uuid.as_deref(), Some(uuid.as_str()));
+        assert_eq!(retrieved.batch_size, Some(10));
+    }
+
+    #[test]
+    fn test_should_error_on_get_nonexistent_esm() {
+        let provider = test_provider();
+        let err = provider
+            .get_event_source_mapping("no-such-uuid")
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            LambdaServiceError::EventSourceMappingNotFound { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_should_update_event_source_mapping() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        let created = provider
+            .create_event_source_mapping(&sample_esm_input())
+            .unwrap();
+        let uuid = created.uuid.as_ref().unwrap();
+
+        let update_input = UpdateEventSourceMappingInput {
+            batch_size: Some(100),
+            enabled: Some(false),
+            maximum_retry_attempts: Some(3),
+            ..Default::default()
+        };
+
+        let updated = provider
+            .update_event_source_mapping(uuid, &update_input)
+            .unwrap();
+        assert_eq!(updated.batch_size, Some(100));
+        assert_eq!(updated.state.as_deref(), Some("Disabled"));
+        assert_eq!(updated.maximum_retry_attempts, Some(3));
+    }
+
+    #[test]
+    fn test_should_error_on_update_nonexistent_esm() {
+        let provider = test_provider();
+        let input = UpdateEventSourceMappingInput::default();
+        let err = provider
+            .update_event_source_mapping("no-such-uuid", &input)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            LambdaServiceError::EventSourceMappingNotFound { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_should_delete_event_source_mapping() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        let created = provider
+            .create_event_source_mapping(&sample_esm_input())
+            .unwrap();
+        let uuid = created.uuid.as_ref().unwrap();
+
+        let deleted = provider.delete_event_source_mapping(uuid).unwrap();
+        assert_eq!(deleted.state.as_deref(), Some("Deleting"));
+
+        // Should no longer be findable.
+        let err = provider.get_event_source_mapping(uuid).unwrap_err();
+        assert!(matches!(
+            err,
+            LambdaServiceError::EventSourceMappingNotFound { .. }
+        ));
+    }
+
+    #[test]
+    fn test_should_error_on_delete_nonexistent_esm() {
+        let provider = test_provider();
+        let err = provider
+            .delete_event_source_mapping("no-such-uuid")
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            LambdaServiceError::EventSourceMappingNotFound { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_should_list_event_source_mappings() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        // Create 3 mappings.
+        for _ in 0..3 {
+            provider
+                .create_event_source_mapping(&sample_esm_input())
+                .unwrap();
+        }
+
+        let output = provider.list_event_source_mappings(None, None, None, None);
+        assert_eq!(output.event_source_mappings.as_ref().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_should_list_esm_with_function_filter() {
+        let provider = test_provider();
+        create_test_function(&provider, "func-a").await;
+        create_test_function(&provider, "func-b").await;
+
+        let input_a = CreateEventSourceMappingInput {
+            event_source_arn: "arn:aws:sqs:us-east-1:000000000000:queue".to_owned(),
+            function_name: "func-a".to_owned(),
+            ..Default::default()
+        };
+        let input_b = CreateEventSourceMappingInput {
+            event_source_arn: "arn:aws:sqs:us-east-1:000000000000:queue".to_owned(),
+            function_name: "func-b".to_owned(),
+            ..Default::default()
+        };
+
+        provider.create_event_source_mapping(&input_a).unwrap();
+        provider.create_event_source_mapping(&input_b).unwrap();
+
+        let output = provider.list_event_source_mappings(Some("func-a"), None, None, None);
+        assert_eq!(output.event_source_mappings.as_ref().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_should_list_esm_with_pagination() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        for _ in 0..5 {
+            provider
+                .create_event_source_mapping(&sample_esm_input())
+                .unwrap();
+        }
+
+        let page1 = provider.list_event_source_mappings(None, None, None, Some(2));
+        assert_eq!(page1.event_source_mappings.as_ref().unwrap().len(), 2);
+        assert!(page1.next_marker.is_some());
+
+        let page2 =
+            provider.list_event_source_mappings(None, None, page1.next_marker.as_deref(), Some(2));
+        assert_eq!(page2.event_source_mappings.as_ref().unwrap().len(), 2);
+    }
+
+    /// Helper to create a test function for ESM tests.
+    async fn create_test_function(provider: &RustStackLambda, name: &str) {
+        provider
+            .create_function(sample_create_input(name))
+            .await
+            .unwrap();
     }
 }

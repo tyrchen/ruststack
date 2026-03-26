@@ -72,6 +72,22 @@ pub enum LambdaServiceError {
     #[error("Docker not available")]
     DockerNotAvailable,
 
+    /// Event source mapping does not exist.
+    #[error("Event source mapping not found: {uuid}")]
+    EventSourceMappingNotFound {
+        /// UUID that was not found.
+        uuid: String,
+    },
+
+    /// Event invoke config does not exist.
+    #[error("Event invoke config not found: {function_name}:{qualifier}")]
+    EventInvokeConfigNotFound {
+        /// Function name.
+        function_name: String,
+        /// Qualifier.
+        qualifier: String,
+    },
+
     /// Policy statement not found.
     #[error("Policy not found: {sid}")]
     PolicyNotFound {
@@ -106,13 +122,15 @@ impl From<LambdaServiceError> for LambdaError {
                 ref function_name,
                 ref version,
             } => LambdaError::resource_not_found(format!(
-                "Function not found: arn:aws:lambda:us-east-1:000000000000:function:{function_name}:{version}"
+                "Function not found: \
+                 arn:aws:lambda:us-east-1:000000000000:function:{function_name}:{version}"
             )),
             LambdaServiceError::AliasNotFound {
                 ref function_name,
                 ref alias,
             } => LambdaError::resource_not_found(format!(
-                "Function not found: arn:aws:lambda:us-east-1:000000000000:function:{function_name}:{alias}"
+                "Function not found: \
+                 arn:aws:lambda:us-east-1:000000000000:function:{function_name}:{alias}"
             )),
             LambdaServiceError::ResourceConflict { ref message } => {
                 LambdaError::resource_conflict(message)
@@ -135,9 +153,23 @@ impl From<LambdaServiceError> for LambdaError {
             LambdaServiceError::RequestTooLarge { ref message } => {
                 LambdaError::new(LambdaErrorCode::RequestTooLargeException, message.clone())
             }
+            LambdaServiceError::EventSourceMappingNotFound { ref uuid } => {
+                LambdaError::resource_not_found(format!(
+                    "The resource you requested does not exist. (Service: Lambda, Status Code: \
+                     404, Request ID: 00000000-0000-0000-0000-000000000000, Extended Request ID: \
+                     null) UUID: {uuid}"
+                ))
+            }
             LambdaServiceError::PolicyNotFound { ref sid } => {
                 LambdaError::resource_not_found(format!("No policy is found for: {sid}"))
             }
+            LambdaServiceError::EventInvokeConfigNotFound {
+                ref function_name,
+                ref qualifier,
+            } => LambdaError::resource_not_found(format!(
+                "The function {function_name} doesn't have an EventInvokeConfig for qualifier \
+                 {qualifier}"
+            )),
             LambdaServiceError::Internal { ref message } => {
                 LambdaError::service_error(message.clone())
             }

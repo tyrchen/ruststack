@@ -11,8 +11,10 @@
 
 use std::io::{self, Write};
 
-use quick_xml::Writer;
-use quick_xml::events::{BytesText, Event};
+use quick_xml::{
+    Writer,
+    events::{BytesText, Event},
+};
 
 use crate::error::XmlError;
 
@@ -208,36 +210,39 @@ impl_as_str!(
 // S3Serialize implementations for shared types
 // ---------------------------------------------------------------------------
 
-use ruststack_s3_model::output::{
-    CompleteMultipartUploadOutput, CopyObjectOutput, CreateMultipartUploadOutput,
-    DeleteObjectsOutput, GetBucketAccelerateConfigurationOutput, GetBucketAclOutput,
-    GetBucketCorsOutput, GetBucketEncryptionOutput, GetBucketLifecycleConfigurationOutput,
-    GetBucketLoggingOutput, GetBucketNotificationConfigurationOutput,
-    GetBucketOwnershipControlsOutput, GetBucketPolicyStatusOutput, GetBucketRequestPaymentOutput,
-    GetBucketTaggingOutput, GetBucketVersioningOutput, GetBucketWebsiteOutput, GetObjectAclOutput,
-    GetObjectAttributesOutput, GetObjectLegalHoldOutput, GetObjectLockConfigurationOutput,
-    GetObjectRetentionOutput, GetObjectTaggingOutput, GetPublicAccessBlockOutput,
-    ListBucketsOutput, ListMultipartUploadsOutput, ListObjectVersionsOutput, ListObjectsOutput,
-    ListObjectsV2Output, ListPartsOutput, UploadPartCopyOutput,
-};
-use ruststack_s3_model::types::{
-    AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, Bucket,
-    BucketInfo, BucketLifecycleConfiguration, BucketLoggingStatus, CORSConfiguration, CORSRule,
-    Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, Condition, CopyObjectResult,
-    CopyPartResult, CreateBucketConfiguration, DefaultRetention, Delete, DeleteMarkerEntry,
-    DeletedObject, Error, ErrorDocument, EventBridgeConfiguration, FilterRule,
-    GetObjectAttributesParts, Grant, Grantee, IndexDocument, Initiator,
-    LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator,
-    LifecycleRuleFilter, LocationInfo, LoggingEnabled, MultipartUpload,
-    NoncurrentVersionExpiration, NoncurrentVersionTransition, NotificationConfiguration,
-    NotificationConfigurationFilter, Object, ObjectIdentifier, ObjectLockConfiguration,
-    ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, Owner,
-    OwnershipControls, OwnershipControlsRule, Part, PartitionedPrefix, PolicyStatus,
-    PublicAccessBlockConfiguration, QueueConfiguration, Redirect, RedirectAllRequestsTo,
-    RequestPaymentConfiguration, RoutingRule, S3KeyFilter, ServerSideEncryptionByDefault,
-    ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix, Tag, Tagging,
-    TargetGrant, TargetObjectKeyFormat, TopicConfiguration, Transition, VersioningConfiguration,
-    WebsiteConfiguration,
+use ruststack_s3_model::{
+    output::{
+        CompleteMultipartUploadOutput, CopyObjectOutput, CreateMultipartUploadOutput,
+        DeleteObjectsOutput, GetBucketAccelerateConfigurationOutput, GetBucketAclOutput,
+        GetBucketCorsOutput, GetBucketEncryptionOutput, GetBucketLifecycleConfigurationOutput,
+        GetBucketLoggingOutput, GetBucketNotificationConfigurationOutput,
+        GetBucketOwnershipControlsOutput, GetBucketPolicyStatusOutput,
+        GetBucketRequestPaymentOutput, GetBucketTaggingOutput, GetBucketVersioningOutput,
+        GetBucketWebsiteOutput, GetObjectAclOutput, GetObjectAttributesOutput,
+        GetObjectLegalHoldOutput, GetObjectLockConfigurationOutput, GetObjectRetentionOutput,
+        GetObjectTaggingOutput, GetPublicAccessBlockOutput, ListBucketsOutput,
+        ListMultipartUploadsOutput, ListObjectVersionsOutput, ListObjectsOutput,
+        ListObjectsV2Output, ListPartsOutput, UploadPartCopyOutput,
+    },
+    types::{
+        AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, Bucket,
+        BucketInfo, BucketLifecycleConfiguration, BucketLoggingStatus, CORSConfiguration, CORSRule,
+        Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, Condition,
+        CopyObjectResult, CopyPartResult, CreateBucketConfiguration, DefaultRetention, Delete,
+        DeleteMarkerEntry, DeletedObject, Error, ErrorDocument, EventBridgeConfiguration,
+        FilterRule, GetObjectAttributesParts, Grant, Grantee, IndexDocument, Initiator,
+        LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator,
+        LifecycleRuleFilter, LocationInfo, LoggingEnabled, MultipartUpload,
+        NoncurrentVersionExpiration, NoncurrentVersionTransition, NotificationConfiguration,
+        NotificationConfigurationFilter, Object, ObjectIdentifier, ObjectLockConfiguration,
+        ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, Owner,
+        OwnershipControls, OwnershipControlsRule, Part, PartitionedPrefix, PolicyStatus,
+        PublicAccessBlockConfiguration, QueueConfiguration, Redirect, RedirectAllRequestsTo,
+        RequestPaymentConfiguration, RoutingRule, S3KeyFilter, ServerSideEncryptionByDefault,
+        ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix, Tag, Tagging,
+        TargetGrant, TargetObjectKeyFormat, TopicConfiguration, Transition,
+        VersioningConfiguration, WebsiteConfiguration,
+    },
 };
 
 impl S3Serialize for Tag {

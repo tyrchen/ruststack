@@ -5,8 +5,10 @@
 
 use std::collections::HashMap;
 
-use ruststack_apigatewayv2_model::error::ApiGatewayV2Error;
-use ruststack_apigatewayv2_model::operations::{APIGATEWAYV2_ROUTES, ApiGatewayV2Operation};
+use ruststack_apigatewayv2_model::{
+    error::ApiGatewayV2Error,
+    operations::{APIGATEWAYV2_ROUTES, ApiGatewayV2Operation},
+};
 
 /// Extracted path parameters from a matched route.
 #[derive(Debug, Clone, Default)]

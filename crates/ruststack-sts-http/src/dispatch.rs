@@ -1,12 +1,9 @@
 //! STS handler trait and operation dispatch.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-
-use ruststack_sts_model::error::StsError;
-use ruststack_sts_model::operations::StsOperation;
+use ruststack_sts_model::{error::StsError, operations::StsOperation};
 
 use crate::body::StsResponseBody;
 

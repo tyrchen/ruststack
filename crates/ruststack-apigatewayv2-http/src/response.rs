@@ -4,9 +4,8 @@
 //! `{"message": "..."}`
 
 use bytes::Bytes;
-use serde::Serialize;
-
 use ruststack_apigatewayv2_model::error::ApiGatewayV2Error;
+use serde::Serialize;
 
 /// Content type for API Gateway v2 JSON responses.
 pub const CONTENT_TYPE: &str = "application/json";
@@ -74,8 +73,9 @@ pub fn empty_response(status: u16) -> Result<http::Response<Bytes>, ApiGatewayV2
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ruststack_apigatewayv2_model::error::ApiGatewayV2ErrorCode;
+
+    use super::*;
 
     #[test]
     fn test_should_format_error_with_lowercase_message() {

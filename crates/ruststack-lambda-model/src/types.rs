@@ -464,6 +464,90 @@ pub struct Layer {
     pub signing_job_arn: Option<String>,
 }
 
+/// Layer version code input for `PublishLayerVersion`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LayerVersionContentInput {
+    /// S3 bucket containing the layer code.
+    #[serde(rename = "S3Bucket")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub s3_bucket: Option<String>,
+    /// S3 key for the layer code.
+    #[serde(rename = "S3Key")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub s3_key: Option<String>,
+    /// S3 object version.
+    #[serde(rename = "S3ObjectVersion")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub s3_object_version: Option<String>,
+    /// Base64-encoded zip file contents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zip_file: Option<String>,
+}
+
+/// Layer version code output returned in layer version responses.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LayerVersionContentOutput {
+    /// Pre-signed URL to download the layer code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    /// SHA-256 hash of the layer code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_sha256: Option<String>,
+    /// Code size in bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_size: Option<i64>,
+    /// Signing profile version ARN.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signing_profile_version_arn: Option<String>,
+    /// Signing job ARN.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signing_job_arn: Option<String>,
+}
+
+/// Summary of a layer version in list responses.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LayerVersionsListItem {
+    /// Layer version ARN.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_version_arn: Option<String>,
+    /// Version number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<i64>,
+    /// Description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// ISO 8601 creation date.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_date: Option<String>,
+    /// Compatible runtimes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatible_runtimes: Option<Vec<String>>,
+    /// License info.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license_info: Option<String>,
+    /// Compatible architectures.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatible_architectures: Option<Vec<String>>,
+}
+
+/// Summary of a layer in list responses.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LayersListItem {
+    /// Layer name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_name: Option<String>,
+    /// Layer ARN (without version).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_arn: Option<String>,
+    /// Latest matching version summary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_matching_version: Option<LayerVersionsListItem>,
+}
+
 /// Function configuration returned by many operations.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -642,4 +726,130 @@ pub struct FunctionUrlConfig {
     /// Invoke mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invoke_mode: Option<String>,
+}
+
+/// Configuration of an event source mapping.
+///
+/// This is the response type shared across all event source mapping operations
+/// (Create, Get, Update, Delete, List).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct EventSourceMappingConfiguration {
+    /// The event source mapping UUID.
+    #[serde(rename = "UUID", skip_serializing_if = "Option::is_none")]
+    pub uuid: Option<String>,
+    /// ARN of the event source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_source_arn: Option<String>,
+    /// Function ARN.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_arn: Option<String>,
+    /// State of the mapping (Creating, Enabled, Disabled, Enabling, Disabling, Updating,
+    /// Deleting).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// Reason for the current state transition.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_transition_reason: Option<String>,
+    /// Last modified timestamp (epoch seconds).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<f64>,
+    /// Result of the last processing attempt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_processing_result: Option<String>,
+    /// Maximum number of records per batch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<i32>,
+    /// Maximum batching window in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_batching_window_in_seconds: Option<i32>,
+    /// Starting position for stream-based sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starting_position: Option<String>,
+    /// Timestamp for `AT_TIMESTAMP` starting position.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starting_position_timestamp: Option<String>,
+    /// Maximum age of a record in seconds before discarding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_record_age_in_seconds: Option<i32>,
+    /// Whether to split a batch on function error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bisect_batch_on_function_error: Option<bool>,
+    /// Maximum number of retry attempts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_retry_attempts: Option<i32>,
+    /// Parallelization factor (1-10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallelization_factor: Option<i32>,
+    /// Function response types (e.g., `ReportBatchItemFailures`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_response_types: Option<Vec<String>>,
+}
+
+// ---------------------------------------------------------------------------
+// Concurrency
+// ---------------------------------------------------------------------------
+
+/// Concurrency configuration for a Lambda function.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct Concurrency {
+    /// The number of reserved concurrent executions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reserved_concurrent_executions: Option<i32>,
+}
+
+// ---------------------------------------------------------------------------
+// Event Invoke Config
+// ---------------------------------------------------------------------------
+
+/// Destination configuration for asynchronous invocations.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DestinationConfig {
+    /// Destination for successful invocations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_success: Option<OnSuccess>,
+    /// Destination for failed invocations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_failure: Option<OnFailure>,
+}
+
+/// Destination for successful asynchronous invocations.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct OnSuccess {
+    /// The ARN of the destination resource.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+}
+
+/// Destination for failed asynchronous invocations.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct OnFailure {
+    /// The ARN of the destination resource.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+}
+
+/// Event invoke configuration for a function.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct FunctionEventInvokeConfig {
+    /// The function ARN.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_arn: Option<String>,
+    /// Maximum retry attempts (0-2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_retry_attempts: Option<i32>,
+    /// Maximum event age in seconds (60-21600).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_event_age_in_seconds: Option<i32>,
+    /// Last modified timestamp as epoch millis (float).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<f64>,
+    /// Destination configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_config: Option<DestinationConfig>,
 }

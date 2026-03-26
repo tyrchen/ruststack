@@ -4,11 +4,12 @@
 //! incoming email in the local development emulator. This is for
 //! API compatibility only.
 
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
+use dashmap::{DashMap, mapref::entry::Entry};
 use parking_lot::RwLock;
-use ruststack_ses_model::error::{SesError, SesErrorCode};
-use ruststack_ses_model::types::{ReceiptRule, ReceiptRuleSetMetadata};
+use ruststack_ses_model::{
+    error::{SesError, SesErrorCode},
+    types::{ReceiptRule, ReceiptRuleSetMetadata},
+};
 
 /// Internal receipt rule set record.
 #[derive(Debug, Clone)]

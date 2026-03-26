@@ -1,16 +1,14 @@
 //! Secrets Manager handler implementation bridging HTTP to business logic.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_secretsmanager_http::body::SecretsManagerResponseBody;
-use ruststack_secretsmanager_http::dispatch::SecretsManagerHandler;
-use ruststack_secretsmanager_http::response::json_response;
-use ruststack_secretsmanager_model::error::SecretsManagerError;
-use ruststack_secretsmanager_model::operations::SecretsManagerOperation;
+use ruststack_secretsmanager_http::{
+    body::SecretsManagerResponseBody, dispatch::SecretsManagerHandler, response::json_response,
+};
+use ruststack_secretsmanager_model::{
+    error::SecretsManagerError, operations::SecretsManagerOperation,
+};
 
 use crate::provider::RustStackSecretsManager;
 

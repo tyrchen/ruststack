@@ -5,22 +5,20 @@
 //! Unlike SQS/SSM (which use `X-Amz-Target` header), SNS uses the
 //! `Action=` form parameter for operation routing.
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
-
 use ruststack_sns_model::error::SnsError;
 
-use crate::body::SnsResponseBody;
-use crate::dispatch::{SnsHandler, dispatch_operation};
-use crate::request::parse_form_params;
-use crate::response::{CONTENT_TYPE, error_to_response};
-use crate::router::resolve_operation;
+use crate::{
+    body::SnsResponseBody,
+    dispatch::{SnsHandler, dispatch_operation},
+    request::parse_form_params,
+    response::{CONTENT_TYPE, error_to_response},
+    router::resolve_operation,
+};
 
 /// Configuration for the SNS HTTP service.
 #[derive(Clone)]

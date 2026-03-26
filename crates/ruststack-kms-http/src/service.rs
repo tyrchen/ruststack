@@ -1,20 +1,18 @@
 //! KMS HTTP service implementing the hyper `Service` trait.
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
-
 use ruststack_kms_model::error::KmsError;
 
-use crate::body::KmsResponseBody;
-use crate::dispatch::{KmsHandler, dispatch_operation};
-use crate::response::{CONTENT_TYPE, error_to_response};
-use crate::router::resolve_operation;
+use crate::{
+    body::KmsResponseBody,
+    dispatch::{KmsHandler, dispatch_operation},
+    response::{CONTENT_TYPE, error_to_response},
+    router::resolve_operation,
+};
 
 /// Configuration for the KMS HTTP service.
 #[derive(Clone)]

@@ -5,8 +5,10 @@
 
 use std::io;
 
-use quick_xml::Writer;
-use quick_xml::events::{BytesDecl, BytesText, Event};
+use quick_xml::{
+    Writer,
+    events::{BytesDecl, BytesText, Event},
+};
 
 /// Errors that can occur during S3 XML serialization or deserialization.
 #[derive(Debug, thiserror::Error)]

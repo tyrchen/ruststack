@@ -1,7 +1,9 @@
 //! Queue message storage for both standard and FIFO queues.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use tokio::time::Instant;
 

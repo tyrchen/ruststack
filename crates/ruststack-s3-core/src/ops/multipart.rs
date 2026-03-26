@@ -7,30 +7,36 @@
 use std::str::FromStr;
 
 use chrono::Utc;
-use ruststack_s3_model::error::{S3Error, S3ErrorCode};
-use ruststack_s3_model::input::{
-    AbortMultipartUploadInput, CompleteMultipartUploadInput, CreateMultipartUploadInput,
-    ListMultipartUploadsInput, ListPartsInput, UploadPartCopyInput, UploadPartInput,
-};
-use ruststack_s3_model::output::{
-    AbortMultipartUploadOutput, CompleteMultipartUploadOutput, CreateMultipartUploadOutput,
-    ListMultipartUploadsOutput, ListPartsOutput, UploadPartCopyOutput, UploadPartOutput,
-};
-use ruststack_s3_model::types::{
-    ChecksumAlgorithm, ChecksumType, CopyPartResult, Initiator,
-    MultipartUpload as ModelMultipartUpload, Part, StorageClass,
+use ruststack_s3_model::{
+    error::{S3Error, S3ErrorCode},
+    input::{
+        AbortMultipartUploadInput, CompleteMultipartUploadInput, CreateMultipartUploadInput,
+        ListMultipartUploadsInput, ListPartsInput, UploadPartCopyInput, UploadPartInput,
+    },
+    output::{
+        AbortMultipartUploadOutput, CompleteMultipartUploadOutput, CreateMultipartUploadOutput,
+        ListMultipartUploadsOutput, ListPartsOutput, UploadPartCopyOutput, UploadPartOutput,
+    },
+    types::{
+        ChecksumAlgorithm, ChecksumType, CopyPartResult, Initiator,
+        MultipartUpload as ModelMultipartUpload, Part, StorageClass,
+    },
 };
 use tracing::debug;
 
-use crate::checksums::{
-    ChecksumAlgorithm as CoreChecksumAlgorithm, compute_checksum, compute_composite_checksum,
+use crate::{
+    checksums::{
+        ChecksumAlgorithm as CoreChecksumAlgorithm, compute_checksum, compute_composite_checksum,
+    },
+    error::S3ServiceError,
+    provider::RustStackS3,
+    state::{
+        multipart::{MultipartUpload, UploadPart},
+        object::{ChecksumData, ObjectMetadata, Owner as InternalOwner, S3Object},
+    },
+    utils::{generate_upload_id, parse_copy_source},
+    validation::{validate_content_md5, validate_object_key},
 };
-use crate::error::S3ServiceError;
-use crate::provider::RustStackS3;
-use crate::state::multipart::{MultipartUpload, UploadPart};
-use crate::state::object::{ChecksumData, ObjectMetadata, Owner as InternalOwner, S3Object};
-use crate::utils::{generate_upload_id, parse_copy_source};
-use crate::validation::{validate_content_md5, validate_object_key};
 
 /// Minimum part size for multipart uploads (5 MB). All parts except the last
 /// must be at least this size per the S3 specification.

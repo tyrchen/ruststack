@@ -4,8 +4,7 @@
 //! `Content-Type: application/x-www-form-urlencoded`. The operation is
 //! specified by the `Action=<OperationName>` form parameter.
 
-use ruststack_iam_model::error::IamError;
-use ruststack_iam_model::operations::IamOperation;
+use ruststack_iam_model::{error::IamError, operations::IamOperation};
 
 /// Resolve an IAM operation from parsed form parameters.
 ///

@@ -1,16 +1,15 @@
 //! Kinesis handler implementation bridging HTTP to business logic.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
-
-use ruststack_kinesis_http::body::KinesisResponseBody;
-use ruststack_kinesis_http::dispatch::KinesisHandler;
-use ruststack_kinesis_http::response::json_response;
-use ruststack_kinesis_model::error::{KinesisError, KinesisErrorCode};
-use ruststack_kinesis_model::operations::KinesisOperation;
+use ruststack_kinesis_http::{
+    body::KinesisResponseBody, dispatch::KinesisHandler, response::json_response,
+};
+use ruststack_kinesis_model::{
+    error::{KinesisError, KinesisErrorCode},
+    operations::KinesisOperation,
+};
 
 use crate::provider::RustStackKinesis;
 

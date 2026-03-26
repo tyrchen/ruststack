@@ -1,9 +1,11 @@
 //! Input validation for KMS operations.
 
-use ruststack_kms_model::error::{KmsError, KmsErrorCode};
-use ruststack_kms_model::types::{
-    EncryptionAlgorithmSpec, KeySpec, KeyState, KeyUsageType, MacAlgorithmSpec,
-    SigningAlgorithmSpec,
+use ruststack_kms_model::{
+    error::{KmsError, KmsErrorCode},
+    types::{
+        EncryptionAlgorithmSpec, KeySpec, KeyState, KeyUsageType, MacAlgorithmSpec,
+        SigningAlgorithmSpec,
+    },
 };
 
 use crate::key::KmsKey;

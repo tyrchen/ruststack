@@ -7,64 +7,70 @@
 //! and SMS operations. These store and retrieve data but do not
 //! perform actual push notification or SMS delivery.
 
-use std::collections::{HashMap, HashSet};
-use std::fmt;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    sync::{Arc, atomic::AtomicU64},
+};
 
+use dashmap::DashMap;
+use ruststack_sns_model::{
+    error::{SnsError, SnsErrorCode},
+    input::{
+        AddPermissionInput, CheckIfPhoneNumberIsOptedOutInput, ConfirmSubscriptionInput,
+        CreatePlatformApplicationInput, CreatePlatformEndpointInput,
+        CreateSMSSandboxPhoneNumberInput, CreateTopicInput, DeleteEndpointInput,
+        DeletePlatformApplicationInput, DeleteSMSSandboxPhoneNumberInput, DeleteTopicInput,
+        GetDataProtectionPolicyInput, GetEndpointAttributesInput,
+        GetPlatformApplicationAttributesInput, GetSMSAttributesInput,
+        GetSMSSandboxAccountStatusInput, GetSubscriptionAttributesInput, GetTopicAttributesInput,
+        ListEndpointsByPlatformApplicationInput, ListOriginationNumbersInput,
+        ListPhoneNumbersOptedOutInput, ListPlatformApplicationsInput,
+        ListSMSSandboxPhoneNumbersInput, ListSubscriptionsByTopicInput, ListSubscriptionsInput,
+        ListTagsForResourceInput, ListTopicsInput, OptInPhoneNumberInput, PublishBatchInput,
+        PublishInput, PutDataProtectionPolicyInput, RemovePermissionInput,
+        SetEndpointAttributesInput, SetPlatformApplicationAttributesInput, SetSMSAttributesInput,
+        SetSubscriptionAttributesInput, SetTopicAttributesInput, SubscribeInput, TagResourceInput,
+        UnsubscribeInput, UntagResourceInput, VerifySMSSandboxPhoneNumberInput,
+    },
+    output::{
+        AddPermissionOutput, CheckIfPhoneNumberIsOptedOutOutput, ConfirmSubscriptionOutput,
+        CreatePlatformApplicationOutput, CreatePlatformEndpointOutput,
+        CreateSMSSandboxPhoneNumberOutput, CreateTopicOutput, DeleteEndpointOutput,
+        DeletePlatformApplicationOutput, DeleteSMSSandboxPhoneNumberOutput, DeleteTopicOutput,
+        GetDataProtectionPolicyOutput, GetEndpointAttributesOutput,
+        GetPlatformApplicationAttributesOutput, GetSMSAttributesOutput,
+        GetSMSSandboxAccountStatusOutput, GetSubscriptionAttributesOutput,
+        GetTopicAttributesOutput, ListEndpointsByPlatformApplicationOutput,
+        ListOriginationNumbersOutput, ListPhoneNumbersOptedOutOutput,
+        ListPlatformApplicationsOutput, ListSMSSandboxPhoneNumbersOutput,
+        ListSubscriptionsByTopicOutput, ListSubscriptionsOutput, ListTagsForResourceOutput,
+        ListTopicsOutput, OptInPhoneNumberOutput, PublishBatchOutput, PublishOutput,
+        PutDataProtectionPolicyOutput, RemovePermissionOutput, SetEndpointAttributesOutput,
+        SetPlatformApplicationAttributesOutput, SetSMSAttributesOutput,
+        SetSubscriptionAttributesOutput, SetTopicAttributesOutput, SubscribeOutput,
+        TagResourceOutput, UnsubscribeOutput, UntagResourceOutput,
+        VerifySMSSandboxPhoneNumberOutput,
+    },
+    types::{
+        BatchResultErrorEntry, Endpoint, PlatformApplication, PublishBatchResultEntry,
+        SMSSandboxPhoneNumber, Subscription, Tag, Topic,
+    },
+};
 use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
 
-use dashmap::DashMap;
-use ruststack_sns_model::error::{SnsError, SnsErrorCode};
-
-use ruststack_sns_model::input::{
-    AddPermissionInput, CheckIfPhoneNumberIsOptedOutInput, ConfirmSubscriptionInput,
-    CreatePlatformApplicationInput, CreatePlatformEndpointInput, CreateSMSSandboxPhoneNumberInput,
-    CreateTopicInput, DeleteEndpointInput, DeletePlatformApplicationInput,
-    DeleteSMSSandboxPhoneNumberInput, DeleteTopicInput, GetDataProtectionPolicyInput,
-    GetEndpointAttributesInput, GetPlatformApplicationAttributesInput, GetSMSAttributesInput,
-    GetSMSSandboxAccountStatusInput, GetSubscriptionAttributesInput, GetTopicAttributesInput,
-    ListEndpointsByPlatformApplicationInput, ListOriginationNumbersInput,
-    ListPhoneNumbersOptedOutInput, ListPlatformApplicationsInput, ListSMSSandboxPhoneNumbersInput,
-    ListSubscriptionsByTopicInput, ListSubscriptionsInput, ListTagsForResourceInput,
-    ListTopicsInput, OptInPhoneNumberInput, PublishBatchInput, PublishInput,
-    PutDataProtectionPolicyInput, RemovePermissionInput, SetEndpointAttributesInput,
-    SetPlatformApplicationAttributesInput, SetSMSAttributesInput, SetSubscriptionAttributesInput,
-    SetTopicAttributesInput, SubscribeInput, TagResourceInput, UnsubscribeInput,
-    UntagResourceInput, VerifySMSSandboxPhoneNumberInput,
+use crate::{
+    config::SnsConfig,
+    delivery::{EnvelopeParams, build_sns_envelope},
+    filter::{evaluate_filter_policy, resolve_protocol_message},
+    publisher::SqsPublisher,
+    state::TopicStore,
+    subscription::{
+        FilterPolicyScope, SubscriptionAttributes, SubscriptionProtocol, SubscriptionRecord,
+    },
+    topic::{TopicAttributes, TopicRecord},
 };
-use ruststack_sns_model::output::{
-    AddPermissionOutput, CheckIfPhoneNumberIsOptedOutOutput, ConfirmSubscriptionOutput,
-    CreatePlatformApplicationOutput, CreatePlatformEndpointOutput,
-    CreateSMSSandboxPhoneNumberOutput, CreateTopicOutput, DeleteEndpointOutput,
-    DeletePlatformApplicationOutput, DeleteSMSSandboxPhoneNumberOutput, DeleteTopicOutput,
-    GetDataProtectionPolicyOutput, GetEndpointAttributesOutput,
-    GetPlatformApplicationAttributesOutput, GetSMSAttributesOutput,
-    GetSMSSandboxAccountStatusOutput, GetSubscriptionAttributesOutput, GetTopicAttributesOutput,
-    ListEndpointsByPlatformApplicationOutput, ListOriginationNumbersOutput,
-    ListPhoneNumbersOptedOutOutput, ListPlatformApplicationsOutput,
-    ListSMSSandboxPhoneNumbersOutput, ListSubscriptionsByTopicOutput, ListSubscriptionsOutput,
-    ListTagsForResourceOutput, ListTopicsOutput, OptInPhoneNumberOutput, PublishBatchOutput,
-    PublishOutput, PutDataProtectionPolicyOutput, RemovePermissionOutput,
-    SetEndpointAttributesOutput, SetPlatformApplicationAttributesOutput, SetSMSAttributesOutput,
-    SetSubscriptionAttributesOutput, SetTopicAttributesOutput, SubscribeOutput, TagResourceOutput,
-    UnsubscribeOutput, UntagResourceOutput, VerifySMSSandboxPhoneNumberOutput,
-};
-use ruststack_sns_model::types::{
-    BatchResultErrorEntry, Endpoint, PlatformApplication, PublishBatchResultEntry,
-    SMSSandboxPhoneNumber, Subscription, Tag, Topic,
-};
-
-use crate::config::SnsConfig;
-use crate::delivery::{EnvelopeParams, build_sns_envelope};
-use crate::filter::{evaluate_filter_policy, resolve_protocol_message};
-use crate::publisher::SqsPublisher;
-use crate::state::TopicStore;
-use crate::subscription::{
-    FilterPolicyScope, SubscriptionAttributes, SubscriptionProtocol, SubscriptionRecord,
-};
-use crate::topic::{TopicAttributes, TopicRecord};
 
 /// Maximum number of topics returned per `ListTopics` page.
 const LIST_TOPICS_PAGE_SIZE: usize = 100;
@@ -186,14 +192,14 @@ impl RustStackSns {
         if let Some(fifo_attr) = input.attributes.get("FifoTopic") {
             if fifo_attr.eq_ignore_ascii_case("true") && !is_fifo {
                 return Err(SnsError::invalid_parameter(
-                    "Invalid parameter: FifoTopic Reason: \
-                     FIFO topics must have a name ending with '.fifo'",
+                    "Invalid parameter: FifoTopic Reason: FIFO topics must have a name ending \
+                     with '.fifo'",
                 ));
             }
             if !fifo_attr.eq_ignore_ascii_case("true") && is_fifo {
                 return Err(SnsError::invalid_parameter(
-                    "Invalid parameter: FifoTopic Reason: Topic name ending with '.fifo' \
-                     must have FifoTopic attribute set to true",
+                    "Invalid parameter: FifoTopic Reason: Topic name ending with '.fifo' must \
+                     have FifoTopic attribute set to true",
                 ));
             }
         }
@@ -209,8 +215,8 @@ impl RustStackSns {
             // Check FIFO attribute conflict.
             if existing.is_fifo != is_fifo {
                 return Err(SnsError::invalid_parameter(
-                    "Invalid parameter: Attributes Reason: \
-                     Topic already exists with different FifoTopic attribute",
+                    "Invalid parameter: Attributes Reason: Topic already exists with different \
+                     FifoTopic attribute",
                 ));
             }
             // Check tag conflict.
@@ -223,8 +229,7 @@ impl RustStackSns {
                     .collect();
                 if existing_tags != input_tags {
                     return Err(SnsError::invalid_parameter(
-                        "Invalid parameter: Tags Reason: \
-                         Topic already exists with different tags",
+                        "Invalid parameter: Tags Reason: Topic already exists with different tags",
                     ));
                 }
             }
@@ -313,8 +318,8 @@ impl RustStackSns {
                         value.eq_ignore_ascii_case("true");
                 } else {
                     return Err(SnsError::invalid_parameter(
-                        "Invalid parameter: ContentBasedDeduplication Reason: \
-                         Content-based deduplication can only be set for FIFO topics",
+                        "Invalid parameter: ContentBasedDeduplication Reason: Content-based \
+                         deduplication can only be set for FIFO topics",
                     ));
                 }
             }
@@ -846,7 +851,8 @@ impl RustStackSns {
             return Err(SnsError::new(
                 SnsErrorCode::TooManyEntriesInBatchRequest,
                 format!(
-                    "The batch request contains more entries than permissible (max {MAX_PUBLISH_BATCH_ENTRIES})"
+                    "The batch request contains more entries than permissible (max \
+                     {MAX_PUBLISH_BATCH_ENTRIES})"
                 ),
             ));
         }
@@ -1724,8 +1730,8 @@ fn resolve_publish_target(input: &PublishInput) -> Result<&str, SnsError> {
 fn validate_publish_message(input: &PublishInput) -> Result<(), SnsError> {
     if input.message.len() > MAX_MESSAGE_SIZE {
         return Err(SnsError::invalid_parameter(format!(
-            "Invalid parameter: Message Reason: \
-             Message must be shorter than {MAX_MESSAGE_SIZE} bytes"
+            "Invalid parameter: Message Reason: Message must be shorter than {MAX_MESSAGE_SIZE} \
+             bytes"
         )));
     }
 
@@ -1734,15 +1740,15 @@ fn validate_publish_message(input: &PublishInput) -> Result<(), SnsError> {
             Ok(val) => {
                 if val.get("default").is_none() {
                     return Err(SnsError::invalid_parameter(
-                        "Invalid parameter: Message Reason: \
-                         When MessageStructure is 'json', the message must contain a 'default' key",
+                        "Invalid parameter: Message Reason: When MessageStructure is 'json', the \
+                         message must contain a 'default' key",
                     ));
                 }
             }
             Err(_) => {
                 return Err(SnsError::invalid_parameter(
-                    "Invalid parameter: Message Reason: \
-                     When MessageStructure is 'json', the message must be valid JSON",
+                    "Invalid parameter: Message Reason: When MessageStructure is 'json', the \
+                     message must be valid JSON",
                 ));
             }
         }
@@ -1759,16 +1765,15 @@ fn validate_fifo_publish(
     if topic.is_fifo {
         if input.message_group_id.is_none() {
             return Err(SnsError::invalid_parameter(
-                "Invalid parameter: MessageGroupId Reason: \
-                 The MessageGroupId parameter is required for FIFO topics",
+                "Invalid parameter: MessageGroupId Reason: The MessageGroupId parameter is \
+                 required for FIFO topics",
             ));
         }
         if input.message_deduplication_id.is_none() && !topic.attributes.content_based_deduplication
         {
             return Err(SnsError::invalid_parameter(
-                "Invalid parameter: MessageDeduplicationId Reason: \
-                 The topic does not have ContentBasedDeduplication enabled, \
-                 so MessageDeduplicationId is required",
+                "Invalid parameter: MessageDeduplicationId Reason: The topic does not have \
+                 ContentBasedDeduplication enabled, so MessageDeduplicationId is required",
             ));
         }
     }
@@ -1782,8 +1787,7 @@ fn validate_fifo_publish(
 fn validate_topic_name(name: &str) -> Result<(), SnsError> {
     if name.is_empty() || name.len() > 256 {
         return Err(SnsError::invalid_parameter(
-            "Invalid parameter: Name Reason: \
-             Topic name must be between 1 and 256 characters",
+            "Invalid parameter: Name Reason: Topic name must be between 1 and 256 characters",
         ));
     }
 
@@ -1797,8 +1801,7 @@ fn validate_topic_name(name: &str) -> Result<(), SnsError> {
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     if !valid {
         return Err(SnsError::invalid_parameter(
-            "Invalid parameter: Name Reason: \
-             Topic name can only contain alphanumeric characters, \
+            "Invalid parameter: Name Reason: Topic name can only contain alphanumeric characters, \
              hyphens (-), and underscores (_)",
         ));
     }

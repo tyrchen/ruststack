@@ -13,8 +13,7 @@
 //! All types are `Send + Sync`. Concurrent access is handled via:
 //!
 //! - `DashMap` for the bucket table and multipart upload table
-//! - `parking_lot::RwLock` for per-bucket configuration fields and the object
-//!   store
+//! - `parking_lot::RwLock` for per-bucket configuration fields and the object store
 
 pub(crate) mod bucket;
 pub(crate) mod keystore;

@@ -7,8 +7,7 @@
 //! X-Amz-Target: AWSEvents.PutEvents
 //! ```
 
-use ruststack_events_model::error::EventsError;
-use ruststack_events_model::operations::EventsOperation;
+use ruststack_events_model::{error::EventsError, operations::EventsOperation};
 
 /// The expected prefix for the `X-Amz-Target` header value.
 const TARGET_PREFIX: &str = "AWSEvents.";

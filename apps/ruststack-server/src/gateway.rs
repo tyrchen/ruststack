@@ -8,13 +8,9 @@
 //! intercepted at the gateway level and return a combined status for all
 //! registered services.
 
-use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
-use hyper::body::Incoming;
-use hyper::service::Service;
+use hyper::{body::Incoming, service::Service};
 
 use crate::service::{GatewayBody, ServiceRouter, gateway_body_from_string};
 

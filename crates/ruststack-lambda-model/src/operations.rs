@@ -56,6 +56,26 @@ pub enum LambdaOperation {
     /// Get account settings.
     GetAccountSettings,
 
+    // Phase 2b: Lambda Layers
+    /// Publish a new layer version.
+    PublishLayerVersion,
+    /// Get a layer version by layer name and version number.
+    GetLayerVersion,
+    /// Get a layer version by its ARN.
+    GetLayerVersionByArn,
+    /// List versions of a layer.
+    ListLayerVersions,
+    /// List all layers.
+    ListLayers,
+    /// Delete a layer version.
+    DeleteLayerVersion,
+    /// Add a permission to a layer version's resource policy.
+    AddLayerVersionPermission,
+    /// Get the resource policy for a layer version.
+    GetLayerVersionPolicy,
+    /// Remove a permission from a layer version's resource policy.
+    RemoveLayerVersionPermission,
+
     // Phase 3: Function URLs
     /// Create a function URL config.
     CreateFunctionUrlConfig,
@@ -67,6 +87,38 @@ pub enum LambdaOperation {
     DeleteFunctionUrlConfig,
     /// List function URL configs.
     ListFunctionUrlConfigs,
+
+    // Phase 3: Event Source Mappings
+    /// Create an event source mapping.
+    CreateEventSourceMapping,
+    /// Get an event source mapping by UUID.
+    GetEventSourceMapping,
+    /// Update an event source mapping.
+    UpdateEventSourceMapping,
+    /// Delete an event source mapping.
+    DeleteEventSourceMapping,
+    /// List event source mappings.
+    ListEventSourceMappings,
+
+    // Phase 6: Concurrency
+    /// Set reserved concurrency for a function.
+    PutFunctionConcurrency,
+    /// Get reserved concurrency for a function.
+    GetFunctionConcurrency,
+    /// Delete reserved concurrency for a function.
+    DeleteFunctionConcurrency,
+
+    // Phase 6: Event Invoke Config
+    /// Create an event invoke config for a function.
+    PutFunctionEventInvokeConfig,
+    /// Get an event invoke config for a function.
+    GetFunctionEventInvokeConfig,
+    /// Update an event invoke config for a function.
+    UpdateFunctionEventInvokeConfig,
+    /// Delete an event invoke config for a function.
+    DeleteFunctionEventInvokeConfig,
+    /// List event invoke configs for a function.
+    ListFunctionEventInvokeConfigs,
 }
 
 impl LambdaOperation {
@@ -96,11 +148,33 @@ impl LambdaOperation {
             Self::UntagResource => "UntagResource",
             Self::ListTags => "ListTags",
             Self::GetAccountSettings => "GetAccountSettings",
+            Self::PublishLayerVersion => "PublishLayerVersion",
+            Self::GetLayerVersion => "GetLayerVersion",
+            Self::GetLayerVersionByArn => "GetLayerVersionByArn",
+            Self::ListLayerVersions => "ListLayerVersions",
+            Self::ListLayers => "ListLayers",
+            Self::DeleteLayerVersion => "DeleteLayerVersion",
+            Self::AddLayerVersionPermission => "AddLayerVersionPermission",
+            Self::GetLayerVersionPolicy => "GetLayerVersionPolicy",
+            Self::RemoveLayerVersionPermission => "RemoveLayerVersionPermission",
             Self::CreateFunctionUrlConfig => "CreateFunctionUrlConfig",
             Self::GetFunctionUrlConfig => "GetFunctionUrlConfig",
             Self::UpdateFunctionUrlConfig => "UpdateFunctionUrlConfig",
             Self::DeleteFunctionUrlConfig => "DeleteFunctionUrlConfig",
             Self::ListFunctionUrlConfigs => "ListFunctionUrlConfigs",
+            Self::CreateEventSourceMapping => "CreateEventSourceMapping",
+            Self::GetEventSourceMapping => "GetEventSourceMapping",
+            Self::UpdateEventSourceMapping => "UpdateEventSourceMapping",
+            Self::DeleteEventSourceMapping => "DeleteEventSourceMapping",
+            Self::ListEventSourceMappings => "ListEventSourceMappings",
+            Self::PutFunctionConcurrency => "PutFunctionConcurrency",
+            Self::GetFunctionConcurrency => "GetFunctionConcurrency",
+            Self::DeleteFunctionConcurrency => "DeleteFunctionConcurrency",
+            Self::PutFunctionEventInvokeConfig => "PutFunctionEventInvokeConfig",
+            Self::GetFunctionEventInvokeConfig => "GetFunctionEventInvokeConfig",
+            Self::UpdateFunctionEventInvokeConfig => "UpdateFunctionEventInvokeConfig",
+            Self::DeleteFunctionEventInvokeConfig => "DeleteFunctionEventInvokeConfig",
+            Self::ListFunctionEventInvokeConfigs => "ListFunctionEventInvokeConfigs",
         }
     }
 }
@@ -248,6 +322,67 @@ pub const LAMBDA_ROUTES: &[LambdaRoute] = &[
         operation: LambdaOperation::ListFunctions,
         success_status: 200,
     },
+    // --- /2018-10-31/layers/{LayerName}/versions/{VersionNumber}/policy/{StatementId} ---
+    LambdaRoute {
+        method: http::Method::DELETE,
+        path_pattern: "/2018-10-31/layers/{LayerName}/versions/{VersionNumber}/policy/\
+                       {StatementId}",
+        operation: LambdaOperation::RemoveLayerVersionPermission,
+        success_status: 204,
+    },
+    // --- /2018-10-31/layers/{LayerName}/versions/{VersionNumber}/policy ---
+    LambdaRoute {
+        method: http::Method::POST,
+        path_pattern: "/2018-10-31/layers/{LayerName}/versions/{VersionNumber}/policy",
+        operation: LambdaOperation::AddLayerVersionPermission,
+        success_status: 201,
+    },
+    LambdaRoute {
+        method: http::Method::GET,
+        path_pattern: "/2018-10-31/layers/{LayerName}/versions/{VersionNumber}/policy",
+        operation: LambdaOperation::GetLayerVersionPolicy,
+        success_status: 200,
+    },
+    // --- /2018-10-31/layers/{LayerName}/versions/{VersionNumber} ---
+    LambdaRoute {
+        method: http::Method::GET,
+        path_pattern: "/2018-10-31/layers/{LayerName}/versions/{VersionNumber}",
+        operation: LambdaOperation::GetLayerVersion,
+        success_status: 200,
+    },
+    LambdaRoute {
+        method: http::Method::DELETE,
+        path_pattern: "/2018-10-31/layers/{LayerName}/versions/{VersionNumber}",
+        operation: LambdaOperation::DeleteLayerVersion,
+        success_status: 204,
+    },
+    // --- /2018-10-31/layers/{LayerName}/versions ---
+    LambdaRoute {
+        method: http::Method::POST,
+        path_pattern: "/2018-10-31/layers/{LayerName}/versions",
+        operation: LambdaOperation::PublishLayerVersion,
+        success_status: 201,
+    },
+    LambdaRoute {
+        method: http::Method::GET,
+        path_pattern: "/2018-10-31/layers/{LayerName}/versions",
+        operation: LambdaOperation::ListLayerVersions,
+        success_status: 200,
+    },
+    // --- /2018-10-31/layers ---
+    LambdaRoute {
+        method: http::Method::GET,
+        path_pattern: "/2018-10-31/layers",
+        operation: LambdaOperation::ListLayers,
+        success_status: 200,
+    },
+    // --- /2021-10-31/layers/{LayerName}/versions/{VersionNumber} (GetLayerVersionByArn) ---
+    LambdaRoute {
+        method: http::Method::GET,
+        path_pattern: "/2021-10-31/layers/{LayerName}/versions/{VersionNumber}",
+        operation: LambdaOperation::GetLayerVersionByArn,
+        success_status: 200,
+    },
     // --- /2021-10-31/functions/{name}/url ---
     LambdaRoute {
         method: http::Method::POST,
@@ -278,6 +413,90 @@ pub const LAMBDA_ROUTES: &[LambdaRoute] = &[
         method: http::Method::GET,
         path_pattern: "/2021-10-31/functions/{FunctionName}/urls",
         operation: LambdaOperation::ListFunctionUrlConfigs,
+        success_status: 200,
+    },
+    // --- /functions/{name}/event-invoke-config/list ---
+    LambdaRoute {
+        method: http::Method::GET,
+        path_pattern: "/2015-03-31/functions/{FunctionName}/event-invoke-config/list",
+        operation: LambdaOperation::ListFunctionEventInvokeConfigs,
+        success_status: 200,
+    },
+    // --- /functions/{name}/event-invoke-config ---
+    LambdaRoute {
+        method: http::Method::PUT,
+        path_pattern: "/2015-03-31/functions/{FunctionName}/event-invoke-config",
+        operation: LambdaOperation::PutFunctionEventInvokeConfig,
+        success_status: 200,
+    },
+    LambdaRoute {
+        method: http::Method::GET,
+        path_pattern: "/2015-03-31/functions/{FunctionName}/event-invoke-config",
+        operation: LambdaOperation::GetFunctionEventInvokeConfig,
+        success_status: 200,
+    },
+    LambdaRoute {
+        method: http::Method::POST,
+        path_pattern: "/2015-03-31/functions/{FunctionName}/event-invoke-config",
+        operation: LambdaOperation::UpdateFunctionEventInvokeConfig,
+        success_status: 200,
+    },
+    LambdaRoute {
+        method: http::Method::DELETE,
+        path_pattern: "/2015-03-31/functions/{FunctionName}/event-invoke-config",
+        operation: LambdaOperation::DeleteFunctionEventInvokeConfig,
+        success_status: 204,
+    },
+    // --- /functions/{name}/concurrency (GET) ---
+    LambdaRoute {
+        method: http::Method::GET,
+        path_pattern: "/2015-03-31/functions/{FunctionName}/concurrency",
+        operation: LambdaOperation::GetFunctionConcurrency,
+        success_status: 200,
+    },
+    // --- /functions/{name}/concurrency (PUT/DELETE) ---
+    LambdaRoute {
+        method: http::Method::PUT,
+        path_pattern: "/2015-03-31/functions/{FunctionName}/concurrency",
+        operation: LambdaOperation::PutFunctionConcurrency,
+        success_status: 200,
+    },
+    LambdaRoute {
+        method: http::Method::DELETE,
+        path_pattern: "/2015-03-31/functions/{FunctionName}/concurrency",
+        operation: LambdaOperation::DeleteFunctionConcurrency,
+        success_status: 204,
+    },
+    // --- /2015-03-31/event-source-mappings/{UUID} ---
+    LambdaRoute {
+        method: http::Method::GET,
+        path_pattern: "/2015-03-31/event-source-mappings/{UUID}",
+        operation: LambdaOperation::GetEventSourceMapping,
+        success_status: 200,
+    },
+    LambdaRoute {
+        method: http::Method::PUT,
+        path_pattern: "/2015-03-31/event-source-mappings/{UUID}",
+        operation: LambdaOperation::UpdateEventSourceMapping,
+        success_status: 202,
+    },
+    LambdaRoute {
+        method: http::Method::DELETE,
+        path_pattern: "/2015-03-31/event-source-mappings/{UUID}",
+        operation: LambdaOperation::DeleteEventSourceMapping,
+        success_status: 202,
+    },
+    // --- /2015-03-31/event-source-mappings/ ---
+    LambdaRoute {
+        method: http::Method::POST,
+        path_pattern: "/2015-03-31/event-source-mappings/",
+        operation: LambdaOperation::CreateEventSourceMapping,
+        success_status: 202,
+    },
+    LambdaRoute {
+        method: http::Method::GET,
+        path_pattern: "/2015-03-31/event-source-mappings/",
+        operation: LambdaOperation::ListEventSourceMappings,
         success_status: 200,
     },
     // --- /2015-03-31/tags/{arn} ---
