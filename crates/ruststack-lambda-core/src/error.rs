@@ -72,6 +72,13 @@ pub enum LambdaServiceError {
     #[error("Docker not available")]
     DockerNotAvailable,
 
+    /// Event source mapping does not exist.
+    #[error("Event source mapping not found: {uuid}")]
+    EventSourceMappingNotFound {
+        /// UUID that was not found.
+        uuid: String,
+    },
+
     /// Policy statement not found.
     #[error("Policy not found: {sid}")]
     PolicyNotFound {
@@ -136,6 +143,13 @@ impl From<LambdaServiceError> for LambdaError {
             ),
             LambdaServiceError::RequestTooLarge { ref message } => {
                 LambdaError::new(LambdaErrorCode::RequestTooLargeException, message.clone())
+            }
+            LambdaServiceError::EventSourceMappingNotFound { ref uuid } => {
+                LambdaError::resource_not_found(format!(
+                    "The resource you requested does not exist. (Service: Lambda, Status Code: \
+                     404, Request ID: 00000000-0000-0000-0000-000000000000, Extended Request ID: \
+                     null) UUID: {uuid}"
+                ))
             }
             LambdaServiceError::PolicyNotFound { ref sid } => {
                 LambdaError::resource_not_found(format!("No policy is found for: {sid}"))

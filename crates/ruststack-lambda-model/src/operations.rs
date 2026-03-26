@@ -87,6 +87,18 @@ pub enum LambdaOperation {
     DeleteFunctionUrlConfig,
     /// List function URL configs.
     ListFunctionUrlConfigs,
+
+    // Phase 3: Event Source Mappings
+    /// Create an event source mapping.
+    CreateEventSourceMapping,
+    /// Get an event source mapping by UUID.
+    GetEventSourceMapping,
+    /// Update an event source mapping.
+    UpdateEventSourceMapping,
+    /// Delete an event source mapping.
+    DeleteEventSourceMapping,
+    /// List event source mappings.
+    ListEventSourceMappings,
 }
 
 impl LambdaOperation {
@@ -130,6 +142,11 @@ impl LambdaOperation {
             Self::UpdateFunctionUrlConfig => "UpdateFunctionUrlConfig",
             Self::DeleteFunctionUrlConfig => "DeleteFunctionUrlConfig",
             Self::ListFunctionUrlConfigs => "ListFunctionUrlConfigs",
+            Self::CreateEventSourceMapping => "CreateEventSourceMapping",
+            Self::GetEventSourceMapping => "GetEventSourceMapping",
+            Self::UpdateEventSourceMapping => "UpdateEventSourceMapping",
+            Self::DeleteEventSourceMapping => "DeleteEventSourceMapping",
+            Self::ListEventSourceMappings => "ListEventSourceMappings",
         }
     }
 }
@@ -368,6 +385,38 @@ pub const LAMBDA_ROUTES: &[LambdaRoute] = &[
         method: http::Method::GET,
         path_pattern: "/2021-10-31/functions/{FunctionName}/urls",
         operation: LambdaOperation::ListFunctionUrlConfigs,
+        success_status: 200,
+    },
+    // --- /2015-03-31/event-source-mappings/{UUID} ---
+    LambdaRoute {
+        method: http::Method::GET,
+        path_pattern: "/2015-03-31/event-source-mappings/{UUID}",
+        operation: LambdaOperation::GetEventSourceMapping,
+        success_status: 200,
+    },
+    LambdaRoute {
+        method: http::Method::PUT,
+        path_pattern: "/2015-03-31/event-source-mappings/{UUID}",
+        operation: LambdaOperation::UpdateEventSourceMapping,
+        success_status: 202,
+    },
+    LambdaRoute {
+        method: http::Method::DELETE,
+        path_pattern: "/2015-03-31/event-source-mappings/{UUID}",
+        operation: LambdaOperation::DeleteEventSourceMapping,
+        success_status: 202,
+    },
+    // --- /2015-03-31/event-source-mappings/ ---
+    LambdaRoute {
+        method: http::Method::POST,
+        path_pattern: "/2015-03-31/event-source-mappings/",
+        operation: LambdaOperation::CreateEventSourceMapping,
+        success_status: 202,
+    },
+    LambdaRoute {
+        method: http::Method::GET,
+        path_pattern: "/2015-03-31/event-source-mappings/",
+        operation: LambdaOperation::ListEventSourceMappings,
         success_status: 200,
     },
     // --- /2015-03-31/tags/{arn} ---

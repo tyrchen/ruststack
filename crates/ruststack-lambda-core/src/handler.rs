@@ -18,10 +18,11 @@ use ruststack_lambda_http::{
 use ruststack_lambda_model::{
     error::LambdaError,
     input::{
-        AddLayerVersionPermissionInput, AddPermissionInput, CreateAliasInput, CreateFunctionInput,
-        CreateFunctionUrlConfigInput, PublishLayerVersionInput, PublishVersionInput,
-        TagResourceInput, UpdateAliasInput, UpdateFunctionCodeInput,
-        UpdateFunctionConfigurationInput, UpdateFunctionUrlConfigInput,
+        AddLayerVersionPermissionInput, AddPermissionInput, CreateAliasInput,
+        CreateEventSourceMappingInput, CreateFunctionInput, CreateFunctionUrlConfigInput,
+        PublishLayerVersionInput, PublishVersionInput, TagResourceInput, UpdateAliasInput,
+        UpdateEventSourceMappingInput, UpdateFunctionCodeInput, UpdateFunctionConfigurationInput,
+        UpdateFunctionUrlConfigInput,
     },
     operations::LambdaOperation,
     types::InvocationType,
@@ -539,6 +540,61 @@ async fn dispatch(
                 .remove_layer_version_permission(layer_name, version, statement_id)
                 .map_err(LambdaError::from)?;
             wrap_empty_response(204)
+        }
+
+        // ---- Phase 3: Event Source Mappings ----
+        LambdaOperation::CreateEventSourceMapping => {
+            let input: CreateEventSourceMappingInput =
+                serde_json::from_slice(body).map_err(|e| {
+                    LambdaError::invalid_parameter(format!("Invalid request body: {e}"))
+                })?;
+            let output = provider
+                .create_event_source_mapping(&input)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(202, &output)
+        }
+
+        LambdaOperation::GetEventSourceMapping => {
+            let uuid = require_path_param(path_params, "UUID")?;
+            let output = provider
+                .get_event_source_mapping(uuid)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(200, &output)
+        }
+
+        LambdaOperation::UpdateEventSourceMapping => {
+            let uuid = require_path_param(path_params, "UUID")?;
+            let input: UpdateEventSourceMappingInput =
+                serde_json::from_slice(body).map_err(|e| {
+                    LambdaError::invalid_parameter(format!("Invalid request body: {e}"))
+                })?;
+            let output = provider
+                .update_event_source_mapping(uuid, &input)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(202, &output)
+        }
+
+        LambdaOperation::DeleteEventSourceMapping => {
+            let uuid = require_path_param(path_params, "UUID")?;
+            let output = provider
+                .delete_event_source_mapping(uuid)
+                .map_err(LambdaError::from)?;
+            wrap_json_response(202, &output)
+        }
+
+        LambdaOperation::ListEventSourceMappings => {
+            let function_name = get_query_param(&query_params, "FunctionName");
+            let event_source_arn = get_query_param(&query_params, "EventSourceArn");
+            let marker = get_query_param(&query_params, "Marker");
+            let max_items =
+                get_query_param(&query_params, "MaxItems").and_then(|v| v.parse::<usize>().ok());
+            let output = provider.list_event_source_mappings(
+                function_name,
+                event_source_arn,
+                marker,
+                max_items,
+            );
+            wrap_json_response(200, &output)
         }
 
         _ => Err(LambdaError::service_error(format!(

@@ -341,6 +341,138 @@ impl Default for LayerStore {
     }
 }
 
+/// Complete record for a Lambda event source mapping.
+#[derive(Debug, Clone)]
+pub struct EventSourceMappingRecord {
+    /// Unique identifier for the mapping.
+    pub uuid: String,
+    /// ARN of the event source (e.g., SQS queue, DynamoDB stream).
+    pub event_source_arn: String,
+    /// ARN of the target Lambda function.
+    pub function_arn: String,
+    /// Whether the mapping is enabled.
+    pub enabled: bool,
+    /// Maximum number of records per batch.
+    pub batch_size: i32,
+    /// Maximum batching window in seconds.
+    pub maximum_batching_window_in_seconds: i32,
+    /// Starting position for stream-based sources.
+    pub starting_position: Option<String>,
+    /// Timestamp for `AT_TIMESTAMP` starting position.
+    pub starting_position_timestamp: Option<String>,
+    /// Maximum age of a record in seconds before discarding.
+    pub maximum_record_age_in_seconds: Option<i32>,
+    /// Whether to split a batch on function error.
+    pub bisect_batch_on_function_error: Option<bool>,
+    /// Maximum number of retry attempts.
+    pub maximum_retry_attempts: Option<i32>,
+    /// Parallelization factor (1-10).
+    pub parallelization_factor: Option<i32>,
+    /// Function response types (e.g., `ReportBatchItemFailures`).
+    pub function_response_types: Vec<String>,
+    /// State of the mapping (`Enabled` or `Disabled`).
+    pub state: String,
+    /// Reason for the current state transition.
+    pub state_transition_reason: String,
+    /// Last modified time as epoch seconds.
+    pub last_modified: i64,
+    /// Result of the last processing attempt.
+    pub last_processing_result: String,
+}
+
+/// In-memory store for Lambda event source mappings.
+#[derive(Debug)]
+pub struct EventSourceMappingStore {
+    /// All mappings keyed by UUID.
+    mappings: DashMap<String, EventSourceMappingRecord>,
+}
+
+impl EventSourceMappingStore {
+    /// Create a new empty event source mapping store.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            mappings: DashMap::new(),
+        }
+    }
+
+    /// Insert a new event source mapping record.
+    pub fn create(&self, record: EventSourceMappingRecord) {
+        self.mappings.insert(record.uuid.clone(), record);
+    }
+
+    /// Get a clone of an event source mapping by UUID.
+    #[must_use]
+    pub fn get(&self, uuid: &str) -> Option<EventSourceMappingRecord> {
+        self.mappings.get(uuid).map(|r| r.value().clone())
+    }
+
+    /// Update an event source mapping in place.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the mapping does not exist.
+    pub fn update<F, R>(&self, uuid: &str, f: F) -> Result<R, LambdaServiceError>
+    where
+        F: FnOnce(&mut EventSourceMappingRecord) -> R,
+    {
+        match self.mappings.get_mut(uuid) {
+            Some(mut entry) => Ok(f(entry.value_mut())),
+            None => Err(LambdaServiceError::EventSourceMappingNotFound {
+                uuid: uuid.to_owned(),
+            }),
+        }
+    }
+
+    /// Delete an event source mapping by UUID.
+    ///
+    /// Returns the removed record, or `None` if it did not exist.
+    #[must_use]
+    pub fn delete(&self, uuid: &str) -> Option<EventSourceMappingRecord> {
+        self.mappings.remove(uuid).map(|(_, v)| v)
+    }
+
+    /// List all event source mappings, optionally filtering by function name and/or event source
+    /// ARN.
+    ///
+    /// Results are sorted by UUID for deterministic ordering.
+    #[must_use]
+    pub fn list(
+        &self,
+        function_name_filter: Option<&str>,
+        event_source_arn_filter: Option<&str>,
+    ) -> Vec<EventSourceMappingRecord> {
+        let mut records: Vec<EventSourceMappingRecord> = self
+            .mappings
+            .iter()
+            .filter(|entry| {
+                let record = entry.value();
+                if let Some(fn_filter) = function_name_filter {
+                    // Match against function ARN (contains function name or full ARN match).
+                    if !record.function_arn.contains(fn_filter) {
+                        return false;
+                    }
+                }
+                if let Some(arn_filter) = event_source_arn_filter {
+                    if record.event_source_arn != arn_filter {
+                        return false;
+                    }
+                }
+                true
+            })
+            .map(|entry| entry.value().clone())
+            .collect();
+        records.sort_by(|a, b| a.uuid.cmp(&b.uuid));
+        records
+    }
+}
+
+impl Default for EventSourceMappingStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FunctionStore {
     /// Create a new function store with the given code storage directory.
     pub fn new(code_dir: impl Into<PathBuf>) -> Self {
@@ -750,5 +882,139 @@ mod tests {
 
         store.cleanup_code("test-func").await;
         assert!(!dir.exists());
+    }
+
+    // ---- Event source mapping store tests ----
+
+    fn sample_esm_record(uuid: &str, function_arn: &str) -> EventSourceMappingRecord {
+        EventSourceMappingRecord {
+            uuid: uuid.to_owned(),
+            event_source_arn: "arn:aws:sqs:us-east-1:000000000000:my-queue".to_owned(),
+            function_arn: function_arn.to_owned(),
+            enabled: true,
+            batch_size: 10,
+            maximum_batching_window_in_seconds: 0,
+            starting_position: None,
+            starting_position_timestamp: None,
+            maximum_record_age_in_seconds: None,
+            bisect_batch_on_function_error: None,
+            maximum_retry_attempts: None,
+            parallelization_factor: None,
+            function_response_types: Vec::new(),
+            state: "Enabled".to_owned(),
+            state_transition_reason: "User action".to_owned(),
+            last_modified: 1_700_000_000,
+            last_processing_result: "No records processed".to_owned(),
+        }
+    }
+
+    #[test]
+    fn test_should_create_and_get_esm() {
+        let store = EventSourceMappingStore::new();
+        let record = sample_esm_record(
+            "uuid-1",
+            "arn:aws:lambda:us-east-1:000000000000:function:my-func",
+        );
+        store.create(record);
+
+        let retrieved = store.get("uuid-1");
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.as_ref().map(|r| r.uuid.as_str()), Some("uuid-1"));
+        assert_eq!(retrieved.as_ref().map(|r| r.batch_size), Some(10));
+    }
+
+    #[test]
+    fn test_should_return_none_for_missing_esm() {
+        let store = EventSourceMappingStore::new();
+        assert!(store.get("no-such-uuid").is_none());
+    }
+
+    #[test]
+    fn test_should_update_esm() {
+        let store = EventSourceMappingStore::new();
+        store.create(sample_esm_record("uuid-1", "arn:func"));
+
+        store
+            .update("uuid-1", |record| {
+                record.batch_size = 50;
+                record.enabled = false;
+                "Disabled".clone_into(&mut record.state);
+            })
+            .unwrap();
+
+        let retrieved = store.get("uuid-1").unwrap();
+        assert_eq!(retrieved.batch_size, 50);
+        assert!(!retrieved.enabled);
+        assert_eq!(retrieved.state, "Disabled");
+    }
+
+    #[test]
+    fn test_should_error_on_update_nonexistent_esm() {
+        let store = EventSourceMappingStore::new();
+        let err = store.update("no-such", |_| {}).unwrap_err();
+        assert!(matches!(
+            err,
+            LambdaServiceError::EventSourceMappingNotFound { .. }
+        ));
+    }
+
+    #[test]
+    fn test_should_delete_esm() {
+        let store = EventSourceMappingStore::new();
+        store.create(sample_esm_record("uuid-1", "arn:func"));
+
+        let removed = store.delete("uuid-1");
+        assert!(removed.is_some());
+        assert!(store.get("uuid-1").is_none());
+    }
+
+    #[test]
+    fn test_should_return_none_on_delete_nonexistent_esm() {
+        let store = EventSourceMappingStore::new();
+        assert!(store.delete("no-such").is_none());
+    }
+
+    #[test]
+    fn test_should_list_esm_sorted_by_uuid() {
+        let store = EventSourceMappingStore::new();
+        store.create(sample_esm_record("charlie", "arn:func-a"));
+        store.create(sample_esm_record("alpha", "arn:func-b"));
+        store.create(sample_esm_record("bravo", "arn:func-a"));
+
+        let all = store.list(None, None);
+        let uuids: Vec<&str> = all.iter().map(|r| r.uuid.as_str()).collect();
+        assert_eq!(uuids, ["alpha", "bravo", "charlie"]);
+    }
+
+    #[test]
+    fn test_should_filter_esm_by_function_name() {
+        let store = EventSourceMappingStore::new();
+        store.create(sample_esm_record(
+            "uuid-1",
+            "arn:aws:lambda:us-east-1:000000000000:function:func-a",
+        ));
+        store.create(sample_esm_record(
+            "uuid-2",
+            "arn:aws:lambda:us-east-1:000000000000:function:func-b",
+        ));
+
+        let filtered = store.list(Some("func-a"), None);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].uuid, "uuid-1");
+    }
+
+    #[test]
+    fn test_should_filter_esm_by_event_source_arn() {
+        let store = EventSourceMappingStore::new();
+        let mut record1 = sample_esm_record("uuid-1", "arn:func");
+        record1.event_source_arn = "arn:aws:sqs:us-east-1:000000000000:queue-a".to_owned();
+        let mut record2 = sample_esm_record("uuid-2", "arn:func");
+        record2.event_source_arn = "arn:aws:sqs:us-east-1:000000000000:queue-b".to_owned();
+        store.create(record1);
+        store.create(record2);
+
+        let filtered = store.list(None, Some("arn:aws:sqs:us-east-1:000000000000:queue-a"));
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].uuid, "uuid-1");
     }
 }

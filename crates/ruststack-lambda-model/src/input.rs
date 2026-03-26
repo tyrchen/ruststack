@@ -299,6 +299,79 @@ pub struct PublishLayerVersionInput {
     pub compatible_architectures: Option<Vec<String>>,
 }
 
+/// Input for `CreateEventSourceMapping`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateEventSourceMappingInput {
+    /// ARN of the event source (e.g., SQS queue, DynamoDB stream, Kinesis stream).
+    pub event_source_arn: String,
+    /// Function name or ARN.
+    pub function_name: String,
+    /// Whether the mapping is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Maximum number of records per batch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<i32>,
+    /// Maximum batching window in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_batching_window_in_seconds: Option<i32>,
+    /// Starting position for stream-based sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starting_position: Option<String>,
+    /// Timestamp for `AT_TIMESTAMP` starting position.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starting_position_timestamp: Option<String>,
+    /// Maximum age of a record in seconds before discarding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_record_age_in_seconds: Option<i32>,
+    /// Whether to split a batch on function error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bisect_batch_on_function_error: Option<bool>,
+    /// Maximum number of retry attempts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_retry_attempts: Option<i32>,
+    /// Parallelization factor (1-10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallelization_factor: Option<i32>,
+    /// Function response types (e.g., `ReportBatchItemFailures`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_response_types: Option<Vec<String>>,
+}
+
+/// Input for `UpdateEventSourceMapping`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateEventSourceMappingInput {
+    /// Function name or ARN.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_name: Option<String>,
+    /// Whether the mapping is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Maximum number of records per batch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<i32>,
+    /// Maximum batching window in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_batching_window_in_seconds: Option<i32>,
+    /// Maximum age of a record in seconds before discarding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_record_age_in_seconds: Option<i32>,
+    /// Whether to split a batch on function error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bisect_batch_on_function_error: Option<bool>,
+    /// Maximum number of retry attempts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_retry_attempts: Option<i32>,
+    /// Parallelization factor (1-10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallelization_factor: Option<i32>,
+    /// Function response types (e.g., `ReportBatchItemFailures`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_response_types: Option<Vec<String>>,
+}
+
 /// Input for `AddLayerVersionPermission`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]

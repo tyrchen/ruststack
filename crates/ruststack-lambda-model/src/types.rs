@@ -727,3 +727,61 @@ pub struct FunctionUrlConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invoke_mode: Option<String>,
 }
+
+/// Configuration of an event source mapping.
+///
+/// This is the response type shared across all event source mapping operations
+/// (Create, Get, Update, Delete, List).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventSourceMappingConfiguration {
+    /// The event source mapping UUID.
+    #[serde(rename = "UUID", skip_serializing_if = "Option::is_none")]
+    pub uuid: Option<String>,
+    /// ARN of the event source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_source_arn: Option<String>,
+    /// Function ARN.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_arn: Option<String>,
+    /// State of the mapping (Creating, Enabled, Disabled, Enabling, Disabling, Updating,
+    /// Deleting).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// Reason for the current state transition.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_transition_reason: Option<String>,
+    /// Last modified timestamp (ISO 8601).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<String>,
+    /// Result of the last processing attempt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_processing_result: Option<String>,
+    /// Maximum number of records per batch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<i32>,
+    /// Maximum batching window in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_batching_window_in_seconds: Option<i32>,
+    /// Starting position for stream-based sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starting_position: Option<String>,
+    /// Timestamp for `AT_TIMESTAMP` starting position.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starting_position_timestamp: Option<String>,
+    /// Maximum age of a record in seconds before discarding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_record_age_in_seconds: Option<i32>,
+    /// Whether to split a batch on function error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bisect_batch_on_function_error: Option<bool>,
+    /// Maximum number of retry attempts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_retry_attempts: Option<i32>,
+    /// Parallelization factor (1-10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallelization_factor: Option<i32>,
+    /// Function response types (e.g., `ReportBatchItemFailures`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_response_types: Option<Vec<String>>,
+}

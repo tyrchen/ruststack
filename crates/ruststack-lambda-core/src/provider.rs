@@ -18,23 +18,25 @@ const MAX_SYNC_PAYLOAD: usize = 6 * 1024 * 1024;
 
 use ruststack_lambda_model::{
     input::{
-        AddLayerVersionPermissionInput, AddPermissionInput, CreateAliasInput, CreateFunctionInput,
-        CreateFunctionUrlConfigInput, PublishLayerVersionInput, PublishVersionInput,
-        TagResourceInput, UpdateAliasInput, UpdateFunctionCodeInput,
-        UpdateFunctionConfigurationInput, UpdateFunctionUrlConfigInput,
+        AddLayerVersionPermissionInput, AddPermissionInput, CreateAliasInput,
+        CreateEventSourceMappingInput, CreateFunctionInput, CreateFunctionUrlConfigInput,
+        PublishLayerVersionInput, PublishVersionInput, TagResourceInput, UpdateAliasInput,
+        UpdateEventSourceMappingInput, UpdateFunctionCodeInput, UpdateFunctionConfigurationInput,
+        UpdateFunctionUrlConfigInput,
     },
     output::{
         AccountLimit, AccountUsage, AddLayerVersionPermissionOutput, AddPermissionOutput,
         GetAccountSettingsOutput, GetFunctionOutput, GetLayerVersionPolicyOutput, GetPolicyOutput,
-        ListAliasesOutput, ListFunctionUrlConfigsOutput, ListFunctionsOutput,
-        ListLayerVersionsOutput, ListLayersOutput, ListTagsOutput, ListVersionsOutput,
-        PublishLayerVersionOutput,
+        ListAliasesOutput, ListEventSourceMappingsOutput, ListFunctionUrlConfigsOutput,
+        ListFunctionsOutput, ListLayerVersionsOutput, ListLayersOutput, ListTagsOutput,
+        ListVersionsOutput, PublishLayerVersionOutput,
     },
     types::{
         AliasConfiguration, AliasRoutingConfiguration, EnvironmentResponse, EphemeralStorage,
-        FunctionCodeLocation, FunctionConfiguration, FunctionUrlConfig, ImageConfigResponse, Layer,
-        LayerVersionContentOutput, LayerVersionsListItem, LayersListItem, SnapStartResponse,
-        TracingConfigResponse, VpcConfigResponse,
+        EventSourceMappingConfiguration, FunctionCodeLocation, FunctionConfiguration,
+        FunctionUrlConfig, ImageConfigResponse, Layer, LayerVersionContentOutput,
+        LayerVersionsListItem, LayersListItem, SnapStartResponse, TracingConfigResponse,
+        VpcConfigResponse,
     },
 };
 
@@ -46,8 +48,9 @@ use crate::{
         parse_layer_version_arn, resolve_function_ref, resolve_version,
     },
     storage::{
-        AliasRecord, FunctionRecord, FunctionStore, FunctionUrlConfigRecord, LayerStore,
-        LayerVersionRecord, PolicyDocument, PolicyStatement, VersionRecord, compute_sha256,
+        AliasRecord, EventSourceMappingRecord, EventSourceMappingStore, FunctionRecord,
+        FunctionStore, FunctionUrlConfigRecord, LayerStore, LayerVersionRecord, PolicyDocument,
+        PolicyStatement, VersionRecord, compute_sha256,
     },
 };
 
@@ -59,6 +62,7 @@ use crate::{
 pub struct RustStackLambda {
     store: FunctionStore,
     layer_store: LayerStore,
+    esm_store: EventSourceMappingStore,
     config: LambdaConfig,
 }
 
@@ -69,6 +73,7 @@ impl RustStackLambda {
         Self {
             store,
             layer_store: LayerStore::new(),
+            esm_store: EventSourceMappingStore::new(),
             config,
         }
     }
@@ -81,6 +86,7 @@ impl RustStackLambda {
         Self {
             store,
             layer_store: LayerStore::new(),
+            esm_store: EventSourceMappingStore::new(),
             config,
         }
     }
@@ -95,6 +101,12 @@ impl RustStackLambda {
     #[must_use]
     pub fn layer_store(&self) -> &LayerStore {
         &self.layer_store
+    }
+
+    /// Returns a reference to the event source mapping store.
+    #[must_use]
+    pub fn esm_store(&self) -> &EventSourceMappingStore {
+        &self.esm_store
     }
 
     /// Returns a reference to the service configuration.
@@ -1833,6 +1845,244 @@ impl RustStackLambda {
     }
 
     // ---------------------------------------------------------------
+    // Phase 3: Event Source Mappings
+    // ---------------------------------------------------------------
+
+    /// Create an event source mapping.
+    ///
+    /// Validates the function exists, generates a UUID, and stores the mapping.
+    /// Defaults: `batch_size=10`, `enabled=true`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FunctionNotFound` if the specified function does not exist.
+    /// Returns `InvalidParameter` if `event_source_arn` is empty.
+    pub fn create_event_source_mapping(
+        &self,
+        input: &CreateEventSourceMappingInput,
+    ) -> Result<EventSourceMappingConfiguration, LambdaServiceError> {
+        if input.event_source_arn.is_empty() {
+            return Err(LambdaServiceError::InvalidParameter {
+                message: "eventSourceArn is required".to_owned(),
+            });
+        }
+
+        // Resolve function name to ARN; validates the function exists.
+        let (name, _) = resolve_function_ref(&input.function_name)?;
+        let _record = self.get_record(&name)?;
+        let func_arn = function_arn(&self.config.default_region, &self.config.account_id, &name);
+
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let enabled = input.enabled.unwrap_or(true);
+        let batch_size = input.batch_size.unwrap_or(10);
+        let max_batching_window = input.maximum_batching_window_in_seconds.unwrap_or(0);
+        let state = if enabled { "Enabled" } else { "Disabled" }.to_owned();
+        let now = chrono::Utc::now().timestamp();
+
+        let esm_record = EventSourceMappingRecord {
+            uuid: uuid.clone(),
+            event_source_arn: input.event_source_arn.clone(),
+            function_arn: func_arn,
+            enabled,
+            batch_size,
+            maximum_batching_window_in_seconds: max_batching_window,
+            starting_position: input.starting_position.clone(),
+            starting_position_timestamp: input.starting_position_timestamp.clone(),
+            maximum_record_age_in_seconds: input.maximum_record_age_in_seconds,
+            bisect_batch_on_function_error: input.bisect_batch_on_function_error,
+            maximum_retry_attempts: input.maximum_retry_attempts,
+            parallelization_factor: input.parallelization_factor,
+            function_response_types: input.function_response_types.clone().unwrap_or_default(),
+            state,
+            state_transition_reason: "User action".to_owned(),
+            last_modified: now,
+            last_processing_result: "No records processed".to_owned(),
+        };
+
+        let config = Self::record_to_configuration(&esm_record);
+        self.esm_store.create(esm_record);
+
+        info!(uuid = %uuid, function_name = %name, "Created event source mapping");
+
+        Ok(config)
+    }
+
+    /// Get an event source mapping by UUID.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EventSourceMappingNotFound` if the UUID does not exist.
+    pub fn get_event_source_mapping(
+        &self,
+        uuid: &str,
+    ) -> Result<EventSourceMappingConfiguration, LambdaServiceError> {
+        let record = self.esm_store.get(uuid).ok_or_else(|| {
+            LambdaServiceError::EventSourceMappingNotFound {
+                uuid: uuid.to_owned(),
+            }
+        })?;
+        Ok(Self::record_to_configuration(&record))
+    }
+
+    /// Update an event source mapping.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EventSourceMappingNotFound` if the UUID does not exist.
+    /// Returns `FunctionNotFound` if a new function name is provided that does not exist.
+    pub fn update_event_source_mapping(
+        &self,
+        uuid: &str,
+        input: &UpdateEventSourceMappingInput,
+    ) -> Result<EventSourceMappingConfiguration, LambdaServiceError> {
+        // If a new function name is provided, validate it exists and resolve the ARN.
+        let new_function_arn = if let Some(ref fn_name) = input.function_name {
+            let (name, _) = resolve_function_ref(fn_name)?;
+            let _record = self.get_record(&name)?;
+            Some(function_arn(
+                &self.config.default_region,
+                &self.config.account_id,
+                &name,
+            ))
+        } else {
+            None
+        };
+
+        let now = chrono::Utc::now().timestamp();
+
+        let updated = self.esm_store.update(uuid, |record| {
+            if let Some(ref arn) = new_function_arn {
+                record.function_arn.clone_from(arn);
+            }
+            if let Some(enabled) = input.enabled {
+                record.enabled = enabled;
+                if enabled { "Enabled" } else { "Disabled" }.clone_into(&mut record.state);
+            }
+            if let Some(batch_size) = input.batch_size {
+                record.batch_size = batch_size;
+            }
+            if let Some(max_window) = input.maximum_batching_window_in_seconds {
+                record.maximum_batching_window_in_seconds = max_window;
+            }
+            if let Some(max_age) = input.maximum_record_age_in_seconds {
+                record.maximum_record_age_in_seconds = Some(max_age);
+            }
+            if let Some(bisect) = input.bisect_batch_on_function_error {
+                record.bisect_batch_on_function_error = Some(bisect);
+            }
+            if let Some(retries) = input.maximum_retry_attempts {
+                record.maximum_retry_attempts = Some(retries);
+            }
+            if let Some(factor) = input.parallelization_factor {
+                record.parallelization_factor = Some(factor);
+            }
+            if let Some(ref types) = input.function_response_types {
+                record.function_response_types.clone_from(types);
+            }
+            record.last_modified = now;
+            "User action".clone_into(&mut record.state_transition_reason);
+            Self::record_to_configuration(record)
+        })?;
+
+        info!(uuid = %uuid, "Updated event source mapping");
+
+        Ok(updated)
+    }
+
+    /// Delete an event source mapping.
+    ///
+    /// Returns the final configuration with state set to `Deleting`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EventSourceMappingNotFound` if the UUID does not exist.
+    pub fn delete_event_source_mapping(
+        &self,
+        uuid: &str,
+    ) -> Result<EventSourceMappingConfiguration, LambdaServiceError> {
+        let record = self.esm_store.delete(uuid).ok_or_else(|| {
+            LambdaServiceError::EventSourceMappingNotFound {
+                uuid: uuid.to_owned(),
+            }
+        })?;
+
+        info!(uuid = %uuid, "Deleted event source mapping");
+
+        let mut config = Self::record_to_configuration(&record);
+        config.state = Some("Deleting".to_owned());
+        Ok(config)
+    }
+
+    /// List event source mappings with optional filters and pagination.
+    ///
+    /// Supports filtering by `function_name` and `event_source_arn`.
+    #[must_use]
+    pub fn list_event_source_mappings(
+        &self,
+        function_name: Option<&str>,
+        event_source_arn: Option<&str>,
+        marker: Option<&str>,
+        max_items: Option<usize>,
+    ) -> ListEventSourceMappingsOutput {
+        let all = self.esm_store.list(function_name, event_source_arn);
+        let max = max_items.unwrap_or(100);
+
+        // Find start index from marker.
+        let start = marker
+            .and_then(|m| all.iter().position(|r| r.uuid == m))
+            .map_or(0, |pos| pos + 1);
+
+        let page: Vec<EventSourceMappingConfiguration> = all
+            .iter()
+            .skip(start)
+            .take(max)
+            .map(Self::record_to_configuration)
+            .collect();
+
+        let next_marker = if start + max < all.len() {
+            all.get(start + max - 1).map(|r| r.uuid.clone())
+        } else {
+            None
+        };
+
+        ListEventSourceMappingsOutput {
+            event_source_mappings: Some(page),
+            next_marker,
+        }
+    }
+
+    /// Convert an `EventSourceMappingRecord` to an `EventSourceMappingConfiguration`.
+    fn record_to_configuration(
+        record: &EventSourceMappingRecord,
+    ) -> EventSourceMappingConfiguration {
+        let last_modified_str = chrono::DateTime::from_timestamp(record.last_modified, 0)
+            .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3f+0000").to_string());
+
+        EventSourceMappingConfiguration {
+            uuid: Some(record.uuid.clone()),
+            event_source_arn: Some(record.event_source_arn.clone()),
+            function_arn: Some(record.function_arn.clone()),
+            state: Some(record.state.clone()),
+            state_transition_reason: Some(record.state_transition_reason.clone()),
+            last_modified: last_modified_str,
+            last_processing_result: Some(record.last_processing_result.clone()),
+            batch_size: Some(record.batch_size),
+            maximum_batching_window_in_seconds: Some(record.maximum_batching_window_in_seconds),
+            starting_position: record.starting_position.clone(),
+            starting_position_timestamp: record.starting_position_timestamp.clone(),
+            maximum_record_age_in_seconds: record.maximum_record_age_in_seconds,
+            bisect_batch_on_function_error: record.bisect_batch_on_function_error,
+            maximum_retry_attempts: record.maximum_retry_attempts,
+            parallelization_factor: record.parallelization_factor,
+            function_response_types: if record.function_response_types.is_empty() {
+                None
+            } else {
+                Some(record.function_response_types.clone())
+            },
+        }
+    }
+
+    // ---------------------------------------------------------------
     // Internal helpers
     // ---------------------------------------------------------------
 
@@ -2598,5 +2848,236 @@ mod tests {
             .list_versions_by_function("my-func", output.next_marker.as_deref(), Some(2))
             .unwrap();
         assert_eq!(output2.versions.as_ref().unwrap().len(), 2);
+    }
+
+    // ---- Event Source Mapping tests ----
+
+    fn sample_esm_input() -> CreateEventSourceMappingInput {
+        CreateEventSourceMappingInput {
+            event_source_arn: "arn:aws:sqs:us-east-1:000000000000:my-queue".to_owned(),
+            function_name: "my-func".to_owned(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_should_create_event_source_mapping() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        let config = provider
+            .create_event_source_mapping(&sample_esm_input())
+            .unwrap();
+
+        assert!(config.uuid.is_some());
+        assert_eq!(
+            config.event_source_arn.as_deref(),
+            Some("arn:aws:sqs:us-east-1:000000000000:my-queue")
+        );
+        assert!(config.function_arn.is_some());
+        assert_eq!(config.state.as_deref(), Some("Enabled"));
+        assert_eq!(config.batch_size, Some(10));
+        assert_eq!(config.maximum_batching_window_in_seconds, Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_should_create_esm_disabled() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        let mut input = sample_esm_input();
+        input.enabled = Some(false);
+        input.batch_size = Some(50);
+
+        let config = provider.create_event_source_mapping(&input).unwrap();
+        assert_eq!(config.state.as_deref(), Some("Disabled"));
+        assert_eq!(config.batch_size, Some(50));
+    }
+
+    #[tokio::test]
+    async fn test_should_reject_esm_for_nonexistent_function() {
+        let provider = test_provider();
+        let err = provider
+            .create_event_source_mapping(&sample_esm_input())
+            .unwrap_err();
+        assert!(matches!(err, LambdaServiceError::FunctionNotFound { .. }));
+    }
+
+    #[test]
+    fn test_should_reject_esm_with_empty_event_source_arn() {
+        let provider = test_provider();
+        let input = CreateEventSourceMappingInput {
+            event_source_arn: String::new(),
+            function_name: "my-func".to_owned(),
+            ..Default::default()
+        };
+        let err = provider.create_event_source_mapping(&input).unwrap_err();
+        assert!(matches!(err, LambdaServiceError::InvalidParameter { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_should_get_event_source_mapping() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        let created = provider
+            .create_event_source_mapping(&sample_esm_input())
+            .unwrap();
+        let uuid = created.uuid.as_ref().unwrap();
+
+        let retrieved = provider.get_event_source_mapping(uuid).unwrap();
+        assert_eq!(retrieved.uuid.as_deref(), Some(uuid.as_str()));
+        assert_eq!(retrieved.batch_size, Some(10));
+    }
+
+    #[test]
+    fn test_should_error_on_get_nonexistent_esm() {
+        let provider = test_provider();
+        let err = provider
+            .get_event_source_mapping("no-such-uuid")
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            LambdaServiceError::EventSourceMappingNotFound { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_should_update_event_source_mapping() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        let created = provider
+            .create_event_source_mapping(&sample_esm_input())
+            .unwrap();
+        let uuid = created.uuid.as_ref().unwrap();
+
+        let update_input = UpdateEventSourceMappingInput {
+            batch_size: Some(100),
+            enabled: Some(false),
+            maximum_retry_attempts: Some(3),
+            ..Default::default()
+        };
+
+        let updated = provider
+            .update_event_source_mapping(uuid, &update_input)
+            .unwrap();
+        assert_eq!(updated.batch_size, Some(100));
+        assert_eq!(updated.state.as_deref(), Some("Disabled"));
+        assert_eq!(updated.maximum_retry_attempts, Some(3));
+    }
+
+    #[test]
+    fn test_should_error_on_update_nonexistent_esm() {
+        let provider = test_provider();
+        let input = UpdateEventSourceMappingInput::default();
+        let err = provider
+            .update_event_source_mapping("no-such-uuid", &input)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            LambdaServiceError::EventSourceMappingNotFound { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_should_delete_event_source_mapping() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        let created = provider
+            .create_event_source_mapping(&sample_esm_input())
+            .unwrap();
+        let uuid = created.uuid.as_ref().unwrap();
+
+        let deleted = provider.delete_event_source_mapping(uuid).unwrap();
+        assert_eq!(deleted.state.as_deref(), Some("Deleting"));
+
+        // Should no longer be findable.
+        let err = provider.get_event_source_mapping(uuid).unwrap_err();
+        assert!(matches!(
+            err,
+            LambdaServiceError::EventSourceMappingNotFound { .. }
+        ));
+    }
+
+    #[test]
+    fn test_should_error_on_delete_nonexistent_esm() {
+        let provider = test_provider();
+        let err = provider
+            .delete_event_source_mapping("no-such-uuid")
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            LambdaServiceError::EventSourceMappingNotFound { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_should_list_event_source_mappings() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        // Create 3 mappings.
+        for _ in 0..3 {
+            provider
+                .create_event_source_mapping(&sample_esm_input())
+                .unwrap();
+        }
+
+        let output = provider.list_event_source_mappings(None, None, None, None);
+        assert_eq!(output.event_source_mappings.as_ref().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_should_list_esm_with_function_filter() {
+        let provider = test_provider();
+        create_test_function(&provider, "func-a").await;
+        create_test_function(&provider, "func-b").await;
+
+        let input_a = CreateEventSourceMappingInput {
+            event_source_arn: "arn:aws:sqs:us-east-1:000000000000:queue".to_owned(),
+            function_name: "func-a".to_owned(),
+            ..Default::default()
+        };
+        let input_b = CreateEventSourceMappingInput {
+            event_source_arn: "arn:aws:sqs:us-east-1:000000000000:queue".to_owned(),
+            function_name: "func-b".to_owned(),
+            ..Default::default()
+        };
+
+        provider.create_event_source_mapping(&input_a).unwrap();
+        provider.create_event_source_mapping(&input_b).unwrap();
+
+        let output = provider.list_event_source_mappings(Some("func-a"), None, None, None);
+        assert_eq!(output.event_source_mappings.as_ref().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_should_list_esm_with_pagination() {
+        let provider = test_provider();
+        create_test_function(&provider, "my-func").await;
+
+        for _ in 0..5 {
+            provider
+                .create_event_source_mapping(&sample_esm_input())
+                .unwrap();
+        }
+
+        let page1 = provider.list_event_source_mappings(None, None, None, Some(2));
+        assert_eq!(page1.event_source_mappings.as_ref().unwrap().len(), 2);
+        assert!(page1.next_marker.is_some());
+
+        let page2 =
+            provider.list_event_source_mappings(None, None, page1.next_marker.as_deref(), Some(2));
+        assert_eq!(page2.event_source_mappings.as_ref().unwrap().len(), 2);
+    }
+
+    /// Helper to create a test function for ESM tests.
+    async fn create_test_function(provider: &RustStackLambda, name: &str) {
+        provider
+            .create_function(sample_create_input(name))
+            .await
+            .unwrap();
     }
 }

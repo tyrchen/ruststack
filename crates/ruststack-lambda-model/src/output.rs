@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    AliasConfiguration, FunctionCodeLocation, FunctionConfiguration, FunctionUrlConfig,
-    LayerVersionContentOutput, LayerVersionsListItem, LayersListItem,
+    AliasConfiguration, EventSourceMappingConfiguration, FunctionCodeLocation,
+    FunctionConfiguration, FunctionUrlConfig, LayerVersionContentOutput, LayerVersionsListItem,
+    LayersListItem,
 };
 
 /// Output for `GetFunction`.
@@ -214,6 +215,18 @@ pub struct GetLayerVersionPolicyOutput {
     /// Revision ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision_id: Option<String>,
+}
+
+/// Output for `ListEventSourceMappings`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListEventSourceMappingsOutput {
+    /// List of event source mapping configurations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_source_mappings: Option<Vec<EventSourceMappingConfiguration>>,
+    /// Next pagination marker.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_marker: Option<String>,
 }
 
 /// Output for `AddLayerVersionPermission`.
