@@ -308,14 +308,8 @@ mod tests {
     #[test]
     fn test_should_parse_multipart_with_policy_fields() {
         let boundary = "xyzzy";
-        let body =
-            "--xyzzy\r\nContent-Disposition: form-data; \
-             name=\"key\"\r\n\r\nuploads/test.bin\r\n--xyzzy\r\nContent-Disposition: form-data; \
-             name=\"policy\"\r\n\r\neyJjb25kaXRpb25zIjpbXX0=\r\n--xyzzy\r\nContent-Disposition: \
-             form-data; \
-             name=\"x-amz-algorithm\"\r\n\r\nAWS4-HMAC-SHA256\r\n--xyzzy\r\nContent-Disposition: \
-             form-data; name=\"file\"; filename=\"test.bin\"\r\nContent-Type: \
-             application/octet-stream\r\n\r\n\x00\x01\x02\x03\r\n--xyzzy--\r\n";
+        #[rustfmt::skip]
+        let body = "--xyzzy\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nuploads/test.bin\r\n--xyzzy\r\nContent-Disposition: form-data; name=\"policy\"\r\n\r\neyJjb25kaXRpb25zIjpbXX0=\r\n--xyzzy\r\nContent-Disposition: form-data; name=\"x-amz-algorithm\"\r\n\r\nAWS4-HMAC-SHA256\r\n--xyzzy\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n\x00\x01\x02\x03\r\n--xyzzy--\r\n";
 
         let result = parse_multipart(body.as_bytes(), boundary).expect("should parse");
         assert_eq!(

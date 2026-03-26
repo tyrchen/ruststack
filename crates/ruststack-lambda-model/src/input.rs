@@ -302,7 +302,7 @@ pub struct PublishLayerVersionInput {
 
 /// Input for `CreateEventSourceMapping`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub struct CreateEventSourceMappingInput {
     /// ARN of the event source (e.g., SQS queue, DynamoDB stream, Kinesis stream).
     pub event_source_arn: String,
@@ -342,7 +342,7 @@ pub struct CreateEventSourceMappingInput {
 
 /// Input for `UpdateEventSourceMapping`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub struct UpdateEventSourceMappingInput {
     /// Function name or ARN.
     #[serde(skip_serializing_if = "Option::is_none")]

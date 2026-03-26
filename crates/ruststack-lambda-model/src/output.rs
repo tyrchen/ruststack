@@ -219,7 +219,7 @@ pub struct GetLayerVersionPolicyOutput {
 
 /// Output for `ListEventSourceMappings`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub struct ListEventSourceMappingsOutput {
     /// List of event source mapping configurations.
     #[serde(skip_serializing_if = "Option::is_none")]

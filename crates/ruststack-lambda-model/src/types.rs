@@ -733,7 +733,7 @@ pub struct FunctionUrlConfig {
 /// This is the response type shared across all event source mapping operations
 /// (Create, Get, Update, Delete, List).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub struct EventSourceMappingConfiguration {
     /// The event source mapping UUID.
     #[serde(rename = "UUID", skip_serializing_if = "Option::is_none")]
