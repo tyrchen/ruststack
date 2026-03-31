@@ -1,4 +1,4 @@
-//! Lambda integration tests against a running `RustStack` server.
+//! Lambda integration tests against a running `Rustack` server.
 //!
 //! These tests cover the Lambda CRUD operations, versioning, aliases,
 //! permissions, tags, account settings, and function URL configurations.

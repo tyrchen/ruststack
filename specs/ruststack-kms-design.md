@@ -1,9 +1,9 @@
-# RustStack KMS: Native Rust Implementation Design
+# Rustack KMS: Native Rust Implementation Design
 
 **Date:** 2026-03-06
 **Status:** Draft / RFC
-**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-dynamodb-design.md](./ruststack-dynamodb-design.md), [ruststack-ssm-design.md](./ruststack-ssm-design.md)
-**Scope:** Add KMS support to RustStack -- ~35 operations covering key management, symmetric/asymmetric encryption, signing, HMAC, grants, aliases, and envelope encryption, using the same Smithy-based codegen and gateway routing patterns established by DynamoDB and SSM.
+**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-dynamodb-design.md](./rustack-dynamodb-design.md), [rustack-ssm-design.md](./rustack-ssm-design.md)
+**Scope:** Add KMS support to Rustack -- ~35 operations covering key management, symmetric/asymmetric encryption, signing, HMAC, grants, aliases, and envelope encryption, using the same Smithy-based codegen and gateway routing patterns established by DynamoDB and SSM.
 
 ---
 
@@ -30,7 +30,7 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding KMS (Key Management Service) support to RustStack as a fully native Rust implementation. Key design decisions:
+This spec proposes adding KMS (Key Management Service) support to Rustack as a fully native Rust implementation. Key design decisions:
 
 - **Medium scope** -- ~35 operations organized into key management, cryptographic operations, alias management, grant management, and key policy operations. More complex than SSM (13 ops) but simpler than DynamoDB (66 ops) because the protocol is identical (`awsJson1.1`) and the complexity lies in the cryptographic engine rather than storage.
 - **Real cryptography** -- unlike SSM where SecureString is plaintext, KMS must perform real AES-256-GCM encryption, RSA encryption/signing, ECDSA signing, and HMAC operations. We use the `aws-lc-rs` crate (AWS's own Rust crypto library, API-compatible with `ring`) for all cryptographic operations.
@@ -106,7 +106,7 @@ With the full KMS implementation, the following tools and integrations work:
 12. **Random generation** -- GenerateRandom
 13. **Public key retrieval** -- GetPublicKey for asymmetric keys
 14. **Smithy-generated types** -- all KMS types generated from official AWS Smithy model
-15. **Shared infrastructure** -- reuse `ruststack-core`, `ruststack-auth`, and the `awsJson1.1` protocol layer from SSM
+15. **Shared infrastructure** -- reuse `rustack-core`, `rustack-auth`, and the `awsJson1.1` protocol layer from SSM
 16. **Same Docker image** -- single binary serves S3 + DynamoDB + SQS + SSM + KMS on port 4566
 17. **Key state machine** -- full state transitions (Enabled, Disabled, PendingDeletion, PendingImport)
 18. **Self-describing ciphertext** -- ciphertext blobs embed key ID, enabling `Decrypt` without explicit `KeyId`
@@ -123,7 +123,7 @@ With the full KMS implementation, the following tools and integrations work:
 7. **On-demand key rotation** -- `RotateKeyOnDemand` (complex key material versioning)
 8. **CloudTrail integration** -- no audit logging
 9. **Rate limiting** -- no throttling of API requests
-10. **Data persistence across restarts** -- in-memory only, matching behavior of other RustStack services
+10. **Data persistence across restarts** -- in-memory only, matching behavior of other Rustack services
 11. **Nitro Enclave attestation** -- `Recipient` parameter for `Decrypt` (requires PKCS7 envelope construction)
 12. **DeriveSharedSecret** -- ECDH key agreement (can be added later)
 13. **Post-quantum key types** -- ML-KEM and other PQ algorithms
@@ -159,8 +159,8 @@ With the full KMS implementation, the following tools and integrations work:
       +--------+--------+--------+--------+
                        |
               +--------+--------+
-              | ruststack-core  |
-              | ruststack-auth  |
+              | rustack-core  |
+              | rustack-auth  |
               +-----------------+
 ```
 
@@ -181,27 +181,27 @@ Routing logic: check `X-Amz-Target` header. If prefix is `TrentService.`, route 
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app)
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-{model,core,http}
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-sqs-{model,core,http}
-+-- ruststack-ssm-{model,core,http}
-+-- ruststack-kms-model        <-- NEW (auto-generated)
-+-- ruststack-kms-core         <-- NEW
-+-- ruststack-kms-http          <-- NEW
+rustack-server (app)
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-{model,core,http}
++-- rustack-dynamodb-{model,core,http}
++-- rustack-sqs-{model,core,http}
++-- rustack-ssm-{model,core,http}
++-- rustack-kms-model        <-- NEW (auto-generated)
++-- rustack-kms-core         <-- NEW
++-- rustack-kms-http          <-- NEW
 
-ruststack-kms-http
-+-- ruststack-kms-model
-+-- ruststack-auth
+rustack-kms-http
++-- rustack-kms-model
++-- rustack-auth
 
-ruststack-kms-core
-+-- ruststack-core
-+-- ruststack-kms-model
+rustack-kms-core
++-- rustack-core
++-- rustack-kms-model
 +-- aws-lc-rs                  <-- NEW dependency (crypto)
 
-ruststack-kms-model (auto-generated, standalone)
+rustack-kms-model (auto-generated, standalone)
 ```
 
 ---
@@ -256,8 +256,8 @@ mod base64_blob {
 | JSON response serialization | Yes | `serde_json::to_vec` with generated `Serialize` derives |
 | `X-Amz-Target` header parsing | Yes | Same pattern, different prefix (`TrentService.`) |
 | JSON error formatting | Yes | Same `{"__type": "...", "message": "..."}` format |
-| SigV4 auth | Yes | `ruststack-auth` is service-agnostic |
-| Multi-account/region state | Yes | `ruststack-core` unchanged |
+| SigV4 auth | Yes | `rustack-auth` is service-agnostic |
+| Multi-account/region state | Yes | `rustack-core` unchanged |
 | Base64 blob serde | Partial | SSM does not use blob types; add to codegen for KMS |
 
 ---
@@ -266,7 +266,7 @@ mod base64_blob {
 
 ### 6.1 Universal Codegen
 
-The `ruststack-kms-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
+The `rustack-kms-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
 
 **Smithy model:** `codegen/smithy-model/kms.json` (764KB, namespace `com.amazonaws.kms`, 39 operations)
 **Service config:** `codegen/services/kms.toml`
@@ -274,7 +274,7 @@ The `ruststack-kms-model` crate is generated from the official AWS Smithy JSON A
 
 ### 6.2 Generated Output
 
-The codegen produces 6 files in `crates/ruststack-kms-model/src/`:
+The codegen produces 6 files in `crates/rustack-kms-model/src/`:
 
 | File | Contents |
 |------|----------|
@@ -295,10 +295,10 @@ See [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design
 
 ## 7. Crate Structure
 
-### 7.1 `ruststack-kms-model` (auto-generated)
+### 7.1 `rustack-kms-model` (auto-generated)
 
 ```
-crates/ruststack-kms-model/
+crates/rustack-kms-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs              # Module re-exports
@@ -312,15 +312,15 @@ crates/ruststack-kms-model/
 
 **Dependencies:** `serde`, `serde_json`, `base64`
 
-### 7.2 `ruststack-kms-core`
+### 7.2 `rustack-kms-core`
 
 ```
-crates/ruststack-kms-core/
+crates/rustack-kms-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs           # KmsConfig
-    +-- provider.rs         # RustStackKms (main provider, all operation handlers)
+    +-- provider.rs         # RustackKms (main provider, all operation handlers)
     +-- error.rs            # KmsServiceError
     +-- state.rs            # KmsStore (DashMap-based key/alias/grant store)
     +-- key.rs              # KmsKey, key state machine, key metadata
@@ -333,12 +333,12 @@ crates/ruststack-kms-core/
     +-- resolve.rs          # Key ID resolution (UUID, ARN, alias name, alias ARN)
 ```
 
-**Dependencies:** `ruststack-core`, `ruststack-kms-model`, `aws-lc-rs`, `dashmap`, `serde_json`, `chrono`, `uuid`, `tracing`, `base64`
+**Dependencies:** `rustack-core`, `rustack-kms-model`, `aws-lc-rs`, `dashmap`, `serde_json`, `chrono`, `uuid`, `tracing`, `base64`
 
-### 7.3 `ruststack-kms-http`
+### 7.3 `rustack-kms-http`
 
 ```
-crates/ruststack-kms-http/
+crates/rustack-kms-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -347,17 +347,17 @@ crates/ruststack-kms-http/
     +-- dispatch.rs         # KmsHandler trait + operation dispatch
 ```
 
-**Dependencies:** `ruststack-kms-model`, `ruststack-auth`, `hyper`, `serde_json`, `bytes`
+**Dependencies:** `rustack-kms-model`, `rustack-auth`, `hyper`, `serde_json`, `bytes`
 
-This crate is structurally identical to `ruststack-ssm-http`. The router parses `TrentService.<Op>` instead of `AmazonSSM.<Op>`.
+This crate is structurally identical to `rustack-ssm-http`. The router parses `TrentService.<Op>` instead of `AmazonSSM.<Op>`.
 
 ### 7.4 Workspace Changes
 
 ```toml
 [workspace.dependencies]
-ruststack-kms-model = { path = "crates/ruststack-kms-model" }
-ruststack-kms-http = { path = "crates/ruststack-kms-http" }
-ruststack-kms-core = { path = "crates/ruststack-kms-core" }
+rustack-kms-model = { path = "crates/rustack-kms-model" }
+rustack-kms-http = { path = "crates/rustack-kms-http" }
+rustack-kms-core = { path = "crates/rustack-kms-core" }
 
 # New crypto dependency
 aws-lc-rs = "1"
@@ -426,7 +426,7 @@ impl<H: KmsHandler> ServiceRouter for KmsServiceRouter<H> {
 ```rust
 /// Trait defining all KMS operations.
 ///
-/// Implemented by `RustStackKms` in the core crate.
+/// Implemented by `RustackKms` in the core crate.
 #[async_trait]
 pub trait KmsHandler: Send + Sync + 'static {
     async fn create_key(
@@ -962,7 +962,7 @@ The storage model consists of three primary `DashMap`-based stores per account/r
 ### 10.2 Core Data Structures
 
 ```rust
-/// Top-level KMS store, scoped per account+region via ruststack-core.
+/// Top-level KMS store, scoped per account+region via rustack-core.
 pub struct KmsStore {
     /// All KMS keys, keyed by Key ID (UUID).
     keys: DashMap<String, KmsKey>,
@@ -1189,12 +1189,12 @@ No actors, no channels, no background tasks. Key deletion scheduling is tracked 
 
 ```rust
 /// Main KMS provider implementing all ~35 operations.
-pub struct RustStackKms {
+pub struct RustackKms {
     pub(crate) store: Arc<KmsStore>,
     pub(crate) config: Arc<KmsConfig>,
 }
 
-impl RustStackKms {
+impl RustackKms {
     pub fn new(config: KmsConfig) -> Self {
         Self {
             store: Arc::new(KmsStore::new()),
@@ -1617,14 +1617,14 @@ KMS uses short error type names (no namespace prefix), same as SSM.
 KMS support is gated behind a cargo feature:
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack-server/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs", "ssm", "kms"]
-s3 = ["dep:ruststack-s3-core", "dep:ruststack-s3-http"]
-dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
-sqs = ["dep:ruststack-sqs-core", "dep:ruststack-sqs-http"]
-ssm = ["dep:ruststack-ssm-core", "dep:ruststack-ssm-http"]
-kms = ["dep:ruststack-kms-core", "dep:ruststack-kms-http"]
+s3 = ["dep:rustack-s3-core", "dep:rustack-s3-http"]
+dynamodb = ["dep:rustack-dynamodb-core", "dep:rustack-dynamodb-http"]
+sqs = ["dep:rustack-sqs-core", "dep:rustack-sqs-http"]
+ssm = ["dep:rustack-ssm-core", "dep:rustack-ssm-http"]
+kms = ["dep:rustack-kms-core", "dep:rustack-kms-http"]
 ```
 
 ### 13.2 Gateway Registration
@@ -1872,7 +1872,7 @@ The most comprehensive open-source KMS test suite. Already vendored at `vendors/
   - Error scenarios (invalid key ID, wrong key usage, disabled keys, etc.)
 - **Framework**: pytest with snapshot testing
 
-Adaptation strategy: run the Python test suite against RustStack's KMS endpoint, track pass/fail counts, progressively fix failures. Tests marked `@markers.aws.only_localstack` can be skipped (they test LocalStack-specific features like custom key material via tags).
+Adaptation strategy: run the Python test suite against Rustack's KMS endpoint, track pass/fail counts, progressively fix failures. Tests marked `@markers.aws.only_localstack` can be skipped (they test LocalStack-specific features like custom key material via tags).
 
 ```makefile
 test-kms-localstack:
@@ -1999,7 +1999,7 @@ resource "aws_kms_alias" "test" {
 
 - Download KMS Smithy model, place at `codegen/smithy-model/kms.json`
 - Add KMS service config to codegen with blob type support
-- Generate `ruststack-kms-model` crate with base64 blob serde
+- Generate `rustack-kms-model` crate with base64 blob serde
 - Verify generated types compile and serde round-trip
 
 #### Step 0.2: Cryptographic Engine
@@ -2100,7 +2100,7 @@ resource "aws_kms_alias" "test" {
 
 ### 16.3 Behavioral Differences from AWS
 
-| Behavior | AWS | RustStack | Justification |
+| Behavior | AWS | Rustack | Justification |
 |----------|-----|-----------|---------------|
 | Ciphertext blob format | Proprietary internal format | Custom header + AES-GCM output | Blobs are opaque; SDKs never parse them |
 | Key material storage | HSM-backed | In-memory | Local dev; no persistence requirement |
@@ -2109,7 +2109,7 @@ resource "aws_kms_alias" "test" {
 | Key policies | Enforced | Stored but not enforced | No IAM engine |
 | Key rotation | Actually rotates key material | Stores rotation flag only | Does not produce new key material on schedule |
 | Rate limiting | 5,500 - 30,000 requests/second | Unlimited | Not meaningful for local dev |
-| Cross-account access | Supported via grants/policies | Supported via multi-account routing | ruststack-core handles account isolation |
+| Cross-account access | Supported via grants/policies | Supported via multi-account routing | rustack-core handles account isolation |
 | FIPS compliance | FIPS 140-2 Level 2 HSMs | No FIPS certification | Local dev only |
 
 ### 16.4 Implementation Effort Comparison

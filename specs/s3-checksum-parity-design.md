@@ -3,8 +3,8 @@
 **Date:** 2026-03-09
 **Status:** Draft / RFC
 **Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md)
-**Scope:** Bring ruststack's S3 checksum handling to full parity with AWS S3 (post-Jan 2025 default integrity protections) and vendor LocalStack reference implementation.
-**Triggered by:** [GitHub Issue #3](https://github.com/tyrchen/ruststack/issues/3) -- Go AWS SDK v2 warns "Response has no supported checksum" on GetObject.
+**Scope:** Bring rustack's S3 checksum handling to full parity with AWS S3 (post-Jan 2025 default integrity protections) and vendor LocalStack reference implementation.
+**Triggered by:** [GitHub Issue #3](https://github.com/tyrchen/rustack/issues/3) -- Go AWS SDK v2 warns "Response has no supported checksum" on GetObject.
 
 ---
 
@@ -12,7 +12,7 @@
 
 1. [Background and Root Cause Analysis](#1-background-and-root-cause-analysis)
 2. [AWS S3 Checksum Behavior (2025)](#2-aws-s3-checksum-behavior-2025)
-3. [Gap Analysis: Ruststack vs LocalStack vs AWS](#3-gap-analysis-ruststack-vs-localstack-vs-aws)
+3. [Gap Analysis: Ruststack vs LocalStack vs AWS](#3-gap-analysis-rustack-vs-localstack-vs-aws)
 4. [Goals and Non-Goals](#4-goals-and-non-goals)
 5. [Design: Phase 1 -- Core Checksum Fixes](#5-design-phase-1----core-checksum-fixes)
 6. [Design: Phase 2 -- CRC64NVME and Checksum Types](#6-design-phase-2----crc64nvme-and-checksum-types)
@@ -29,13 +29,13 @@
 
 ### 1.1 The Reported Bug
 
-A user started ruststack with S3 service and used the Go AWS SDK v2 to PutObject then GetObject. The GetObject succeeded but the SDK logged:
+A user started rustack with S3 service and used the Go AWS SDK v2 to PutObject then GetObject. The GetObject succeeded but the SDK logged:
 
 ```
 SDK WARN Response has no supported checksum. Not validating response payload.
 ```
 
-The object data was returned correctly, but the SDK could not validate its integrity because ruststack returned no `x-amz-checksum-*` headers.
+The object data was returned correctly, but the SDK could not validate its integrity because rustack returned no `x-amz-checksum-*` headers.
 
 ### 1.2 Root Cause: Wiring Gap
 
@@ -43,13 +43,13 @@ The checksum infrastructure was **fully built** across three layers but never co
 
 | Layer | Status | Location |
 |-------|--------|----------|
-| Checksum computation (CRC32, CRC32C, SHA1, SHA256) | Working | `ruststack-s3-core/src/checksums.rs` |
-| `ChecksumData` storage in `S3Object` model | Working | `ruststack-s3-core/src/state/object.rs:185-193` |
-| HTTP response serialization (`x-amz-checksum-*` headers) | Working | `ruststack-s3-http/src/response.rs:287-292` |
-| GetObjectOutput / HeadObjectOutput checksum fields | Defined | `ruststack-s3-model/src/output/object.rs:70-81` |
-| **PutObject handler: compute checksum when client doesn't provide one** | **Missing** | `ruststack-s3-core/src/ops/object.rs:142` |
-| **GetObject handler: populate checksum fields from stored data** | **Missing** | `ruststack-s3-core/src/ops/object.rs:312-346` |
-| **HeadObject handler: populate checksum fields from stored data** | **Missing** | `ruststack-s3-core/src/ops/object.rs:413-449` |
+| Checksum computation (CRC32, CRC32C, SHA1, SHA256) | Working | `rustack-s3-core/src/checksums.rs` |
+| `ChecksumData` storage in `S3Object` model | Working | `rustack-s3-core/src/state/object.rs:185-193` |
+| HTTP response serialization (`x-amz-checksum-*` headers) | Working | `rustack-s3-http/src/response.rs:287-292` |
+| GetObjectOutput / HeadObjectOutput checksum fields | Defined | `rustack-s3-model/src/output/object.rs:70-81` |
+| **PutObject handler: compute checksum when client doesn't provide one** | **Missing** | `rustack-s3-core/src/ops/object.rs:142` |
+| **GetObject handler: populate checksum fields from stored data** | **Missing** | `rustack-s3-core/src/ops/object.rs:312-346` |
+| **HeadObject handler: populate checksum fields from stored data** | **Missing** | `rustack-s3-core/src/ops/object.rs:413-449` |
 
 The `handle_get_object()` destructured 8 fields from the `S3Object` but skipped `checksum`. The `handle_put_object()` only stored client-provided checksums and never auto-computed a default. The HTTP serialization layer would have returned the headers correctly if the output fields had been populated.
 
@@ -151,7 +151,7 @@ The `x-amz-trailer` request header declares which trailing header will follow. T
 
 #### Bug 1: AWS-Chunked Trailing Headers Are Silently Dropped
 
-**Location:** `ruststack-s3-http/src/codec.rs:45-118`
+**Location:** `rustack-s3-http/src/codec.rs:45-118`
 
 The `decode_aws_chunked()` function strips the aws-chunked framing and returns decoded body bytes, but **silently discards all trailing headers**. This means:
 
@@ -163,13 +163,13 @@ This is the most critical bug because it breaks the fundamental data integrity g
 
 #### Bug 2: Multipart Complete Ignores Checksums Entirely
 
-**Location:** `ruststack-s3-core/src/ops/multipart.rs:403`
+**Location:** `rustack-s3-core/src/ops/multipart.rs:403`
 
 The `handle_complete_multipart_upload()` handler hardcodes `checksum: None` in the assembled `S3Object`, discarding any per-part checksums. No checksum combination (composite or full-object) is performed.
 
 #### Bug 3: GetObjectAttributes Returns No Checksum Data
 
-**Location:** `ruststack-s3-core/src/ops/object_config.rs:586`
+**Location:** `rustack-s3-core/src/ops/object_config.rs:586`
 
 The `handle_get_object_attributes()` handler hardcodes `checksum: None`, even when the stored object has checksum data.
 
@@ -199,7 +199,7 @@ The `handle_get_object_attributes()` handler hardcodes `checksum: None`, even wh
 ### Non-Goals
 
 1. **Full S3 conformance test suite integration** -- desirable but out of scope for this spec. File a follow-up.
-2. **Checksum support for SelectObjectContent** -- not implemented in ruststack at all.
+2. **Checksum support for SelectObjectContent** -- not implemented in rustack at all.
 3. **Trailer signature validation** -- we currently skip SigV4 validation entirely; trailer signatures are included in this skip.
 4. **Retroactive checksum computation** -- existing objects stored before this change will not get checksums. This matches AWS behavior (only new objects get default checksums).
 
@@ -361,10 +361,10 @@ For PutObject when no client checksum is provided:
 
 Update `extract_checksum_from_put()`, HTTP request parsing, and response serialization to handle CRC64NVME:
 
-- `ruststack-s3-http/src/request.rs`: Parse `x-amz-checksum-crc64nvme` header
-- `ruststack-s3-http/src/response.rs`: Serialize `checksum_crc64nvme` field to header
-- `ruststack-s3-model/src/input/object.rs`: Add `checksum_crc64nvme` to `PutObjectInput`
-- `ruststack-s3-model/src/output/object.rs`: Already has `checksum_crc64nvme` in `GetObjectOutput`
+- `rustack-s3-http/src/request.rs`: Parse `x-amz-checksum-crc64nvme` header
+- `rustack-s3-http/src/response.rs`: Serialize `checksum_crc64nvme` field to header
+- `rustack-s3-model/src/input/object.rs`: Add `checksum_crc64nvme` to `PutObjectInput`
+- `rustack-s3-model/src/output/object.rs`: Already has `checksum_crc64nvme` in `GetObjectOutput`
 
 ---
 
@@ -372,7 +372,7 @@ Update `extract_checksum_from_put()`, HTTP request parsing, and response seriali
 
 ### 7.1 Problem
 
-The current `decode_aws_chunked()` in `ruststack-s3-http/src/codec.rs` strips chunked framing and returns decoded body bytes, but **discards all trailing headers**. When SDKs send checksums via trailing headers (the default for streaming uploads), those checksums are lost.
+The current `decode_aws_chunked()` in `rustack-s3-http/src/codec.rs` strips chunked framing and returns decoded body bytes, but **discards all trailing headers**. When SDKs send checksums via trailing headers (the default for streaming uploads), those checksums are lost.
 
 ### 7.2 Solution: Return Trailing Headers
 

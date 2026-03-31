@@ -30,8 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack via action (defaults)
-        id: ruststack
+      - name: Start Rustack via action (defaults)
+        id: rustack
         uses: ./
         with:
           image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
@@ -41,8 +41,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          ENDPOINT="${{ steps.ruststack.outputs.endpoint }}"
-          CONTAINER_ID="${{ steps.ruststack.outputs.container-id }}"
+          ENDPOINT="${{ steps.rustack.outputs.endpoint }}"
+          CONTAINER_ID="${{ steps.rustack.outputs.container-id }}"
 
           echo "endpoint=$ENDPOINT"
           echo "container-id=$CONTAINER_ID"
@@ -412,11 +412,11 @@ jobs:
       # ── Cleanup ───────────────────────────────────────────────────────
       - name: "Dump container logs (on failure)"
         if: failure()
-        run: docker logs ruststack 2>&1 | tail -500
+        run: docker logs rustack 2>&1 | tail -500
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 2: Custom port
@@ -427,8 +427,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack on port 5566
-        id: ruststack
+      - name: Start Rustack on port 5566
+        id: rustack
         uses: ./
         with:
           image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
@@ -438,7 +438,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          [ "${{ steps.ruststack.outputs.endpoint }}" = "http://localhost:5566" ]
+          [ "${{ steps.rustack.outputs.endpoint }}" = "http://localhost:5566" ]
           [ "$AWS_ENDPOINT_URL" = "http://localhost:5566" ]
           [ "$LOCALSTACK_ENDPOINT" = "http://localhost:5566" ]
 
@@ -465,7 +465,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 3: Custom region
@@ -476,8 +476,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack with eu-west-1
-        id: ruststack
+      - name: Start Rustack with eu-west-1
+        id: rustack
         uses: ./
         with:
           image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
@@ -505,7 +505,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 4: Custom credentials
@@ -516,8 +516,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack with custom credentials
-        id: ruststack
+      - name: Start Rustack with custom credentials
+        id: rustack
         uses: ./
         with:
           image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
@@ -541,7 +541,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 5: Services filter — only enable a subset
@@ -552,8 +552,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack with limited services
-        id: ruststack
+      - name: Start Rustack with limited services
+        id: rustack
         uses: ./
         with:
           image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
@@ -613,7 +613,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 6: Log level configuration
@@ -624,8 +624,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack with debug logging
-        id: ruststack
+      - name: Start Rustack with debug logging
+        id: rustack
         uses: ./
         with:
           image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
@@ -641,7 +641,7 @@ jobs:
           aws s3api delete-bucket --bucket log-test
 
           # Check container logs contain DEBUG-level entries
-          LOGS=$(docker logs ruststack 2>&1)
+          LOGS=$(docker logs rustack 2>&1)
           if echo "$LOGS" | grep -qi "DEBUG\|debug"; then
             echo "Debug logging confirmed"
           else
@@ -651,7 +651,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 7: Wait timeout — verify fast startup
@@ -662,8 +662,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack with short timeout (succeeds)
-        id: ruststack
+      - name: Start Rustack with short timeout (succeeds)
+        id: rustack
         uses: ./
         with:
           image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
@@ -677,7 +677,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 8: Cross-service integration (SNS → SQS fan-out)
@@ -688,8 +688,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack
-        id: ruststack
+      - name: Start Rustack
+        id: rustack
         uses: ./
         with:
           image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
@@ -769,8 +769,8 @@ jobs:
 
       - name: "Dump container logs (on failure)"
         if: failure()
-        run: docker logs ruststack 2>&1 | tail -500
+        run: docker logs rustack 2>&1 | tail -500
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true

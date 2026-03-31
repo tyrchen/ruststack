@@ -1,4 +1,4 @@
-//! SQS integration tests against a running `RustStack` server.
+//! SQS integration tests against a running `Rustack` server.
 //!
 //! These tests cover queue lifecycle, message operations, batch operations,
 //! FIFO queues, tags, and error handling.
@@ -754,7 +754,7 @@ mod tests {
         // Tag the queue.
         let mut tags = HashMap::new();
         tags.insert("env".to_owned(), "test".to_owned());
-        tags.insert("project".to_owned(), "ruststack".to_owned());
+        tags.insert("project".to_owned(), "rustack".to_owned());
 
         client
             .tag_queue()
@@ -774,7 +774,7 @@ mod tests {
 
         let tags = result.tags().unwrap();
         assert_eq!(tags.get("env").unwrap(), "test");
-        assert_eq!(tags.get("project").unwrap(), "ruststack");
+        assert_eq!(tags.get("project").unwrap(), "rustack");
 
         // Untag.
         client

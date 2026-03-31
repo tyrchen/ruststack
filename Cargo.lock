@@ -2574,6 +2574,1095 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustack"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-dynamodb",
+ "aws-sdk-s3",
+ "aws-sdk-sqs",
+ "aws-smithy-runtime-api",
+ "bytes",
+ "http 1.4.0",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-apigatewayv2-core",
+ "rustack-apigatewayv2-http",
+ "rustack-auth",
+ "rustack-cloudwatch-core",
+ "rustack-cloudwatch-http",
+ "rustack-core",
+ "rustack-dynamodb-core",
+ "rustack-dynamodb-http",
+ "rustack-dynamodbstreams-core",
+ "rustack-dynamodbstreams-http",
+ "rustack-events-core",
+ "rustack-events-http",
+ "rustack-iam-core",
+ "rustack-iam-http",
+ "rustack-kinesis-core",
+ "rustack-kinesis-http",
+ "rustack-kms-core",
+ "rustack-kms-http",
+ "rustack-lambda-core",
+ "rustack-lambda-http",
+ "rustack-logs-core",
+ "rustack-logs-http",
+ "rustack-s3-core",
+ "rustack-s3-http",
+ "rustack-s3-model",
+ "rustack-secretsmanager-core",
+ "rustack-secretsmanager-http",
+ "rustack-ses-core",
+ "rustack-ses-http",
+ "rustack-sns-core",
+ "rustack-sns-http",
+ "rustack-sqs-core",
+ "rustack-sqs-http",
+ "rustack-sqs-model",
+ "rustack-ssm-core",
+ "rustack-ssm-http",
+ "rustack-sts-core",
+ "rustack-sts-http",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rustack-apigatewayv2-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "rand",
+ "reqwest 0.12.28",
+ "rustack-apigatewayv2-http",
+ "rustack-apigatewayv2-model",
+ "rustack-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-apigatewayv2-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-apigatewayv2-model",
+ "rustack-auth",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-apigatewayv2-model"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rustack-auth"
+version = "0.6.0"
+dependencies = [
+ "base64",
+ "chrono",
+ "digest",
+ "hex",
+ "hmac",
+ "http 1.4.0",
+ "percent-encoding",
+ "sha1",
+ "sha2",
+ "subtle",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "rustack-cloudwatch-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "ciborium",
+ "dashmap",
+ "http 1.4.0",
+ "parking_lot",
+ "rustack-auth",
+ "rustack-cloudwatch-http",
+ "rustack-cloudwatch-model",
+ "rustack-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-cloudwatch-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "ciborium",
+ "form_urlencoded",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-cloudwatch-model",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-cloudwatch-model"
+version = "0.6.0"
+dependencies = [
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rustack-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dashmap",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-dynamodb-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "parking_lot",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-dynamodb-http",
+ "rustack-dynamodb-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-dynamodb-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "crc32fast",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-dynamodb-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-dynamodb-model"
+version = "0.6.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rustack-dynamodbstreams-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "parking_lot",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-dynamodb-core",
+ "rustack-dynamodb-model",
+ "rustack-dynamodbstreams-http",
+ "rustack-dynamodbstreams-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-dynamodbstreams-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-dynamodbstreams-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-dynamodbstreams-model"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "http 1.4.0",
+ "rustack-dynamodb-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rustack-events-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "futures",
+ "http 1.4.0",
+ "ipnet",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-events-http",
+ "rustack-events-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-events-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-events-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-events-model"
+version = "0.6.0"
+dependencies = [
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rustack-iam-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "percent-encoding",
+ "rand",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-iam-http",
+ "rustack-iam-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-iam-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "form_urlencoded",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-iam-model",
+ "serde",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-iam-model"
+version = "0.6.0"
+dependencies = [
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rustack-integration"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-apigatewayv2",
+ "aws-sdk-cloudwatch",
+ "aws-sdk-cloudwatchlogs",
+ "aws-sdk-dynamodb",
+ "aws-sdk-dynamodbstreams",
+ "aws-sdk-eventbridge",
+ "aws-sdk-iam",
+ "aws-sdk-kinesis",
+ "aws-sdk-kms",
+ "aws-sdk-lambda",
+ "aws-sdk-s3",
+ "aws-sdk-secretsmanager",
+ "aws-sdk-ses",
+ "aws-sdk-sns",
+ "aws-sdk-sqs",
+ "aws-sdk-ssm",
+ "aws-sdk-sts",
+ "aws-smithy-runtime-api",
+ "base64",
+ "bytes",
+ "rand",
+ "reqwest 0.13.2",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-kinesis-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "md-5",
+ "rand",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-kinesis-http",
+ "rustack-kinesis-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-kinesis-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-kinesis-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-kinesis-model"
+version = "0.6.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rustack-kms-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "aws-lc-rs",
+ "base64",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "rand",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-kms-http",
+ "rustack-kms-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-kms-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-kms-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-kms-model"
+version = "0.6.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rustack-lambda-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-lambda-http",
+ "rustack-lambda-model",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-lambda-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-lambda-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-lambda-model"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rustack-logs-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "regex",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-logs-http",
+ "rustack-logs-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-logs-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-logs-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-logs-model"
+version = "0.6.0"
+dependencies = [
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rustack-s3-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "chrono",
+ "crc32c",
+ "crc32fast",
+ "crc64fast-nvme",
+ "dashmap",
+ "digest",
+ "hex",
+ "http 1.4.0",
+ "hyper 1.8.1",
+ "md-5",
+ "parking_lot",
+ "percent-encoding",
+ "quick-xml",
+ "rand",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-s3-model",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "typed-builder",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-s3-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "futures",
+ "hex",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "rustack-auth",
+ "rustack-s3-model",
+ "rustack-s3-xml",
+ "sha2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-s3-model"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "http 1.4.0",
+ "serde",
+]
+
+[[package]]
+name = "rustack-s3-xml"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "quick-xml",
+ "rustack-s3-model",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "rustack-secretsmanager-core"
+version = "0.6.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "rand",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-secretsmanager-http",
+ "rustack-secretsmanager-model",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-secretsmanager-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-secretsmanager-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-secretsmanager-model"
+version = "0.6.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rustack-ses-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "parking_lot",
+ "regex",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-ses-http",
+ "rustack-ses-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-ses-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "form_urlencoded",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-ses-model",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-ses-model"
+version = "0.6.0"
+dependencies = [
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rustack-sns-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "parking_lot",
+ "regex",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-sns-http",
+ "rustack-sns-model",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-sns-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "form_urlencoded",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-sns-model",
+ "serde",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-sns-model"
+version = "0.6.0"
+dependencies = [
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rustack-sqs-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "hex",
+ "http 1.4.0",
+ "md-5",
+ "parking_lot",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-sqs-http",
+ "rustack-sqs-model",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-sqs-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-sqs-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-sqs-model"
+version = "0.6.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rustack-ssm-core"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "regex",
+ "rustack-auth",
+ "rustack-core",
+ "rustack-ssm-http",
+ "rustack-ssm-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-ssm-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-ssm-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-ssm-model"
+version = "0.6.0"
+dependencies = [
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rustack-sts-core"
+version = "0.6.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "http 1.4.0",
+ "rand",
+ "rustack-core",
+ "rustack-sts-http",
+ "rustack-sts-model",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-sts-http"
+version = "0.6.0"
+dependencies = [
+ "bytes",
+ "form_urlencoded",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "rustack-auth",
+ "rustack-sts-model",
+ "serde",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rustack-sts-model"
+version = "0.6.0"
+dependencies = [
+ "chrono",
+ "http 1.4.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2697,1095 +3786,6 @@ dependencies = [
  "ring",
  "rustls-pki-types",
  "untrusted 0.9.0",
-]
-
-[[package]]
-name = "ruststack-apigatewayv2-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "rand",
- "reqwest 0.12.28",
- "ruststack-apigatewayv2-http",
- "ruststack-apigatewayv2-model",
- "ruststack-core",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-apigatewayv2-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-apigatewayv2-model",
- "ruststack-auth",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-apigatewayv2-model"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "chrono",
- "http 1.4.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ruststack-auth"
-version = "0.1.0"
-dependencies = [
- "base64",
- "chrono",
- "digest",
- "hex",
- "hmac",
- "http 1.4.0",
- "percent-encoding",
- "sha1",
- "sha2",
- "subtle",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "ruststack-cloudwatch-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "chrono",
- "ciborium",
- "dashmap",
- "http 1.4.0",
- "parking_lot",
- "ruststack-auth",
- "ruststack-cloudwatch-http",
- "ruststack-cloudwatch-model",
- "ruststack-core",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-cloudwatch-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "ciborium",
- "form_urlencoded",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-cloudwatch-model",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-cloudwatch-model"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "http 1.4.0",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "ruststack-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "dashmap",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-dynamodb-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "parking_lot",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-dynamodb-http",
- "ruststack-dynamodb-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-dynamodb-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "chrono",
- "crc32fast",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-dynamodb-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-dynamodb-model"
-version = "0.1.0"
-dependencies = [
- "base64",
- "bytes",
- "chrono",
- "http 1.4.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ruststack-dynamodbstreams-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "parking_lot",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-dynamodb-core",
- "ruststack-dynamodb-model",
- "ruststack-dynamodbstreams-http",
- "ruststack-dynamodbstreams-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-dynamodbstreams-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "crc32fast",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-dynamodbstreams-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-dynamodbstreams-model"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "http 1.4.0",
- "ruststack-dynamodb-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "ruststack-events-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "chrono",
- "dashmap",
- "futures",
- "http 1.4.0",
- "ipnet",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-events-http",
- "ruststack-events-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-events-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "crc32fast",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-events-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-events-model"
-version = "0.1.0"
-dependencies = [
- "http 1.4.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ruststack-iam-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "percent-encoding",
- "rand",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-iam-http",
- "ruststack-iam-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-iam-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "form_urlencoded",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-iam-model",
- "serde",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-iam-model"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "http 1.4.0",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "ruststack-integration"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "aws-config",
- "aws-credential-types",
- "aws-sdk-apigatewayv2",
- "aws-sdk-cloudwatch",
- "aws-sdk-cloudwatchlogs",
- "aws-sdk-dynamodb",
- "aws-sdk-dynamodbstreams",
- "aws-sdk-eventbridge",
- "aws-sdk-iam",
- "aws-sdk-kinesis",
- "aws-sdk-kms",
- "aws-sdk-lambda",
- "aws-sdk-s3",
- "aws-sdk-secretsmanager",
- "aws-sdk-ses",
- "aws-sdk-sns",
- "aws-sdk-sqs",
- "aws-sdk-ssm",
- "aws-sdk-sts",
- "aws-smithy-runtime-api",
- "base64",
- "bytes",
- "rand",
- "reqwest 0.13.2",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-kinesis-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "md-5",
- "rand",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-kinesis-http",
- "ruststack-kinesis-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-kinesis-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "crc32fast",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-kinesis-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-kinesis-model"
-version = "0.1.0"
-dependencies = [
- "base64",
- "bytes",
- "chrono",
- "http 1.4.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ruststack-kms-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "aws-lc-rs",
- "base64",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "rand",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-kms-http",
- "ruststack-kms-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-kms-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "crc32fast",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-kms-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-kms-model"
-version = "0.1.0"
-dependencies = [
- "base64",
- "bytes",
- "chrono",
- "http 1.4.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ruststack-lambda-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-lambda-http",
- "ruststack-lambda-model",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-lambda-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-lambda-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-lambda-model"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "http 1.4.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ruststack-logs-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "regex",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-logs-http",
- "ruststack-logs-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-logs-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "crc32fast",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-logs-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-logs-model"
-version = "0.1.0"
-dependencies = [
- "http 1.4.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ruststack-s3-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytes",
- "chrono",
- "crc32c",
- "crc32fast",
- "crc64fast-nvme",
- "dashmap",
- "digest",
- "hex",
- "http 1.4.0",
- "hyper 1.8.1",
- "md-5",
- "parking_lot",
- "percent-encoding",
- "quick-xml",
- "rand",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-s3-model",
- "serde",
- "serde_json",
- "sha1",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "tracing",
- "typed-builder",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-s3-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "chrono",
- "futures",
- "hex",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "mime",
- "percent-encoding",
- "pin-project-lite",
- "ruststack-auth",
- "ruststack-s3-model",
- "ruststack-s3-xml",
- "sha2",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-s3-model"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "chrono",
- "http 1.4.0",
- "serde",
-]
-
-[[package]]
-name = "ruststack-s3-xml"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "chrono",
- "quick-xml",
- "ruststack-s3-model",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "ruststack-secretsmanager-core"
-version = "0.1.0"
-dependencies = [
- "base64",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "rand",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-secretsmanager-http",
- "ruststack-secretsmanager-model",
- "serde",
- "serde_json",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-secretsmanager-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "crc32fast",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-secretsmanager-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-secretsmanager-model"
-version = "0.1.0"
-dependencies = [
- "base64",
- "bytes",
- "chrono",
- "http 1.4.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ruststack-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "aws-config",
- "aws-credential-types",
- "aws-sdk-dynamodb",
- "aws-sdk-s3",
- "aws-sdk-sqs",
- "aws-smithy-runtime-api",
- "bytes",
- "http 1.4.0",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-apigatewayv2-core",
- "ruststack-apigatewayv2-http",
- "ruststack-auth",
- "ruststack-cloudwatch-core",
- "ruststack-cloudwatch-http",
- "ruststack-core",
- "ruststack-dynamodb-core",
- "ruststack-dynamodb-http",
- "ruststack-dynamodbstreams-core",
- "ruststack-dynamodbstreams-http",
- "ruststack-events-core",
- "ruststack-events-http",
- "ruststack-iam-core",
- "ruststack-iam-http",
- "ruststack-kinesis-core",
- "ruststack-kinesis-http",
- "ruststack-kms-core",
- "ruststack-kms-http",
- "ruststack-lambda-core",
- "ruststack-lambda-http",
- "ruststack-logs-core",
- "ruststack-logs-http",
- "ruststack-s3-core",
- "ruststack-s3-http",
- "ruststack-s3-model",
- "ruststack-secretsmanager-core",
- "ruststack-secretsmanager-http",
- "ruststack-ses-core",
- "ruststack-ses-http",
- "ruststack-sns-core",
- "ruststack-sns-http",
- "ruststack-sqs-core",
- "ruststack-sqs-http",
- "ruststack-sqs-model",
- "ruststack-ssm-core",
- "ruststack-ssm-http",
- "ruststack-sts-core",
- "ruststack-sts-http",
- "serde",
- "serde_json",
- "tokio",
- "tokio-test",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "ruststack-ses-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "parking_lot",
- "regex",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-ses-http",
- "ruststack-ses-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-ses-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "form_urlencoded",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-ses-model",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-ses-model"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "http 1.4.0",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "ruststack-sns-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "parking_lot",
- "regex",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-sns-http",
- "ruststack-sns-model",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-sns-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "form_urlencoded",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-sns-model",
- "serde",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-sns-model"
-version = "0.1.0"
-dependencies = [
- "http 1.4.0",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "ruststack-sqs-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytes",
- "chrono",
- "dashmap",
- "hex",
- "http 1.4.0",
- "md-5",
- "parking_lot",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-sqs-http",
- "ruststack-sqs-model",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-sqs-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "crc32fast",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-sqs-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-sqs-model"
-version = "0.1.0"
-dependencies = [
- "base64",
- "bytes",
- "http 1.4.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ruststack-ssm-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "regex",
- "ruststack-auth",
- "ruststack-core",
- "ruststack-ssm-http",
- "ruststack-ssm-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-ssm-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "crc32fast",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-ssm-model",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-ssm-model"
-version = "0.1.0"
-dependencies = [
- "http 1.4.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ruststack-sts-core"
-version = "0.1.0"
-dependencies = [
- "base64",
- "bytes",
- "chrono",
- "dashmap",
- "http 1.4.0",
- "rand",
- "ruststack-core",
- "ruststack-sts-http",
- "ruststack-sts-model",
- "serde",
- "serde_json",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-sts-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "form_urlencoded",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "ruststack-auth",
- "ruststack-sts-model",
- "serde",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ruststack-sts-model"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "http 1.4.0",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]

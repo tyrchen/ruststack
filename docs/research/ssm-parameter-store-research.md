@@ -17,7 +17,7 @@
 8. [Third-Party Test Suites](#8-third-party-test-suites)
 9. [Tools That Use SSM Parameter Store](#9-tools-that-use-ssm-parameter-store)
 10. [Implementation Priority Matrix](#10-implementation-priority-matrix)
-11. [Architecture Considerations for RustStack](#11-architecture-considerations-for-ruststack)
+11. [Architecture Considerations for Rustack](#11-architecture-considerations-for-rustack)
 
 ---
 
@@ -150,17 +150,17 @@ The official Smithy model for SSM is hosted in the AWS API Models repository:
 
 ### 2.3 Code Generation
 
-The same Smithy codegen infrastructure used for DynamoDB in RustStack can be reused for SSM, since both use the AWS JSON protocol family. The primary change is:
+The same Smithy codegen infrastructure used for DynamoDB in Rustack can be reused for SSM, since both use the AWS JSON protocol family. The primary change is:
 - Different Content-Type header (`1.1` vs `1.0`)
 - Different X-Amz-Target prefix (`AmazonSSM` vs `DynamoDB_20120810`)
 
-For RustStack, we should **NOT** generate from the full SSM model (146 operations). Instead, we should extract only the Parameter Store subset (~14 operations) and generate types from that.
+For Rustack, we should **NOT** generate from the full SSM model (146 operations). Instead, we should extract only the Parameter Store subset (~14 operations) and generate types from that.
 
 ---
 
 ## 3. SSM Service Scope: Full vs. Parameter Store
 
-AWS Systems Manager is a **massive** service with 146 API operations spanning many features. For RustStack, we only care about **Parameter Store**.
+AWS Systems Manager is a **massive** service with 146 API operations spanning many features. For Rustack, we only care about **Parameter Store**.
 
 ### 3.1 Full SSM Features (NOT implementing)
 
@@ -202,7 +202,7 @@ The Parameter Store operations are the subset we need:
 | 12 | `RemoveTagsFromResource` | Remove tags from a parameter (shared with other SSM resources) |
 | 13 | `ListTagsForResource` | List tags on a parameter (shared with other SSM resources) |
 
-The tag operations (`AddTagsToResource`, `RemoveTagsFromResource`, `ListTagsForResource`) are shared across all SSM resource types. For RustStack, we only need to support `ResourceType: "Parameter"`.
+The tag operations (`AddTagsToResource`, `RemoveTagsFromResource`, `ListTagsForResource`) are shared across all SSM resource types. For Rustack, we only need to support `ResourceType: "Parameter"`.
 
 **Optionally** (for completeness):
 | # | Operation | Description |
@@ -231,7 +231,7 @@ The tag operations (`AddTagsToResource`, `RemoveTagsFromResource`, `ListTagsForR
 | Advanced | 100,000 | 8 KB | Yes | Charged |
 | Intelligent-Tiering | Auto-switches | Auto | Auto | Variable |
 
-For RustStack local dev, tier distinction is informational only -- no real AWS billing.
+For Rustack local dev, tier distinction is informational only -- no real AWS billing.
 
 ### 4.3 Parameter Object (API response)
 
@@ -356,11 +356,11 @@ Note: For parameter names starting with `/`, the ARN becomes `arn:aws:ssm:...:pa
 | `aws:ec2:image` | Validates the value is a valid AMI ID. Validation is asynchronous. |
 | `aws:ssm:integration` | Integration data type. |
 
-For RustStack, `text` is the only DataType we need to fully support.
+For Rustack, `text` is the only DataType we need to fully support.
 
 ### 4.13 Public Parameters
 
-AWS publishes public parameters (e.g., latest AMI IDs) under paths like `/aws/service/ami-amazon-linux-latest/`. These are read-only, AWS-managed parameters available in all regions. For RustStack local dev, we do **not** need to replicate public parameters.
+AWS publishes public parameters (e.g., latest AMI IDs) under paths like `/aws/service/ami-amazon-linux-latest/`. These are read-only, AWS-managed parameters available in all regions. For Rustack local dev, we do **not** need to replicate public parameters.
 
 ---
 
@@ -810,7 +810,7 @@ List tags on a parameter.
 | GetParametersByPath | 40 TPS | 1,000 TPS |
 | PutParameter | 40 TPS | 1,000 TPS |
 
-For RustStack local dev, throughput limits are irrelevant.
+For Rustack local dev, throughput limits are irrelevant.
 
 ---
 
@@ -1078,7 +1078,7 @@ For comparison: DynamoDB MVP was ~10 operations, full was ~20+. SSM Parameter St
 
 ---
 
-## 11. Architecture Considerations for RustStack
+## 11. Architecture Considerations for Rustack
 
 ### 11.1 Protocol Reuse
 
@@ -1093,12 +1093,12 @@ The existing DynamoDB HTTP layer can be generalized into a shared `awsJson` prot
 ### 11.2 Suggested Crate Structure
 
 Following the existing pattern:
-- `ruststack-ssm-model` -- Auto-generated Smithy types (from Parameter Store subset of SSM model)
-- `ruststack-ssm-core` -- Parameter Store business logic
-- `ruststack-ssm-http` -- HTTP routing, service layer
+- `rustack-ssm-model` -- Auto-generated Smithy types (from Parameter Store subset of SSM model)
+- `rustack-ssm-core` -- Parameter Store business logic
+- `rustack-ssm-http` -- HTTP routing, service layer
 
 Or, since SSM Parameter Store is much simpler than DynamoDB, it could be a single crate:
-- `ruststack-ssm` -- Combined model, core, and HTTP (like a simpler S3)
+- `rustack-ssm` -- Combined model, core, and HTTP (like a simpler S3)
 
 ### 11.3 Storage Model
 
@@ -1135,7 +1135,7 @@ For local dev, SecureString parameters can be stored as plaintext with a marker 
 
 ### 11.5 Gateway Integration
 
-SSM should be registered as another service in the RustStack gateway alongside S3 and DynamoDB. Service dispatch can use the `X-Amz-Target` header prefix:
+SSM should be registered as another service in the Rustack gateway alongside S3 and DynamoDB. Service dispatch can use the `X-Amz-Target` header prefix:
 - `DynamoDB_20120810.*` -> DynamoDB service
 - `AmazonSSM.*` -> SSM service
 

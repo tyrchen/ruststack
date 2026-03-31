@@ -1,9 +1,9 @@
-# RustStack IAM: Native Rust Implementation Design
+# Rustack IAM: Native Rust Implementation Design
 
 **Date:** 2026-03-19
 **Status:** Draft / RFC
-**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-sns-design.md](./ruststack-sns-design.md)
-**Scope:** Add AWS IAM (Identity and Access Management) support to RustStack -- ~60 operations across 4 phases covering users, roles, groups, policies, instance profiles, access keys, tagging, and service-linked roles, using the same Smithy-based codegen and gateway routing patterns established by SNS (awsQuery protocol).
+**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-sns-design.md](./rustack-sns-design.md)
+**Scope:** Add AWS IAM (Identity and Access Management) support to Rustack -- ~60 operations across 4 phases covering users, roles, groups, policies, instance profiles, access keys, tagging, and service-linked roles, using the same Smithy-based codegen and gateway routing patterns established by SNS (awsQuery protocol).
 
 ---
 
@@ -29,14 +29,14 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding AWS IAM support to RustStack. Key points:
+This spec proposes adding AWS IAM support to Rustack. Key points:
 
-- **Large scope** -- ~60 operations across 4 phases, making this one of the larger services in RustStack. However, the vast majority of operations are straightforward CRUD with no complex state machines, streaming, or background processing.
+- **Large scope** -- ~60 operations across 4 phases, making this one of the larger services in Rustack. However, the vast majority of operations are straightforward CRUD with no complex state machines, streaming, or background processing.
 - **High value** -- IAM is the foundational AWS service. Every Terraform plan, CDK deployment, and CI pipeline that creates roles, policies, or instance profiles depends on IAM. Without local IAM, developers must either skip IAM resources in their IaC or make real AWS API calls. Adding IAM unlocks fully offline Terraform/CDK workflows for the most common AWS resources.
-- **Global service** -- Unlike all other RustStack services, IAM is a **global** service (not regional). IAM entities are keyed by `account_id` only, not by `(account_id, region)`. This is a straightforward simplification of the storage model.
+- **Global service** -- Unlike all other Rustack services, IAM is a **global** service (not regional). IAM entities are keyed by `account_id` only, not by `(account_id, region)`. This is a straightforward simplification of the storage model.
 - **awsQuery protocol** -- IAM uses the `awsQuery` protocol (same as SNS). Requests are `POST` with `application/x-www-form-urlencoded` body containing `Action=OperationName`. Responses are XML. The entire form-parsing, XML-response, and error-formatting infrastructure from SNS can be reused.
 - **Gateway routing challenge** -- Both IAM and SNS use `awsQuery` with `application/x-www-form-urlencoded`. The gateway must distinguish between them. The solution is to inspect the `Authorization` header's SigV4 credential scope, which contains the service name (`iam` vs `sns`). This is reliable because all AWS SDKs sign requests with the correct service name. As a fallback, IAM and SNS have completely disjoint `Action` parameter names.
-- **Smithy codegen reuse** -- Generate a `ruststack-iam-model` crate from the official Smithy model using the same codegen infrastructure as all other services.
+- **Smithy codegen reuse** -- Generate a `rustack-iam-model` crate from the official Smithy model using the same codegen infrastructure as all other services.
 - **Entity relationship model** -- IAM has a rich entity model: Users, Groups, Roles, Policies (managed and inline), Instance Profiles, and Access Keys. These entities have many-to-many relationships (e.g., policies attached to multiple users/roles/groups). The storage engine must efficiently track these relationships.
 - **Estimated effort** -- 4-5 days for Phase 0 (~20 core operations), 8-10 days for full implementation (~60 operations), plus 1 day for CI integration.
 
@@ -74,7 +74,7 @@ Without local IAM, developers must either:
 | Global vs Regional      | Global (simpler)                                          | Regional                             | Regional                              | Regional         |
 | Estimated lines of code | ~6,000                                                    | ~8,000                               | ~4,500                                | ~3,000           |
 
-IAM has more operations than any other RustStack service, but the individual operations are simpler -- almost all are CRUD without complex state transitions. The primary complexity is the entity relationship model and ensuring correct ARN generation.
+IAM has more operations than any other Rustack service, but the individual operations are simpler -- almost all are CRUD without complex state transitions. The primary complexity is the entity relationship model and ensuring correct ARN generation.
 
 ### 2.3 Tool Coverage
 
@@ -110,7 +110,7 @@ With all ~60 operations implemented, the following tools work out of the box:
 10. **Service-linked roles** -- `CreateServiceLinkedRole`, `DeleteServiceLinkedRole`, `GetServiceLinkedRoleDeletionStatus`
 11. **Assume role policy management** -- `UpdateAssumeRolePolicy` to update role trust policies
 12. **Smithy-generated types** -- all types generated from official AWS Smithy model
-13. **Shared infrastructure** -- reuse `ruststack-core`, `ruststack-auth`, and the awsQuery protocol layer from SNS
+13. **Shared infrastructure** -- reuse `rustack-core`, `rustack-auth`, and the awsQuery protocol layer from SNS
 14. **Same Docker image** -- single binary serves all services on port 4566
 15. **Pass LocalStack and moto IAM test suites** -- validate against comprehensive mock test suites
 
@@ -128,7 +128,7 @@ With all ~60 operations implemented, the following tools work out of the box:
 10. **Credential reports** -- `GenerateCredentialReport`, `GetCredentialReport` are low priority.
 11. **Service-specific credentials** -- `CreateServiceSpecificCredential`, `ListServiceSpecificCredentials`, etc. are low priority.
 12. **Organizations integration** -- no cross-account policy evaluation or SCPs.
-13. **Data persistence across restarts** -- in-memory only, matching all other RustStack services.
+13. **Data persistence across restarts** -- in-memory only, matching all other Rustack services.
 14. **Policy simulation engine** -- `SimulatePrincipalPolicy` and `SimulateCustomPolicy` accept requests and return stub results indicating all actions are allowed. No actual policy evaluation engine is built.
 
 ---
@@ -162,7 +162,7 @@ With all ~60 operations implemented, the following tools work out of the box:
    +--------+--------+-------+-------+-------+
                       |
                +------+------+
-               | ruststack-  |
+               | rustack-  |
                | core + auth |
                +-------------+
 ```
@@ -239,33 +239,33 @@ If SigV4 parsing fails (e.g., unsigned requests in permissive mode), the gateway
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app)
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-{model,core,http}
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-sqs-{model,core,http}
-+-- ruststack-ssm-{model,core,http}
-+-- ruststack-sns-{model,core,http}
-+-- ruststack-iam-model            <-- NEW (auto-generated)
-+-- ruststack-iam-core             <-- NEW
-+-- ruststack-iam-http             <-- NEW
+rustack-server (app)
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-{model,core,http}
++-- rustack-dynamodb-{model,core,http}
++-- rustack-sqs-{model,core,http}
++-- rustack-ssm-{model,core,http}
++-- rustack-sns-{model,core,http}
++-- rustack-iam-model            <-- NEW (auto-generated)
++-- rustack-iam-core             <-- NEW
++-- rustack-iam-http             <-- NEW
 +-- ... (other services)
 
-ruststack-iam-http
-+-- ruststack-iam-model
-+-- ruststack-auth
+rustack-iam-http
++-- rustack-iam-model
++-- rustack-auth
 +-- quick-xml (XML response serialization, reuse pattern from SNS)
 +-- serde_urlencoded (form request deserialization)
 
-ruststack-iam-core
-+-- ruststack-core
-+-- ruststack-iam-model
+rustack-iam-core
++-- rustack-core
++-- rustack-iam-model
 +-- dashmap
 +-- serde_json (policy document validation)
 +-- rand (access key ID generation)
 
-ruststack-iam-model (auto-generated, standalone)
+rustack-iam-model (auto-generated, standalone)
 +-- serde
 +-- serde_json
 ```
@@ -303,7 +303,7 @@ The SNS implementation provides all the awsQuery infrastructure IAM needs:
 | XML response serialization (`XmlWriter`)    | Pattern reuse | IAM needs its own `XmlWriter` instance with different namespace, but the `XmlWriter` utility from SNS can be extracted into a shared crate or duplicated (small code) |
 | XML error formatting (`<ErrorResponse>`)    | Pattern reuse | Same structure, different namespace URI                                                                                                                               |
 | `ServiceRouter` trait                       | Yes           | IAM implements `ServiceRouter` like all other services                                                                                                                |
-| SigV4 auth                                  | Yes           | `ruststack-auth` is service-agnostic                                                                                                                                  |
+| SigV4 auth                                  | Yes           | `rustack-auth` is service-agnostic                                                                                                                                  |
 | Form parameter encoding conventions         | Yes           | Same `member.N`, `entry.N.key/value` patterns for lists and maps                                                                                                      |
 
 ### 5.3 Wire Format Examples
@@ -398,7 +398,7 @@ Action=CreateUser&UserName=testuser&Path=/developers/&Version=2010-05-08
 **List parameters (Tags):**
 ```
 Tags.member.1.Key=Department&Tags.member.1.Value=Engineering
-&Tags.member.2.Key=Project&Tags.member.2.Value=RustStack
+&Tags.member.2.Key=Project&Tags.member.2.Value=Rustack
 ```
 
 **Policy document (URL-encoded JSON string):**
@@ -412,7 +412,7 @@ PolicyDocument=%7B%22Version%22%3A%222012-10-17%22%2C%22Statement%22%3A...%7D
 
 ### 6.1 Universal Codegen
 
-The `ruststack-iam-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
+The `rustack-iam-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
 
 **Smithy model:** `codegen/smithy-model/iam.json` (IAM namespace `com.amazonaws.iam`, ~60+ operations)
 **Service config:** `codegen/services/iam.toml`
@@ -505,7 +505,7 @@ file_layout = "flat"
 
 ### 6.3 Generated Output
 
-The codegen produces 6 files in `crates/ruststack-iam-model/src/`:
+The codegen produces 6 files in `crates/rustack-iam-model/src/`:
 
 | File            | Contents                                                                                                                             |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -530,10 +530,10 @@ See [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design
 
 ## 7. Crate Structure
 
-### 7.1 `ruststack-iam-model` (auto-generated)
+### 7.1 `rustack-iam-model` (auto-generated)
 
 ```
-crates/ruststack-iam-model/
+crates/rustack-iam-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs              # Module re-exports
@@ -547,16 +547,16 @@ crates/ruststack-iam-model/
 
 **Dependencies:** `serde`, `serde_json`
 
-### 7.2 `ruststack-iam-core`
+### 7.2 `rustack-iam-core`
 
 ```
-crates/ruststack-iam-core/
+crates/rustack-iam-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs           # IamConfig
     +-- handler.rs          # IamHandler trait (all operation dispatch)
-    +-- provider.rs         # RustStackIam (main provider, all operation handlers)
+    +-- provider.rs         # RustackIam (main provider, all operation handlers)
     +-- storage.rs          # IamStore: top-level store with all DashMaps
     +-- types.rs            # Internal data types: UserRecord, RoleRecord, GroupRecord,
     |                       #   ManagedPolicyRecord, InstanceProfileRecord, AccessKeyRecord
@@ -575,12 +575,12 @@ crates/ruststack-iam-core/
     +-- service_linked.rs   # Service-linked role operations
 ```
 
-**Dependencies:** `ruststack-core`, `ruststack-iam-model`, `dashmap`, `serde_json`, `tracing`, `rand`, `chrono`
+**Dependencies:** `rustack-core`, `rustack-iam-model`, `dashmap`, `serde_json`, `tracing`, `rand`, `chrono`
 
-### 7.3 `ruststack-iam-http`
+### 7.3 `rustack-iam-http`
 
 ```
-crates/ruststack-iam-http/
+crates/rustack-iam-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -592,17 +592,17 @@ crates/ruststack-iam-http/
     +-- response.rs         # XML response construction, XmlWriter, error formatting
 ```
 
-**Dependencies:** `ruststack-iam-model`, `ruststack-auth`, `hyper`, `http`, `bytes`, `serde_urlencoded`, `uuid`
+**Dependencies:** `rustack-iam-model`, `rustack-auth`, `hyper`, `http`, `bytes`, `serde_urlencoded`, `uuid`
 
-This crate is structurally identical to `ruststack-sns-http`. The router parses `Action=<IamOp>` from the form body and dispatches to the handler. XML responses use a different namespace (`https://iam.amazonaws.com/doc/2010-05-08/`).
+This crate is structurally identical to `rustack-sns-http`. The router parses `Action=<IamOp>` from the form body and dispatches to the handler. XML responses use a different namespace (`https://iam.amazonaws.com/doc/2010-05-08/`).
 
 ### 7.4 Workspace Changes
 
 ```toml
 [workspace.dependencies]
-ruststack-iam-model = { path = "crates/ruststack-iam-model" }
-ruststack-iam-http = { path = "crates/ruststack-iam-http" }
-ruststack-iam-core = { path = "crates/ruststack-iam-core" }
+rustack-iam-model = { path = "crates/rustack-iam-model" }
+rustack-iam-http = { path = "crates/rustack-iam-http" }
+rustack-iam-core = { path = "crates/rustack-iam-core" }
 ```
 
 ---
@@ -778,7 +778,7 @@ impl IamXmlWriter {
 
 ### 9.1 Overview
 
-IAM is a **global** service. Unlike regional services (S3, DynamoDB, SQS, etc.) that partition state by `(account_id, region)`, IAM stores all entities under `account_id` only. In RustStack's single-account model, this means a single flat namespace for all IAM entities.
+IAM is a **global** service. Unlike regional services (S3, DynamoDB, SQS, etc.) that partition state by `(account_id, region)`, IAM stores all entities under `account_id` only. In Rustack's single-account model, this means a single flat namespace for all IAM entities.
 
 The storage model consists of 6 primary entity stores (DashMaps) plus relationship tracking. The entity model has these key relationships:
 
@@ -811,7 +811,7 @@ use dashmap::DashMap;
 /// Top-level IAM store.
 ///
 /// IAM is a global service -- entities are keyed by account_id only,
-/// not by (account_id, region). In RustStack's single-account model,
+/// not by (account_id, region). In Rustack's single-account model,
 /// this is a flat namespace.
 pub struct IamStore {
     /// Users keyed by username.
@@ -1109,7 +1109,7 @@ IAM has two types of policies:
 - Created via `Put{User,Role,Group}Policy`
 - Stored in `UserRecord.inline_policies`, `RoleRecord.inline_policies`, `GroupRecord.inline_policies` as `HashMap<String, String>` (policy_name -> document)
 
-For RustStack's local dev use case, we store policy documents as JSON strings without parsing or evaluating them. The policy document is validated for JSON syntax only.
+For Rustack's local dev use case, we store policy documents as JSON strings without parsing or evaluating them. The policy document is validated for JSON syntax only.
 
 ### 9.6 Policy Attachment Tracking
 
@@ -1191,12 +1191,12 @@ IAM is a pure request/response service with no streaming, no background processi
 
 ```rust
 /// Main IAM provider implementing all operations.
-pub struct RustStackIam {
+pub struct RustackIam {
     pub(crate) store: Arc<IamStore>,
     pub(crate) config: Arc<IamConfig>,
 }
 
-impl RustStackIam {
+impl RustackIam {
     pub fn new(config: IamConfig) -> Self {
         Self {
             store: Arc::new(IamStore::new()),
@@ -1759,10 +1759,10 @@ This is the same XML error format as SNS, with a different namespace URI.
 IAM support is gated behind a cargo feature:
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack-server/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs", "ssm", "sns", "lambda", "events", "logs", "kms", "kinesis", "secretsmanager", "iam"]
-iam = ["dep:ruststack-iam-core", "dep:ruststack-iam-http"]
+iam = ["dep:rustack-iam-core", "dep:rustack-iam-http"]
 ```
 
 ### 12.2 Gateway Registration
@@ -1780,8 +1780,8 @@ if is_enabled("iam") {
         iam_skip_signature_validation = iam_config.skip_signature_validation,
         "initializing IAM service",
     );
-    let iam_provider = RustStackIam::new(iam_config.clone());
-    let iam_handler = RustStackIamHandler::new(Arc::new(iam_provider));
+    let iam_provider = RustackIam::new(iam_config.clone());
+    let iam_handler = RustackIamHandler::new(Arc::new(iam_provider));
     let iam_http_config = build_iam_http_config(&iam_config);
     let iam_service = IamHttpService::new(Arc::new(iam_handler), iam_http_config);
     services.push(Box::new(service::IamServiceRouter::new(iam_service)));
@@ -2119,9 +2119,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -p ruststack-iam-model
-      - run: cargo test -p ruststack-iam-core
-      - run: cargo test -p ruststack-iam-http
+      - run: cargo test -p rustack-iam-model
+      - run: cargo test -p rustack-iam-core
+      - run: cargo test -p rustack-iam-http
 
   integration:
     runs-on: ubuntu-latest
@@ -2129,7 +2129,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release
-      - run: ./target/release/ruststack-server &
+      - run: ./target/release/rustack-server &
       - run: sleep 2
       - run: |
           # AWS CLI smoke tests
@@ -2156,8 +2156,8 @@ jobs:
 1. **Day 1: Model + Scaffolding**
    - Download IAM Smithy model from AWS API models repository
    - Add `codegen/services/iam.toml` configuration
-   - Generate `ruststack-iam-model` crate
-   - Create `ruststack-iam-core` and `ruststack-iam-http` crate scaffolding
+   - Generate `rustack-iam-model` crate
+   - Create `rustack-iam-core` and `rustack-iam-http` crate scaffolding
    - Implement `IamOperation` enum and router
 
 2. **Day 2: Storage Engine + User/Role CRUD**
@@ -2179,7 +2179,7 @@ jobs:
    - Implement HTTP layer: router, service, XML response builder
    - Implement `IamServiceRouter` with SigV4 service detection
    - Integrate into gateway `build_services()` and health endpoint
-   - Add feature gate to `apps/ruststack-server/Cargo.toml`
+   - Add feature gate to `apps/rustack-server/Cargo.toml`
 
 5. **Day 5: Tests + Polish**
    - Unit tests for all Phase 0 operations
@@ -2270,8 +2270,8 @@ jobs:
 
 ### 15.2 Dependencies
 
-- `ruststack-core` -- no changes needed (IAM is global, but the global/regional distinction is handled in IAM core, not in ruststack-core)
-- `ruststack-auth` -- no changes needed (SigV4 with service=`iam`)
+- `rustack-core` -- no changes needed (IAM is global, but the global/regional distinction is handled in IAM core, not in rustack-core)
+- `rustack-auth` -- no changes needed (SigV4 with service=`iam`)
 - `dashmap` -- already in workspace
 - `serde_json` -- for policy document JSON validation (already in workspace)
 - `serde_urlencoded` -- for form parameter parsing (already in workspace for SNS)
@@ -2293,5 +2293,5 @@ jobs:
 | Access key secret returned only on creation                 | Matches AWS behavior exactly. The secret access key is stored in the AccessKeyRecord for internal use but never returned after the initial CreateAccessKey response.                                                          |
 | Register IAM router before SNS in gateway                   | IAM uses SigV4-based matching which is more specific than SNS's Content-Type-based matching. Registering IAM first means IAM claims its requests before SNS's catch-all awsQuery matching.                                    |
 | ISO 8601 timestamps (not epoch seconds)                     | IAM uses ISO 8601 format (`2026-03-19T12:00:00Z`) in XML responses, unlike Secrets Manager and SSM which use epoch seconds. This is protocol-specific.                                                                        |
-| No STS integration                                          | STS (GetCallerIdentity, AssumeRole) is a separate service with its own endpoint. IAM and STS are logically related but architecturally separate. STS can be added later as `ruststack-sts-{model,core,http}`.                 |
+| No STS integration                                          | STS (GetCallerIdentity, AssumeRole) is a separate service with its own endpoint. IAM and STS are logically related but architecturally separate. STS can be added later as `rustack-sts-{model,core,http}`.                 |
 | SimulatePrincipalPolicy returns "allowed" for everything    | Building a real IAM policy evaluation engine is a massive undertaking (AWS's policy language supports conditions, wildcards, NotAction, etc.). Returning "allowed" for all simulations is the pragmatic choice for local dev. |

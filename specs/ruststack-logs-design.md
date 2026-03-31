@@ -1,9 +1,9 @@
-# RustStack CloudWatch Logs: Native Rust Implementation Design
+# Rustack CloudWatch Logs: Native Rust Implementation Design
 
 **Date:** 2026-03-06
 **Status:** Draft / RFC
-**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-ssm-design.md](./ruststack-ssm-design.md)
-**Scope:** Add CloudWatch Logs support to RustStack -- targeting ~35 core operations covering log group/stream management, event ingestion/retrieval, filtering, metric filters, subscription filters, resource policies, tags, and basic Insights queries, using the same Smithy-based codegen and `awsJson1.1` gateway routing patterns established by SSM.
+**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-ssm-design.md](./rustack-ssm-design.md)
+**Scope:** Add CloudWatch Logs support to Rustack -- targeting ~35 core operations covering log group/stream management, event ingestion/retrieval, filtering, metric filters, subscription filters, resource policies, tags, and basic Insights queries, using the same Smithy-based codegen and `awsJson1.1` gateway routing patterns established by SSM.
 
 ---
 
@@ -29,14 +29,14 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding CloudWatch Logs support to RustStack as a fully native Rust implementation. Key design decisions:
+This spec proposes adding CloudWatch Logs support to Rustack as a fully native Rust implementation. Key design decisions:
 
 - **Medium-scope service** -- ~35 operations for the MVP surface area (out of 152+ total CW Logs operations). CloudWatch Logs is larger than SSM Parameter Store (13 ops) but smaller than DynamoDB (66 ops) or S3 (90+ ops). We target the operations that matter for local development: log group/stream CRUD, event ingestion/retrieval, filtering, metric filters, subscription filters, resource policies, tagging, and basic Insights queries.
 - **Same protocol as SSM** -- CloudWatch Logs uses `awsJson1.1` with `X-Amz-Target: Logs_20140328.<Op>`. This is identical to SSM's protocol pattern. We reuse the same codegen path, JSON request/response serialization, and error formatting.
 - **Append-only log storage engine** -- log events are stored in time-ordered sequences per log stream. Unlike SQS (message lifecycle state machine) or DynamoDB (indexed tables), the storage model is simple: append events, query by time range. Memory management is handled via configurable per-stream event limits and retention policy enforcement.
 - **No background processing for MVP** -- metric filters are stored but do not emit CloudWatch metrics. Subscription filters are stored but do not forward to Lambda/Kinesis/Firehose. These are metadata-only for MVP.
 - **Filter pattern evaluation** -- `FilterLogEvents` with simple text patterns (space-separated terms, quoted phrases) is implemented in Phase 1. JSON filter patterns (`{$.field = value}`) are a Phase 2 stretch goal.
-- **Shared infrastructure** -- reuse `ruststack-core` (multi-account/region state), `ruststack-auth` (SigV4 verification), and the SSM-established `awsJson1.1` HTTP layer patterns unchanged.
+- **Shared infrastructure** -- reuse `rustack-core` (multi-account/region state), `rustack-auth` (SigV4 verification), and the SSM-established `awsJson1.1` HTTP layer patterns unchanged.
 - **Phased delivery** -- 4 phases from MVP (log group/stream CRUD, event put/get) to full feature parity including filter patterns, Insights queries, and metric/subscription filter CRUD.
 
 ---
@@ -73,7 +73,7 @@ A native Rust implementation provides:
 | moto (getmoto/moto) | Python | N/A (lib) | ~30 | In-process mock, no standalone server |
 | fake-cloudwatch-logs | Node.js | ~100MB | ~5 | Minimal, abandoned |
 | Mockoon | N/A | N/A | Static mocks | No business logic |
-| **RustStack CW Logs** | **Rust** | **~10MB** | **~35** | **This proposal** |
+| **Rustack CW Logs** | **Rust** | **~10MB** | **~35** | **This proposal** |
 
 No existing Rust-based CloudWatch Logs emulator exists. This would be the first.
 
@@ -105,7 +105,7 @@ No existing Rust-based CloudWatch Logs emulator exists. This would be the first.
 6. **Retention policy enforcement** -- background task that evicts events older than the configured retention period
 7. **Simple text filter patterns** -- `FilterLogEvents` with space-separated term matching and quoted phrases
 8. **Same Docker image** -- single binary serves S3, DynamoDB, SQS, SSM, and CW Logs on port 4566
-9. **GitHub Action compatibility** -- extend the existing `tyrchen/ruststack` GitHub Action
+9. **GitHub Action compatibility** -- extend the existing `tyrchen/rustack` GitHub Action
 10. **Pass LocalStack CW Logs test suite** -- validate against vendored `vendors/localstack/tests/aws/services/logs/`
 
 ### 3.2 Non-Goals
@@ -119,7 +119,7 @@ No existing Rust-based CloudWatch Logs emulator exists. This would be the first.
 7. **Data protection policies** -- accept but do not enforce data masking
 8. **Cross-account log delivery** -- `PutDestination`/`PutDestinationPolicy` are stored but cross-account routing is not implemented
 9. **KMS encryption** -- accept `kmsKeyId` on log groups but do not perform actual encryption
-10. **Data persistence across restarts** -- in-memory only, matching all other RustStack services
+10. **Data persistence across restarts** -- in-memory only, matching all other Rustack services
 11. **JSON filter patterns** -- `{$.field = value}` syntax in `FilterLogEvents` is a Phase 2 stretch goal
 12. **Delivery/integration operations** -- `CreateDelivery`, `PutDeliverySource`, `PutDeliveryDestination`, S3 table integrations, transformers, and other advanced features added post-2023
 
@@ -154,8 +154,8 @@ No existing Rust-based CloudWatch Logs emulator exists. This would be the first.
       +--------+--------+--------+---------+
                        |
               +--------+--------+
-              | ruststack-core  |
-              | ruststack-auth  |
+              | rustack-core  |
+              | rustack-auth  |
               +-----------------+
 ```
 
@@ -176,28 +176,28 @@ Routing logic: check `X-Amz-Target` header. If prefix is `Logs_20140328.`, route
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app)
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-{model,core,http}
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-sqs-{model,core,http}
-+-- ruststack-ssm-{model,core,http}
-+-- ruststack-logs-model        <-- NEW (auto-generated)
-+-- ruststack-logs-core         <-- NEW
-+-- ruststack-logs-http         <-- NEW
+rustack-server (app)
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-{model,core,http}
++-- rustack-dynamodb-{model,core,http}
++-- rustack-sqs-{model,core,http}
++-- rustack-ssm-{model,core,http}
++-- rustack-logs-model        <-- NEW (auto-generated)
++-- rustack-logs-core         <-- NEW
++-- rustack-logs-http         <-- NEW
 
-ruststack-logs-http
-+-- ruststack-logs-model
-+-- ruststack-auth
+rustack-logs-http
++-- rustack-logs-model
++-- rustack-auth
 
-ruststack-logs-core
-+-- ruststack-core
-+-- ruststack-logs-model
+rustack-logs-core
++-- rustack-core
++-- rustack-logs-model
 +-- tokio (time for retention cleanup)
 +-- dashmap
 
-ruststack-logs-model (auto-generated, standalone)
+rustack-logs-model (auto-generated, standalone)
 ```
 
 ---
@@ -227,8 +227,8 @@ CloudWatch Logs uses `awsJson1.1`, identical to SSM. The only differences from S
 | JSON response serialization | Yes | `serde_json::to_vec` with `Serialize` derives |
 | `X-Amz-Target` header parsing | Yes | Same pattern, different prefix (`Logs_20140328.`) |
 | JSON error formatting | Yes | Same `{"__type": "...", "message": "..."}` format |
-| SigV4 auth | Yes | `ruststack-auth` is service-agnostic, service name = `logs` |
-| Multi-account/region state | Yes | `ruststack-core` unchanged |
+| SigV4 auth | Yes | `rustack-auth` is service-agnostic, service name = `logs` |
+| Multi-account/region state | Yes | `rustack-core` unchanged |
 
 ### 5.3 Example Request/Response
 
@@ -267,7 +267,7 @@ CloudWatch Logs was introduced in 2014 with `awsJson1.1` from the start. There i
 
 ### 6.1 Universal Codegen
 
-The `ruststack-logs-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
+The `rustack-logs-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
 
 **Smithy model:** `codegen/smithy-model/logs.json` (780KB, namespace `com.amazonaws.cloudwatchlogs`, 43 operations)
 **Service config:** `codegen/services/logs.toml`
@@ -275,7 +275,7 @@ The `ruststack-logs-model` crate is generated from the official AWS Smithy JSON 
 
 ### 6.2 Generated Output
 
-The codegen produces 6 files in `crates/ruststack-logs-model/src/`:
+The codegen produces 6 files in `crates/rustack-logs-model/src/`:
 
 | File | Contents |
 |------|----------|
@@ -296,10 +296,10 @@ See [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design
 
 ## 7. Crate Structure
 
-### 7.1 `ruststack-logs-model` (auto-generated)
+### 7.1 `rustack-logs-model` (auto-generated)
 
 ```
-crates/ruststack-logs-model/
+crates/rustack-logs-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs              # Module re-exports
@@ -314,15 +314,15 @@ crates/ruststack-logs-model/
 
 No hand-written types needed. CW Logs has no equivalent of DynamoDB's `AttributeValue` -- all types are straightforward structs and enums.
 
-### 7.2 `ruststack-logs-core`
+### 7.2 `rustack-logs-core`
 
 ```
-crates/ruststack-logs-core/
+crates/rustack-logs-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs           # LogsConfig
-    +-- provider.rs         # RustStackLogs (main provider, handler dispatch)
+    +-- provider.rs         # RustackLogs (main provider, handler dispatch)
     +-- error.rs            # LogsServiceError
     +-- state.rs            # LogsState (top-level: DashMap of log groups)
     +-- group.rs            # LogGroupRecord (metadata, retention, tags, streams)
@@ -355,12 +355,12 @@ crates/ruststack-logs-core/
         +-- kms.rs          # AssociateKmsKey, DisassociateKmsKey
 ```
 
-**Dependencies:** `ruststack-core`, `ruststack-logs-model`, `dashmap`, `serde_json`, `chrono`, `tracing`, `tokio` (for retention timer), `uuid`
+**Dependencies:** `rustack-core`, `rustack-logs-model`, `dashmap`, `serde_json`, `chrono`, `tracing`, `tokio` (for retention timer), `uuid`
 
-### 7.3 `ruststack-logs-http`
+### 7.3 `rustack-logs-http`
 
 ```
-crates/ruststack-logs-http/
+crates/rustack-logs-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -369,17 +369,17 @@ crates/ruststack-logs-http/
     +-- dispatch.rs         # LogsHandler trait + operation dispatch
 ```
 
-**Dependencies:** `ruststack-logs-model`, `ruststack-auth`, `hyper`, `serde_json`, `bytes`
+**Dependencies:** `rustack-logs-model`, `rustack-auth`, `hyper`, `serde_json`, `bytes`
 
-This crate is structurally identical to `ruststack-ssm-http`. The router parses `Logs_20140328.<Op>` instead of `AmazonSSM.<Op>`.
+This crate is structurally identical to `rustack-ssm-http`. The router parses `Logs_20140328.<Op>` instead of `AmazonSSM.<Op>`.
 
 ### 7.4 Workspace Changes
 
 ```toml
 [workspace.dependencies]
-ruststack-logs-model = { path = "crates/ruststack-logs-model" }
-ruststack-logs-http = { path = "crates/ruststack-logs-http" }
-ruststack-logs-core = { path = "crates/ruststack-logs-core" }
+rustack-logs-model = { path = "crates/rustack-logs-model" }
+rustack-logs-http = { path = "crates/rustack-logs-http" }
+rustack-logs-core = { path = "crates/rustack-logs-core" }
 ```
 
 ---
@@ -486,7 +486,7 @@ Account + Region
 
 ```rust
 /// Top-level CW Logs state.
-/// Keyed by (account_id, region) via ruststack-core.
+/// Keyed by (account_id, region) via rustack-core.
 pub struct LogsState {
     /// All log groups keyed by name.
     groups: DashMap<String, LogGroupRecord>,
@@ -558,7 +558,7 @@ pub struct LogStreamRecord {
 pub struct StoredLogEvent {
     /// Event timestamp (epoch millis, from the producer).
     pub timestamp: i64,
-    /// Ingestion time (epoch millis, when RustStack received it).
+    /// Ingestion time (epoch millis, when Rustack received it).
     pub ingestion_time: i64,
     /// Log message content.
     pub message: String,
@@ -904,12 +904,12 @@ fn parse_filter_terms(pattern: &str) -> Vec<FilterTerm> {
 
 ```rust
 /// Main CW Logs provider implementing all operations.
-pub struct RustStackLogs {
+pub struct RustackLogs {
     pub(crate) state: Arc<LogsState>,
     pub(crate) config: Arc<LogsConfig>,
 }
 
-impl RustStackLogs {
+impl RustackLogs {
     pub fn new(config: LogsConfig) -> Self {
         let state = Arc::new(LogsState::new(Arc::new(config.clone())));
         Self {
@@ -1341,14 +1341,14 @@ CW Logs uses short error type names (no namespace prefix), same as SSM.
 ### 12.1 Feature Gate
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack-server/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs", "ssm", "logs"]
-s3 = ["dep:ruststack-s3-core", "dep:ruststack-s3-http"]
-dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
-sqs = ["dep:ruststack-sqs-core", "dep:ruststack-sqs-http"]
-ssm = ["dep:ruststack-ssm-core", "dep:ruststack-ssm-http"]
-logs = ["dep:ruststack-logs-core", "dep:ruststack-logs-http"]
+s3 = ["dep:rustack-s3-core", "dep:rustack-s3-http"]
+dynamodb = ["dep:rustack-dynamodb-core", "dep:rustack-dynamodb-http"]
+sqs = ["dep:rustack-sqs-core", "dep:rustack-sqs-http"]
+ssm = ["dep:rustack-ssm-core", "dep:rustack-ssm-http"]
+logs = ["dep:rustack-logs-core", "dep:rustack-logs-http"]
 ```
 
 ### 12.2 Gateway Registration
@@ -1504,7 +1504,7 @@ The vendored LocalStack tests (`vendors/localstack/tests/aws/services/logs/`) co
 
 **Total: ~84 tests** covering the full API surface we plan to implement.
 
-These tests use boto3 and can be run directly against RustStack by pointing `AWS_ENDPOINT_URL` at `http://localhost:4566`.
+These tests use boto3 and can be run directly against Rustack by pointing `AWS_ENDPOINT_URL` at `http://localhost:4566`.
 
 ### 13.4 moto Test Suite
 
@@ -1532,8 +1532,8 @@ fluent-bit is the most important log shipper to validate against. It uses `Creat
 
 ```makefile
 test-logs-fluentbit:
-	@echo "Starting RustStack..."
-	@./target/release/ruststack-server &
+	@echo "Starting Rustack..."
+	@./target/release/rustack-server &
 	@sleep 1
 	@echo '{"log": "test message from fluent-bit"}' | fluent-bit \
 	    -i stdin \
@@ -1595,10 +1595,10 @@ aws logs delete-log-group --log-group-name /test/my-app \
 ### 13.8 Docker awslogs Driver Test
 
 ```bash
-# Start RustStack
-docker run -d -p 4566:4566 tyrchen/ruststack
+# Start Rustack
+docker run -d -p 4566:4566 tyrchen/rustack
 
-# Run a container with awslogs driver pointed at RustStack
+# Run a container with awslogs driver pointed at Rustack
 docker run --rm \
     --log-driver=awslogs \
     --log-opt awslogs-region=us-east-1 \
@@ -1627,7 +1627,7 @@ aws logs get-log-events \
 #### Step 0.1: Codegen
 - Add CW Logs service config to codegen
 - Download CW Logs Smithy model from `aws/api-models-aws`
-- Generate `ruststack-logs-model` crate
+- Generate `rustack-logs-model` crate
 - Verify generated types compile and serde round-trip
 
 #### Step 0.2: HTTP Layer
@@ -1718,7 +1718,7 @@ aws logs get-log-events \
 
 ### 15.3 Behavioral Differences from AWS
 
-| Behavior | AWS | RustStack | Justification |
+| Behavior | AWS | Rustack | Justification |
 |----------|-----|-----------|---------------|
 | KMS encryption | Encrypts with KMS key | Stores key ID, no encryption | No KMS service; local dev does not need encryption |
 | Subscription filter forwarding | Forwards matching events | Stores filter metadata only | No Lambda/Kinesis/Firehose service dependencies |

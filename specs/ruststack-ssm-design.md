@@ -1,9 +1,9 @@
-# RustStack SSM Parameter Store: Native Rust Implementation Design
+# Rustack SSM Parameter Store: Native Rust Implementation Design
 
 **Date:** 2026-03-02
 **Status:** Draft / RFC
-**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-dynamodb-design.md](./ruststack-dynamodb-design.md), [SSM Parameter Store Research](../docs/research/ssm-parameter-store-research.md)
-**Scope:** Add SSM Parameter Store support to RustStack -- 13 operations covering the full Parameter Store API surface, using the same Smithy-based codegen and gateway routing patterns established by S3 and DynamoDB.
+**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-dynamodb-design.md](./rustack-dynamodb-design.md), [SSM Parameter Store Research](../docs/research/ssm-parameter-store-research.md)
+**Scope:** Add SSM Parameter Store support to Rustack -- 13 operations covering the full Parameter Store API surface, using the same Smithy-based codegen and gateway routing patterns established by S3 and DynamoDB.
 
 ---
 
@@ -29,13 +29,13 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding SSM Parameter Store support to RustStack. Key points:
+This spec proposes adding SSM Parameter Store support to Rustack. Key points:
 
 - **Trivially small scope** -- 13 operations total (compared to DynamoDB's 66 or S3's 90+). Parameter Store is the simplest AWS service we will implement.
 - **High value** -- SSM Parameter Store is the standard configuration/secrets management primitive in AWS. Tools like Chamber, Terraform, CDK, Spring Cloud AWS, and ssm-env all depend on it. Adding it unlocks local development for any application that reads config from SSM.
 - **Near-zero protocol work** -- SSM uses `awsJson1.1`, which differs from DynamoDB's `awsJson1.0` only in the `Content-Type` version string and `X-Amz-Target` prefix. The entire JSON serialization, routing, and error formatting infrastructure from DynamoDB can be reused.
 - **Simple storage model** -- a `DashMap<String, ParameterRecord>` with `BTreeMap<u64, ParameterVersion>` per parameter for version history. No B-Trees, no secondary indexes, no expression parser.
-- **Smithy codegen reuse** -- extract the 13 Parameter Store operations from the full SSM Smithy model (146 operations) and generate a `ruststack-ssm-model` crate using the same codegen infrastructure as DynamoDB.
+- **Smithy codegen reuse** -- extract the 13 Parameter Store operations from the full SSM Smithy model (146 operations) and generate a `rustack-ssm-model` crate using the same codegen infrastructure as DynamoDB.
 - **Estimated effort** -- 2-3 days for MVP (6 operations), 4-5 days for full Parameter Store (13 operations).
 
 ---
@@ -94,7 +94,7 @@ With all 13 operations implemented, the following tools work out of the box:
 5. **Tag support** -- AddTagsToResource, RemoveTagsFromResource, ListTagsForResource for Parameter resources
 6. **DescribeParameters filtering** -- Name, Type, KeyId, Path, Tier, tag, DataType filters
 7. **Smithy-generated types** -- all SSM types generated from official AWS Smithy model
-8. **Shared infrastructure** -- reuse `ruststack-core`, `ruststack-auth`, and the awsJson protocol layer
+8. **Shared infrastructure** -- reuse `rustack-core`, `rustack-auth`, and the awsJson protocol layer
 9. **Same Docker image** -- single binary serves S3 + DynamoDB + SSM on port 4566
 10. **Pass moto test suite** -- validate against the most comprehensive SSM mock test suite
 
@@ -141,7 +141,7 @@ With all 13 operations implemented, the following tools work out of the box:
          +------+------+------+------+
                 |
          +------+------+
-         | ruststack-  |
+         | rustack-  |
          | core + auth |
          +-------------+
 ```
@@ -161,24 +161,24 @@ Routing logic: check `X-Amz-Target` header. If prefix is `AmazonSSM.`, route to 
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app)
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-{model,core,http}
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-ssm-model        <-- NEW (auto-generated)
-+-- ruststack-ssm-core         <-- NEW
-+-- ruststack-ssm-http         <-- NEW
+rustack-server (app)
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-{model,core,http}
++-- rustack-dynamodb-{model,core,http}
++-- rustack-ssm-model        <-- NEW (auto-generated)
++-- rustack-ssm-core         <-- NEW
++-- rustack-ssm-http         <-- NEW
 
-ruststack-ssm-http
-+-- ruststack-ssm-model
-+-- ruststack-auth
+rustack-ssm-http
++-- rustack-ssm-model
++-- rustack-auth
 
-ruststack-ssm-core
-+-- ruststack-core
-+-- ruststack-ssm-model
+rustack-ssm-core
++-- rustack-core
++-- rustack-ssm-model
 
-ruststack-ssm-model (auto-generated, standalone)
+rustack-ssm-model (auto-generated, standalone)
 ```
 
 ---
@@ -213,8 +213,8 @@ The DynamoDB implementation provides all the infrastructure SSM needs:
 | JSON response serialization | Yes | `serde_json::to_vec` with `Serialize` derives |
 | `X-Amz-Target` header parsing | Yes | Same pattern, different prefix |
 | JSON error formatting | Yes | Same `{"__type": "...", "message": "..."}` format |
-| SigV4 auth | Yes | `ruststack-auth` is service-agnostic |
-| Multi-account/region state | Yes | `ruststack-core` unchanged |
+| SigV4 auth | Yes | `rustack-auth` is service-agnostic |
+| Multi-account/region state | Yes | `rustack-core` unchanged |
 
 ### 5.3 No Legacy Compatibility Needed
 
@@ -287,7 +287,7 @@ Total: roughly 1,000-1,500 lines of generated code, compared to DynamoDB's ~4,00
 ```makefile
 codegen-ssm:
 	@cd codegen && cargo run -- --service ssm
-	@cargo +nightly fmt -p ruststack-ssm-model
+	@cargo +nightly fmt -p rustack-ssm-model
 
 codegen: codegen-s3 codegen-dynamodb codegen-ssm
 ```
@@ -296,10 +296,10 @@ codegen: codegen-s3 codegen-dynamodb codegen-ssm
 
 ## 7. Crate Structure
 
-### 7.1 `ruststack-ssm-model` (auto-generated)
+### 7.1 `rustack-ssm-model` (auto-generated)
 
 ```
-crates/ruststack-ssm-model/
+crates/rustack-ssm-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs              # Module re-exports
@@ -314,15 +314,15 @@ crates/ruststack-ssm-model/
 
 No hand-written types needed. SSM has no equivalent of DynamoDB's `AttributeValue` -- all types are straightforward structs and enums that serde handles natively.
 
-### 7.2 `ruststack-ssm-core`
+### 7.2 `rustack-ssm-core`
 
 ```
-crates/ruststack-ssm-core/
+crates/rustack-ssm-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs           # SSMConfig
-    +-- provider.rs         # RustStackSSM (main provider, all 13 handlers)
+    +-- provider.rs         # RustackSSM (main provider, all 13 handlers)
     +-- error.rs            # SSMServiceError
     +-- state.rs            # ParameterStore (DashMap<String, ParameterRecord>)
     +-- storage.rs          # ParameterRecord, ParameterVersion, path matching
@@ -331,12 +331,12 @@ crates/ruststack-ssm-core/
     +-- validation.rs       # Parameter name, value, label, tag validation
 ```
 
-**Dependencies:** `ruststack-core`, `ruststack-ssm-model`, `dashmap`, `serde_json`, `chrono`, `tracing`
+**Dependencies:** `rustack-core`, `rustack-ssm-model`, `dashmap`, `serde_json`, `chrono`, `tracing`
 
-### 7.3 `ruststack-ssm-http`
+### 7.3 `rustack-ssm-http`
 
 ```
-crates/ruststack-ssm-http/
+crates/rustack-ssm-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -345,17 +345,17 @@ crates/ruststack-ssm-http/
     +-- dispatch.rs         # SSMHandler trait + operation dispatch
 ```
 
-**Dependencies:** `ruststack-ssm-model`, `ruststack-auth`, `hyper`, `serde_json`, `bytes`
+**Dependencies:** `rustack-ssm-model`, `rustack-auth`, `hyper`, `serde_json`, `bytes`
 
-This crate is structurally identical to `ruststack-dynamodb-http`. The router parses `AmazonSSM.<Op>` instead of `DynamoDB_20120810.<Op>`. Request deserialization and response serialization use the same `serde_json` machinery.
+This crate is structurally identical to `rustack-dynamodb-http`. The router parses `AmazonSSM.<Op>` instead of `DynamoDB_20120810.<Op>`. Request deserialization and response serialization use the same `serde_json` machinery.
 
 ### 7.4 Workspace Changes
 
 ```toml
 [workspace.dependencies]
-ruststack-ssm-model = { path = "crates/ruststack-ssm-model" }
-ruststack-ssm-http = { path = "crates/ruststack-ssm-http" }
-ruststack-ssm-core = { path = "crates/ruststack-ssm-core" }
+rustack-ssm-model = { path = "crates/rustack-ssm-model" }
+rustack-ssm-http = { path = "crates/rustack-ssm-http" }
+rustack-ssm-core = { path = "crates/rustack-ssm-core" }
 ```
 
 ---
@@ -387,7 +387,7 @@ impl SSMRouter {
 ```rust
 /// SSM service router for the gateway.
 pub struct SSMServiceRouter {
-    handler: Arc<RustStackSSM>,
+    handler: Arc<RustackSSM>,
     config: SSMHttpConfig,
 }
 
@@ -434,7 +434,7 @@ The storage model is a flat hashmap of parameters with versioned history. There 
 
 ```rust
 /// Top-level parameter store.
-/// Keyed by (account_id, region) via ruststack-core, then by parameter name.
+/// Keyed by (account_id, region) via rustack-core, then by parameter name.
 pub struct ParameterStore {
     /// All parameters keyed by name.
     parameters: DashMap<String, ParameterRecord>,
@@ -643,12 +643,12 @@ No actors, no channels, no background tasks. This is straightforward request/res
 
 ```rust
 /// Main SSM Parameter Store provider implementing all 13 operations.
-pub struct RustStackSSM {
+pub struct RustackSSM {
     pub(crate) state: Arc<ParameterStore>,
     pub(crate) config: Arc<SSMConfig>,
 }
 
-impl RustStackSSM {
+impl RustackSSM {
     pub fn new(config: SSMConfig) -> Self;
 }
 ```
@@ -887,12 +887,12 @@ SSM uses short error type names (no namespace prefix), unlike DynamoDB which use
 SSM support is gated behind a cargo feature:
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack-server/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "ssm"]
-s3 = ["dep:ruststack-s3-core", "dep:ruststack-s3-http"]
-dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
-ssm = ["dep:ruststack-ssm-core", "dep:ruststack-ssm-http"]
+s3 = ["dep:rustack-s3-core", "dep:rustack-s3-http"]
+dynamodb = ["dep:rustack-dynamodb-core", "dep:rustack-dynamodb-http"]
+ssm = ["dep:rustack-ssm-core", "dep:rustack-ssm-http"]
 ```
 
 ### 12.2 Gateway Registration
@@ -1033,8 +1033,8 @@ Chamber (`segmentio/chamber`) uses all 10 core Parameter Store operations and is
 
 ```makefile
 test-ssm-chamber:
-	@echo "Starting RustStack..."
-	@./target/release/ruststack-server &
+	@echo "Starting Rustack..."
+	@./target/release/rustack-server &
 	@sleep 1
 	@AWS_REGION=us-east-1 \
 	 AWS_ACCESS_KEY_ID=test \
@@ -1081,7 +1081,7 @@ aws ssm delete-parameter --name "/test/param1" \
 #### Step 0.1: Codegen
 - Add SSM service config to codegen
 - Download SSM Smithy model, extract Parameter Store subset
-- Generate `ruststack-ssm-model` crate
+- Generate `rustack-ssm-model` crate
 - Verify generated types compile and serde round-trip
 
 #### Step 0.2: HTTP Layer
@@ -1157,7 +1157,7 @@ aws ssm delete-parameter --name "/test/param1" \
 
 ### 15.3 Behavioral Differences from AWS
 
-| Behavior | AWS | RustStack | Justification |
+| Behavior | AWS | Rustack | Justification |
 |----------|-----|-----------|---------------|
 | SecureString encryption | KMS-encrypted | Plaintext | No KMS service; local dev does not need encryption |
 | Parameter policies | Enforced (expiration, notification) | Stored but not enforced | No background enforcement engine |
@@ -1177,4 +1177,4 @@ aws ssm delete-parameter --name "/test/param1" \
 | Expression parser | 0 | ~2,500 | 0.0x |
 | **Total** | **~3,000** | **~15,400** | **0.2x** |
 
-SSM Parameter Store is approximately one-fifth the implementation effort of DynamoDB. The absence of an expression language, secondary indexes, and transaction semantics makes this the simplest AWS service in the RustStack roadmap.
+SSM Parameter Store is approximately one-fifth the implementation effort of DynamoDB. The absence of an expression language, secondary indexes, and transaction semantics makes this the simplest AWS service in the Rustack roadmap.

@@ -1,6 +1,6 @@
 [package]
-name = "ruststack-integration"
-description = "Integration tests for RustStack server"
+name = "rustack-integration"
+description = "Integration tests for Rustack server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,9 +1,9 @@
-# RustStack SNS: Native Rust Implementation Design
+# Rustack SNS: Native Rust Implementation Design
 
 **Date:** 2026-03-06
 **Status:** Draft / RFC
-**Depends on:** [ruststack-sqs-design.md](./ruststack-sqs-design.md), [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-dynamodb-design.md](./ruststack-dynamodb-design.md)
-**Scope:** Add native SNS support to RustStack using the same Smithy-based codegen and gateway routing patterns established by S3, DynamoDB, SQS, and SSM. SNS is unique in that it requires cross-service integration with the existing SQS implementation for SNS-to-SQS fan-out.
+**Depends on:** [rustack-sqs-design.md](./rustack-sqs-design.md), [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-dynamodb-design.md](./rustack-dynamodb-design.md)
+**Scope:** Add native SNS support to Rustack using the same Smithy-based codegen and gateway routing patterns established by S3, DynamoDB, SQS, and SSM. SNS is unique in that it requires cross-service integration with the existing SQS implementation for SNS-to-SQS fan-out.
 
 ---
 
@@ -30,15 +30,15 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding SNS support to RustStack as a fully native Rust implementation, following the same architectural patterns established by S3, DynamoDB, SQS, and SSM. Key design decisions:
+This spec proposes adding SNS support to Rustack as a fully native Rust implementation, following the same architectural patterns established by S3, DynamoDB, SQS, and SSM. Key design decisions:
 
 - **Native Rust pub/sub engine** -- unlike LocalStack which implements SNS in Python with complex provider classes, we build a purpose-built in-memory topic/subscription engine. This maintains the ~10MB Docker image and millisecond startup.
-- **Smithy codegen reuse** -- extend the existing `codegen/` system to generate SNS model types from the official AWS SNS Smithy JSON AST (`aws/api-models-aws`), producing a `ruststack-sns-model` crate.
+- **Smithy codegen reuse** -- extend the existing `codegen/` system to generate SNS model types from the official AWS SNS Smithy JSON AST (`aws/api-models-aws`), producing a `rustack-sns-model` crate.
 - **awsQuery protocol** -- SNS uses the `@awsQuery` Smithy protocol (API version `2010-03-31`), with `application/x-www-form-urlencoded` request bodies and XML responses. This is the *only* protocol SNS supports -- unlike SQS, SNS has no JSON protocol alternative. Modern AWS SDKs still use awsQuery for SNS.
-- **Cross-service SNS-to-SQS fan-out** -- the core differentiating feature of SNS for local development. When a message is published to an SNS topic, subscribed SQS queues receive the message. This requires a well-defined integration boundary between `ruststack-sns-core` and `ruststack-sqs-core`.
+- **Cross-service SNS-to-SQS fan-out** -- the core differentiating feature of SNS for local development. When a message is published to an SNS topic, subscribed SQS queues receive the message. This requires a well-defined integration boundary between `rustack-sns-core` and `rustack-sqs-core`.
 - **Message filtering** -- subscription filter policies allow fine-grained message routing based on message attributes or body content. This is a critical feature for microservice testing.
 - **FIFO topics** -- paired with FIFO SQS queues, FIFO topics provide strict ordering and deduplication. Building on the existing FIFO SQS support.
-- **Shared infrastructure** -- reuse `ruststack-core` (multi-account/region state), `ruststack-auth` (SigV4 verification), and the gateway routing pattern unchanged.
+- **Shared infrastructure** -- reuse `rustack-core` (multi-account/region state), `rustack-auth` (SigV4 verification), and the gateway routing pattern unchanged.
 - **Phased delivery** -- 4 phases from MVP (topic CRUD, publish, SQS subscriptions) to full feature parity including FIFO topics, HTTP/HTTPS subscriptions, platform applications, and filter policies.
 
 ---
@@ -64,7 +64,7 @@ SNS is the fifth most-used AWS service for local development, and the essential 
 | s12v/sns | Scala/JVM | ~300MB | Partial | SQS, HTTP, RabbitMQ | No | No | Abandoned since 2019 |
 | fake_sns | Ruby | ~200MB | Partial | SQS, HTTP | No | No | Minimal, Ruby-only test helper |
 | LocalStack SNS | Python | ~1GB | Yes | Full | Full | Yes | Most complete, heavy |
-| **RustStack SNS** | **Rust** | **~10MB** | **Yes** | **SQS, HTTP** | **Full** | **Yes** | **This proposal** |
+| **Rustack SNS** | **Rust** | **~10MB** | **Yes** | **SQS, HTTP** | **Full** | **Yes** | **This proposal** |
 
 All existing alternatives are either too incomplete (GoAWS lacks filter policies and FIFO), too heavy (s12v/sns requires JVM), abandoned (fake_sns), or part of a monolithic system (LocalStack). No Rust-based SNS emulator exists.
 
@@ -75,7 +75,7 @@ A native Rust implementation provides:
 - **~10MB Docker image** (same binary as S3/DynamoDB/SQS/SSM) vs ~300MB+ with JVM alternatives
 - **Millisecond startup** vs 2-4 seconds for JVM
 - **~5MB memory baseline** vs 80-150MB for JVM
-- **Direct SQS integration** -- SNS-to-SQS fan-out calls directly into `ruststack-sqs-core` without HTTP round-trips or inter-process communication
+- **Direct SQS integration** -- SNS-to-SQS fan-out calls directly into `rustack-sqs-core` without HTTP round-trips or inter-process communication
 - **Tokio-native concurrency** -- async message delivery, HTTP endpoint callbacks, and timers integrate naturally with our async runtime
 - **Single binary** -- no process management, no inter-process communication
 - **Full debuggability** -- we own every line of code
@@ -106,11 +106,11 @@ With SNS implemented, the following common patterns work out of the box:
 2. **Cover 90%+ of local development use cases** -- topic CRUD, subscriptions, publish, SQS fan-out, message filtering
 3. **awsQuery protocol support** -- full `application/x-www-form-urlencoded` request parsing and XML response serialization (the only SNS protocol)
 4. **Smithy-generated types** -- all SNS API types generated from official AWS Smithy model
-5. **SNS-to-SQS fan-out** -- when a message is published to a topic, deliver to all subscribed SQS queues via direct in-process integration with `ruststack-sqs-core`
+5. **SNS-to-SQS fan-out** -- when a message is published to a topic, deliver to all subscribed SQS queues via direct in-process integration with `rustack-sqs-core`
 6. **Message filtering** -- support filter policies on subscriptions with `MessageAttributes` and `MessageBody` scopes
 7. **FIFO topics** -- strict ordering within message groups, exactly-once deduplication, paired with FIFO SQS queues
 8. **Same Docker image** -- single binary serves S3, DynamoDB, SQS, SSM, and SNS on the same port (4566)
-9. **GitHub Action compatibility** -- extend the existing `tyrchen/ruststack` GitHub Action
+9. **GitHub Action compatibility** -- extend the existing `tyrchen/rustack` GitHub Action
 10. **Pass LocalStack SNS test suite** -- validate against vendored `test_sns.py` (180 tests) and `test_sns_filter_policy.py` (22 tests)
 
 ### 3.2 Non-Goals
@@ -125,7 +125,7 @@ With SNS implemented, the following common patterns work out of the box:
 8. **Data protection policies** -- accept `PutDataProtectionPolicy`/`GetDataProtectionPolicy`, store policy JSON, do not enforce content scanning
 9. **SMS sandbox management** -- accept SMS sandbox operations, return stub responses
 10. **Cross-account access** -- all topics exist within a single account context
-11. **Data persistence across restarts** -- in-memory only, matching all other RustStack services
+11. **Data persistence across restarts** -- in-memory only, matching all other Rustack services
 12. **Message delivery retry with backoff** -- for HTTP/HTTPS endpoints, attempt delivery once with a short timeout; do not implement the full exponential backoff retry policy
 13. **Subscription confirmation for SQS/Lambda** -- auto-confirm internal subscriptions (matching LocalStack behavior)
 
@@ -160,7 +160,7 @@ With SNS implemented, the following common patterns work out of the box:
       +--------+------+----+-------+---------+
                        |            |
                 +------+------+     |
-                | ruststack-  |     | SNS->SQS fan-out:
+                | rustack-  |     | SNS->SQS fan-out:
                 | core + auth |     | SNS Core calls SQS
                 +-------------+     | Core directly
                                     v
@@ -179,8 +179,8 @@ The critical design challenge is the cross-service fan-out. When SNS publishes a
 ```rust
 /// Trait for delivering messages to SQS queues.
 ///
-/// This abstraction decouples `ruststack-sns-core` from `ruststack-sqs-core`.
-/// In production, the implementation wraps `RustStackSqs::send_message()`.
+/// This abstraction decouples `rustack-sns-core` from `rustack-sqs-core`.
+/// In production, the implementation wraps `RustackSqs::send_message()`.
 /// In tests, a mock implementation captures delivered messages.
 #[async_trait]
 pub trait SqsPublisher: Send + Sync + 'static {
@@ -196,17 +196,17 @@ pub trait SqsPublisher: Send + Sync + 'static {
 }
 ```
 
-The server binary wires `RustStackSqs` into the `SqsPublisher` implementation at startup:
+The server binary wires `RustackSqs` into the `SqsPublisher` implementation at startup:
 
 ```rust
 /// Production SQS publisher that delegates to the SQS provider.
-pub struct RustStackSqsPublisher {
-    sqs: Arc<RustStackSqs>,
+pub struct RustackSqsPublisher {
+    sqs: Arc<RustackSqs>,
     config: SqsPublisherConfig,
 }
 
 #[async_trait]
-impl SqsPublisher for RustStackSqsPublisher {
+impl SqsPublisher for RustackSqsPublisher {
     async fn send_message(
         &self,
         queue_arn: &str,
@@ -264,37 +264,37 @@ SNS requests are distinguished from other services by their characteristics:
 ### 4.4 Crate Dependency Graph
 
 ```
-ruststack-server (app) <-- unified binary
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-{model,core,http}
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-sqs-{model,core,http}
-+-- ruststack-ssm-{model,core,http}
-+-- ruststack-sns-core       <-- NEW
-+-- ruststack-sns-http       <-- NEW
-+-- ruststack-sns-model      <-- NEW (auto-generated)
+rustack-server (app) <-- unified binary
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-{model,core,http}
++-- rustack-dynamodb-{model,core,http}
++-- rustack-sqs-{model,core,http}
++-- rustack-ssm-{model,core,http}
++-- rustack-sns-core       <-- NEW
++-- rustack-sns-http       <-- NEW
++-- rustack-sns-model      <-- NEW (auto-generated)
 
-ruststack-sns-http
-+-- ruststack-sns-model
-+-- ruststack-auth
+rustack-sns-http
++-- rustack-sns-model
++-- rustack-auth
 +-- quick-xml (XML response serialization)
 +-- serde_urlencoded (form request deserialization)
 
-ruststack-sns-core
-+-- ruststack-core
-+-- ruststack-sns-model
+rustack-sns-core
++-- rustack-core
++-- rustack-sns-model
 +-- dashmap
 +-- tokio
 +-- serde_json (for filter policy evaluation, message JSON wrapping)
 +-- regex (for filter policy pattern matching)
 
-ruststack-server (wiring layer)
-+-- ruststack-sns-core
-+-- ruststack-sqs-core       <-- for SqsPublisher integration
+rustack-server (wiring layer)
++-- rustack-sns-core
++-- rustack-sqs-core       <-- for SqsPublisher integration
 ```
 
-Note: `ruststack-sns-core` does NOT depend on `ruststack-sqs-core`. The `SqsPublisher` trait is defined in `ruststack-sns-core`, and the concrete implementation wrapping `RustStackSqs` lives in the server binary (or a thin integration crate). This keeps the dependency graph clean and testable.
+Note: `rustack-sns-core` does NOT depend on `rustack-sqs-core`. The `SqsPublisher` trait is defined in `rustack-sns-core`, and the concrete implementation wrapping `RustackSqs` lives in the server binary (or a thin integration crate). This keeps the dependency graph clean and testable.
 
 ---
 
@@ -598,7 +598,7 @@ pub struct MessageAttributeValue {
 ```makefile
 codegen-sns:
     @cd codegen && cargo run -- --service sns
-    @cargo +nightly fmt -p ruststack-sns-model
+    @cargo +nightly fmt -p rustack-sns-model
 
 codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-sns
 ```
@@ -607,10 +607,10 @@ codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-sns
 
 ## 7. Crate Structure
 
-### 7.1 `ruststack-sns-model` (auto-generated)
+### 7.1 `rustack-sns-model` (auto-generated)
 
 ```
-crates/ruststack-sns-model/
+crates/rustack-sns-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs                    # Module re-exports
@@ -641,15 +641,15 @@ crates/ruststack-sns-model/
 
 **Dependencies**: `serde`, `serde_json`
 
-### 7.2 `ruststack-sns-core`
+### 7.2 `rustack-sns-core`
 
 ```
-crates/ruststack-sns-core/
+crates/rustack-sns-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs                 # SnsConfig
-    +-- provider.rs               # RustStackSns (main provider, all operation handlers)
+    +-- provider.rs               # RustackSns (main provider, all operation handlers)
     +-- error.rs                  # SnsServiceError
     +-- publisher.rs              # SqsPublisher trait, HttpPublisher trait
     +-- state.rs                  # TopicStore (DashMap<topic_arn, TopicRecord>)
@@ -694,12 +694,12 @@ crates/ruststack-sns-core/
         +-- data_protection.rs    # Data protection policy operations
 ```
 
-**Dependencies**: `ruststack-core`, `ruststack-sns-model`, `dashmap`, `tokio`, `serde_json`, `regex`, `uuid`, `tracing`, `chrono`, `async-trait`
+**Dependencies**: `rustack-core`, `rustack-sns-model`, `dashmap`, `tokio`, `serde_json`, `regex`, `uuid`, `tracing`, `chrono`, `async-trait`
 
-### 7.3 `ruststack-sns-http`
+### 7.3 `rustack-sns-http`
 
 ```
-crates/ruststack-sns-http/
+crates/rustack-sns-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -716,7 +716,7 @@ crates/ruststack-sns-http/
     |   +-- params.rs             # Nested param parsing (Attributes.entry.1.key)
 ```
 
-**Dependencies**: `ruststack-sns-model`, `ruststack-auth`, `hyper`, `serde_urlencoded`, `quick-xml`, `bytes`, `uuid`
+**Dependencies**: `rustack-sns-model`, `rustack-auth`, `hyper`, `serde_urlencoded`, `quick-xml`, `bytes`, `uuid`
 
 ### 7.4 Workspace Changes
 
@@ -724,9 +724,9 @@ crates/ruststack-sns-http/
 # Root Cargo.toml
 [workspace.dependencies]
 # ... existing deps ...
-ruststack-sns-model = { path = "crates/ruststack-sns-model" }
-ruststack-sns-http = { path = "crates/ruststack-sns-http" }
-ruststack-sns-core = { path = "crates/ruststack-sns-core" }
+rustack-sns-model = { path = "crates/rustack-sns-model" }
+rustack-sns-http = { path = "crates/rustack-sns-http" }
+rustack-sns-core = { path = "crates/rustack-sns-core" }
 
 # Testing
 aws-sdk-sns = "1.x"
@@ -1224,7 +1224,7 @@ pub struct SnsMessageAttributeEnvelope {
 ```rust
 /// Main SNS provider. Owns all topic, subscription, and platform state.
 #[derive(Debug)]
-pub struct RustStackSns {
+pub struct RustackSns {
     /// Topic and subscription storage.
     topics: TopicStore,
     /// Platform application/endpoint storage.
@@ -1327,7 +1327,7 @@ pub struct RustStackSns {
 ### 10.3 CreateTopic Logic
 
 ```rust
-impl RustStackSns {
+impl RustackSns {
     pub fn create_topic(
         &self,
         input: CreateTopicInput,
@@ -1401,7 +1401,7 @@ impl RustStackSns {
 ### 10.4 Subscribe Logic
 
 ```rust
-impl RustStackSns {
+impl RustackSns {
     pub fn subscribe(
         &self,
         input: SubscribeInput,
@@ -1492,7 +1492,7 @@ impl RustStackSns {
 ### 10.5 Publish Logic (Fan-Out)
 
 ```rust
-impl RustStackSns {
+impl RustackSns {
     pub async fn publish(
         &self,
         input: PublishInput,
@@ -2037,14 +2037,14 @@ impl ServiceRouter for QueryServiceRouter {
 ### 12.2 Feature Gate
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack-server/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs", "ssm", "sns"]
-s3 = ["dep:ruststack-s3-core", "dep:ruststack-s3-http", "dep:ruststack-s3-model"]
-dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
-sqs = ["dep:ruststack-sqs-core", "dep:ruststack-sqs-http"]
-ssm = ["dep:ruststack-ssm-core", "dep:ruststack-ssm-http"]
-sns = ["dep:ruststack-sns-core", "dep:ruststack-sns-http", "sqs"]
+s3 = ["dep:rustack-s3-core", "dep:rustack-s3-http", "dep:rustack-s3-model"]
+dynamodb = ["dep:rustack-dynamodb-core", "dep:rustack-dynamodb-http"]
+sqs = ["dep:rustack-sqs-core", "dep:rustack-sqs-http"]
+ssm = ["dep:rustack-ssm-core", "dep:rustack-ssm-http"]
+sns = ["dep:rustack-sns-core", "dep:rustack-sns-http", "sqs"]
 ```
 
 Note: `sns` feature implies `sqs` because SNS-to-SQS fan-out requires the SQS provider.
@@ -2087,7 +2087,7 @@ The server binary creates the `SqsPublisher` bridge at startup:
 #[cfg(all(feature = "sns", feature = "sqs"))]
 {
     let sqs_provider = Arc::clone(&sqs_provider);
-    let sqs_publisher = Arc::new(RustStackSqsPublisher::new(
+    let sqs_publisher = Arc::new(RustackSqsPublisher::new(
         sqs_provider,
         SqsPublisherConfig {
             region: sns_config.default_region.clone(),
@@ -2097,7 +2097,7 @@ The server binary creates the `SqsPublisher` bridge at startup:
         },
     ));
 
-    let sns_provider = RustStackSns::new(
+    let sns_provider = RustackSns::new(
         sns_config.clone(),
         sqs_publisher,
         http_publisher,
@@ -2302,7 +2302,7 @@ The most comprehensive open-source SNS test suite. Already vendored at `vendors/
 
 - **Framework**: pytest with snapshot testing (`snapshot.match()`)
 
-**Adaptation strategy**: Same approach as SQS -- run the Python test suite against RustStack's SNS endpoint, track pass/fail counts, progressively fix failures.
+**Adaptation strategy**: Same approach as SQS -- run the Python test suite against Rustack's SNS endpoint, track pass/fail counts, progressively fix failures.
 
 ```makefile
 test-sns-localstack:
@@ -2330,7 +2330,7 @@ test-sns-filter-localstack:
   - `test_http_message_verification.py` -- HTTP subscription message signature verification
   - `test_server.py` -- server endpoint testing
   - `test_sns_cloudformation.py` -- CloudFormation integration (not applicable)
-- **Running**: Can be adapted to run against RustStack by pointing boto3 at our endpoint
+- **Running**: Can be adapted to run against Rustack by pointing boto3 at our endpoint
 
 Moto is the second-most comprehensive SNS mock after LocalStack. While it is primarily an in-process mock (not a server), its test cases document expected AWS behavior and can be ported to integration tests.
 
@@ -2399,7 +2399,7 @@ aws sqs delete-queue $ENDPOINT --queue-url "$QUEUE_URL"
 test-sns: test-sns-unit test-sns-integration
 
 test-sns-unit:
-    @cargo test -p ruststack-sns-model -p ruststack-sns-core -p ruststack-sns-http
+    @cargo test -p rustack-sns-model -p rustack-sns-core -p rustack-sns-http
 
 test-sns-integration:
     @cargo test -p integration-tests -- sns --ignored
@@ -2423,7 +2423,7 @@ test-sns-localstack:
 #### Step 0.1: Codegen Extension
 - Add `SnsServiceConfig` to codegen
 - Download SNS Smithy model JSON from `aws/api-models-aws`
-- Generate `ruststack-sns-model` crate (operations enum, input/output structs, error codes)
+- Generate `rustack-sns-model` crate (operations enum, input/output structs, error codes)
 - Generate serde derives with `#[serde(rename_all = "PascalCase")]`
 
 #### Step 0.2: HTTP Layer (awsQuery Protocol)
@@ -2445,8 +2445,8 @@ test-sns-localstack:
 - `Publish` (fan-out to SQS only, no filtering)
 
 #### Step 0.5: SQS Integration
-- Define `SqsPublisher` trait in `ruststack-sns-core`
-- Implement `RustStackSqsPublisher` in server binary wrapping `RustStackSqs`
+- Define `SqsPublisher` trait in `rustack-sns-core`
+- Implement `RustackSqsPublisher` in server binary wrapping `RustackSqs`
 - Implement SNS message envelope (JSON wrapping for SQS delivery)
 - Implement `RawMessageDelivery` attribute support
 - Wire SNS and SQS providers together in `main.rs`
@@ -2541,7 +2541,7 @@ test-sns-localstack:
 
 ### 15.4 Behavioral Differences
 
-| Behavior | AWS | LocalStack | RustStack | Justification |
+| Behavior | AWS | LocalStack | Rustack | Justification |
 |----------|-----|------------|-----------|---------------|
 | SQS subscription confirmation | Auto-confirmed | Auto-confirmed | Auto-confirmed | Standard for local dev |
 | HTTP subscription confirmation | Requires ConfirmSubscription | Sends POST, requires confirm | Phase 0: auto-confirm; Phase 2: proper flow | Simplify MVP |
@@ -2565,9 +2565,9 @@ Should we use Approach A (combined `QueryServiceRouter` for SNS+SQS) or Approach
 
 ### 16.2 SQS Publisher Trait Location
 
-Should the `SqsPublisher` trait live in `ruststack-sns-core` or in a shared `ruststack-core` crate?
+Should the `SqsPublisher` trait live in `rustack-sns-core` or in a shared `rustack-core` crate?
 
-**Recommendation**: Define in `ruststack-sns-core`. The trait is specific to SNS delivery semantics. If we later add other cross-service integrations (e.g., S3 event notifications to SNS), we can extract a shared trait then. YAGNI for now.
+**Recommendation**: Define in `rustack-sns-core`. The trait is specific to SNS delivery semantics. If we later add other cross-service integrations (e.g., S3 event notifications to SNS), we can extract a shared trait then. YAGNI for now.
 
 ### 16.3 HTTP Subscription Delivery in MVP
 

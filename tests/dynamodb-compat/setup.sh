@@ -81,7 +81,7 @@ for file in "${FILES[@]}"; do
 done
 
 # Copy our conftest.py and util.py into vendor/
-echo "  Installing RustStack conftest.py and util.py..."
+echo "  Installing Rustack conftest.py and util.py..."
 cp "${SCRIPT_DIR}/conftest.py" "${VENDOR_DIR}/conftest.py"
 cp "${SCRIPT_DIR}/util.py" "${VENDOR_DIR}/util.py"
 

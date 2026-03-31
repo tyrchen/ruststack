@@ -1,7 +1,7 @@
 # DynamoDB Integration Test Suites Research
 
 **Date:** 2026-03-01
-**Purpose:** Survey of available DynamoDB compatibility/conformance test suites and recommendations for adoption in RustStack, analogous to how MinIO Mint is used for S3 testing.
+**Purpose:** Survey of available DynamoDB compatibility/conformance test suites and recommendations for adoption in Rustack, analogous to how MinIO Mint is used for S3 testing.
 
 ---
 
@@ -16,8 +16,8 @@
 7. [pytest + boto3 Approach](#7-pytest--boto3-approach)
 8. [Rust aws-sdk-dynamodb Approach](#8-rust-aws-sdk-dynamodb-approach)
 9. [Comparison Matrix](#9-comparison-matrix)
-10. [How S3 Testing Is Set Up in RustStack (Current State)](#10-how-s3-testing-is-set-up-in-ruststack-current-state)
-11. [Recommendations for RustStack DynamoDB](#11-recommendations-for-ruststack-dynamodb)
+10. [How S3 Testing Is Set Up in Rustack (Current State)](#10-how-s3-testing-is-set-up-in-rustack-current-state)
+11. [Recommendations for Rustack DynamoDB](#11-recommendations-for-rustack-dynamodb)
 
 ---
 
@@ -78,7 +78,7 @@ The ScyllaDB Alternator project includes an extensive pytest + boto3 test suite 
 - **CORS**: Cross-origin request handling
 - **Error handling**: Comprehensive error code and message validation
 
-### How to Run Against RustStack
+### How to Run Against Rustack
 
 ```bash
 # Clone ScyllaDB repo (only need the test/alternator directory)
@@ -90,7 +90,7 @@ git sparse-checkout set test/alternator
 cd test/alternator
 pip install boto3 pytest
 
-# Run against RustStack
+# Run against Rustack
 pytest --url http://localhost:4566 -v
 
 # Run specific test files
@@ -368,7 +368,7 @@ async fn create_test_client() -> Client {
 
 ---
 
-## 10. How S3 Testing Is Set Up in RustStack (Current State)
+## 10. How S3 Testing Is Set Up in Rustack (Current State)
 
 For context, the existing S3 testing approach uses:
 
@@ -399,7 +399,7 @@ This pattern can be replicated for DynamoDB testing using the Alternator test su
 
 ---
 
-## 11. Recommendations for RustStack DynamoDB
+## 11. Recommendations for Rustack DynamoDB
 
 ### Recommended Multi-Layer Testing Strategy
 
@@ -441,12 +441,12 @@ alternator-tests-setup:
 dynamodb-test: dynamodb-test-start dynamodb-test-run
 
 dynamodb-test-start: mint-build
-	@echo "Starting RustStack server..."
+	@echo "Starting Rustack server..."
 	@ACCESS_KEY=test SECRET_KEY=test \
 		DYNAMODB_SKIP_SIGNATURE_VALIDATION=false \
 		GATEWAY_LISTEN=0.0.0.0:4566 \
 		LOG_LEVEL=warn \
-		cargo run --release -p ruststack-server &
+		cargo run --release -p rustack-server &
 	@# Wait for server...
 
 dynamodb-test-run: alternator-tests-setup
@@ -502,7 +502,7 @@ PR Checks (fast feedback):
   - cargo clippy, cargo fmt
 
 Merge / Nightly (thorough validation):
-  - Start ruststack-server
+  - Start rustack-server
   - Run Alternator tests (Tier 2) -- selective subset initially
   - Upload test artifacts (pytest output, pass/fail counts)
 ```

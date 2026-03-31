@@ -54,7 +54,7 @@ fn main() -> Result<()> {
     let output_dir = output_dir_arg.map_or_else(
         || {
             args.get(2).filter(|a| !a.starts_with("--")).map_or_else(
-                || PathBuf::from("../crates/ruststack-s3-model/src"),
+                || PathBuf::from("../crates/rustack-s3-model/src"),
                 PathBuf::from,
             )
         },

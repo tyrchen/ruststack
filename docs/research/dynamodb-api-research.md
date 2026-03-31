@@ -21,7 +21,7 @@
 12. [DynamoDB Local (AWS Official) Limitations](#12-dynamodb-local-aws-official-limitations)
 13. [Existing Implementations](#13-existing-implementations)
 14. [Implementation Priority Matrix](#14-implementation-priority-matrix)
-15. [Architecture Considerations for RustStack](#15-architecture-considerations-for-ruststack)
+15. [Architecture Considerations for Rustack](#15-architecture-considerations-for-rustack)
 
 ---
 
@@ -688,7 +688,7 @@ This is already supported by smithy-rs server codegen (see `smithy-rs-server-cod
 
 ### 9.3 Code Generation Approach
 
-The existing RustStack S3 implementation uses a custom codegen approach (see `/codegen/`) that generates Rust types from the S3 Smithy model JSON AST. For DynamoDB, we have two options:
+The existing Rustack S3 implementation uses a custom codegen approach (see `/codegen/`) that generates Rust types from the S3 Smithy model JSON AST. For DynamoDB, we have two options:
 
 **Option A: Extend the existing custom codegen** to handle `@awsJson1_0` protocol models. Since DynamoDB uses JSON (not XML), the serialization/deserialization is simpler than S3.
 
@@ -742,18 +742,18 @@ The DynamoDB model defines these important shapes (among hundreds):
 | **Schema** | Schemaless blobs | Semi-structured (key schema defined, attributes flexible) |
 | **Max object/item** | 5 TB (multipart) | 400 KB |
 
-### 10.1 Implications for RustStack Architecture
+### 10.1 Implications for Rustack Architecture
 
-**Shared components (`ruststack-core`, `ruststack-auth`):**
+**Shared components (`rustack-core`, `rustack-auth`):**
 - Account/region state management: reusable as-is
 - SigV4 authentication: reusable as-is (DynamoDB uses only SigV4, no SigV2)
 - SigV2 support: not needed for DynamoDB
 
 **New DynamoDB-specific crates needed:**
-- `ruststack-dynamodb-model`: Generated types from Smithy model
-- `ruststack-dynamodb-core`: Business logic (table management, item storage, indexes, expressions)
-- `ruststack-dynamodb-http`: HTTP routing, JSON codec, service layer
-- No XML crate needed (unlike `ruststack-s3-xml`)
+- `rustack-dynamodb-model`: Generated types from Smithy model
+- `rustack-dynamodb-core`: Business logic (table management, item storage, indexes, expressions)
+- `rustack-dynamodb-http`: HTTP routing, JSON codec, service layer
+- No XML crate needed (unlike `rustack-s3-xml`)
 
 **Simpler aspects vs S3:**
 - No virtual-host vs path-style routing ambiguity
@@ -903,13 +903,13 @@ Everything else: Backups, PITR, Global Tables, Kinesis, Export/Import, Resource 
 
 ---
 
-## 15. Architecture Considerations for RustStack
+## 15. Architecture Considerations for Rustack
 
 ### 15.1 Proposed Crate Structure
 
 ```
-ruststack-dynamodb-model/     # Generated types from Smithy model (JSON serde)
-ruststack-dynamodb-core/      # Business logic
+rustack-dynamodb-model/     # Generated types from Smithy model (JSON serde)
+rustack-dynamodb-core/      # Business logic
   - table/                    # Table management, schema validation
   - item/                     # Item storage, type validation
   - index/                    # GSI/LSI maintenance and querying
@@ -924,7 +924,7 @@ ruststack-dynamodb-core/      # Business logic
   - batch/                    # Batch operations
   - transaction/              # Transaction support
   - ttl/                      # TTL management
-ruststack-dynamodb-http/      # HTTP layer
+rustack-dynamodb-http/      # HTTP layer
   - router.rs                 # X-Amz-Target dispatch (much simpler than S3)
   - codec.rs                  # JSON codec (serde_json, trivial vs XML)
   - service.rs                # Tower service
@@ -972,7 +972,7 @@ Consider using a parser combinator library like `winnow` or `nom` for expression
 
 ### 15.5 Advantages of Rust Implementation Over DynamoDB Local
 
-| Aspect | DynamoDB Local (Java) | RustStack (Rust) |
+| Aspect | DynamoDB Local (Java) | Rustack (Rust) |
 |--------|----------------------|------------------|
 | Startup time | Seconds (JVM warmup) | Milliseconds |
 | Memory usage | High (JVM overhead) | Low |

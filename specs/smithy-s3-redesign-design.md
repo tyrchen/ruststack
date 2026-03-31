@@ -1,4 +1,4 @@
-# RustStack S3: Smithy-Based Redesign (Replacing s3s)
+# Rustack S3: Smithy-Based Redesign (Replacing s3s)
 
 **Date:** 2026-02-27
 **Status:** Draft / RFC
@@ -66,7 +66,7 @@ A **hybrid approach**:
 - **Build our own XML serialization** using `quick-xml`, guided by the Smithy model's HTTP binding traits
 - **Build our own SigV4 auth** for request signature verification
 - **Build our own virtual hosting** for bucket name extraction from Host headers
-- **Keep all business logic** from the current `ruststack-s3-core` (state, storage, checksums, cors, etc.)
+- **Keep all business logic** from the current `rustack-s3-core` (state, storage, checksums, cors, etc.)
 
 ---
 
@@ -110,7 +110,7 @@ AWS SDK / CLI
                │ S3Request<Input>
                ▼
 ┌─────────────────────────────────────────────┐
-│  RustStackS3 (impl s3s::S3)                │
+│  RustackS3 (impl s3s::S3)                │
 │  - 60+ operation handlers                   │
 │  - State management (DashMap)               │
 │  - Storage backend (InMemory)               │
@@ -125,7 +125,7 @@ AWS SDK / CLI
      │ HTTP :4566
      ▼
 ┌─────────────────────────────────────────────┐
-│  ruststack-s3-http (WE OWN)                │
+│  rustack-s3-http (WE OWN)                │
 │  ┌────────────────────────────────────────┐ │
 │  │ hyper Server + tower Middleware        │ │
 │  │ ┌──────┐ ┌──────┐ ┌──────┐ ┌───────┐ │ │
@@ -149,7 +149,7 @@ AWS SDK / CLI
                          │ S3Operation<Input>
                          ▼
 ┌─────────────────────────────────────────────┐
-│  ruststack-s3-core (MOSTLY UNCHANGED)       │
+│  rustack-s3-core (MOSTLY UNCHANGED)       │
 │  ┌────────────────────────────────────────┐ │
 │  │ Operation Dispatch                    │ │
 │  │ - Typed handler per operation         │ │
@@ -323,7 +323,7 @@ use tower::ServiceBuilder;
 #[derive(Clone)]
 pub struct S3HttpService {
     router: S3Router,
-    provider: Arc<RustStackS3>,
+    provider: Arc<RustackS3>,
     config: Arc<S3Config>,
 }
 
@@ -907,7 +907,7 @@ localstack-rs/
 ├── rust-toolchain.toml
 │
 ├── crates/
-│   ├── ruststack-core/              # UNCHANGED - Core types, AccountRegionStore
+│   ├── rustack-core/              # UNCHANGED - Core types, AccountRegionStore
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── config.rs
@@ -915,7 +915,7 @@ localstack-rs/
 │   │       ├── state.rs
 │   │       └── types.rs
 │   │
-│   ├── ruststack-s3-model/          # NEW - Generated S3 types from Smithy model
+│   ├── rustack-s3-model/          # NEW - Generated S3 types from Smithy model
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs               # Re-exports
@@ -935,7 +935,7 @@ localstack-rs/
 │   │       │   └── config.rs
 │   │       └── error.rs             # S3ErrorCode, S3Error
 │   │
-│   ├── ruststack-s3-xml/            # NEW - S3 XML serialization/deserialization
+│   ├── rustack-s3-xml/            # NEW - S3 XML serialization/deserialization
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
@@ -943,7 +943,7 @@ localstack-rs/
 │   │       ├── deserialize.rs       # XML → Struct
 │   │       └── traits.rs            # S3Serialize, S3Deserialize traits
 │   │
-│   ├── ruststack-s3-auth/           # NEW - SigV4 authentication
+│   ├── rustack-s3-auth/           # NEW - SigV4 authentication
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
@@ -952,7 +952,7 @@ localstack-rs/
 │   │       ├── canonical.rs         # Canonical request construction
 │   │       └── credentials.rs       # Credential provider trait
 │   │
-│   ├── ruststack-s3-http/           # NEW - S3 HTTP layer (routing, middleware)
+│   ├── rustack-s3-http/           # NEW - S3 HTTP layer (routing, middleware)
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
@@ -968,11 +968,11 @@ localstack-rs/
 │   │           ├── trace.rs         # Request tracing
 │   │           └── request_id.rs    # x-amz-request-id generation
 │   │
-│   ├── ruststack-s3-core/           # REFACTORED - Business logic (no s3s dependency)
-│   │   ├── Cargo.toml               # Remove s3s, s3s-aws; add ruststack-s3-model
+│   ├── rustack-s3-core/           # REFACTORED - Business logic (no s3s dependency)
+│   │   ├── Cargo.toml               # Remove s3s, s3s-aws; add rustack-s3-model
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── provider.rs          # RustStackS3 (same struct, new trait impls)
+│   │       ├── provider.rs          # RustackS3 (same struct, new trait impls)
 │   │       ├── ops/                 # REFACTORED - Use our types instead of s3s types
 │   │       │   ├── mod.rs           # No longer `impl s3s::S3`; uses our dispatch
 │   │       │   ├── bucket.rs        # handle_create_bucket(CreateBucketInput) → ...
@@ -989,10 +989,10 @@ localstack-rs/
 │   │       ├── utils.rs             # UNCHANGED
 │   │       └── error.rs             # REFACTORED - Use S3Error from s3-model
 │   │
-│   └── ruststack-core/              # UNCHANGED
+│   └── rustack-core/              # UNCHANGED
 │
 ├── apps/
-│   └── ruststack-s3-server/         # REFACTORED - Use new HTTP layer
+│   └── rustack-s3-server/         # REFACTORED - Use new HTTP layer
 │       ├── Cargo.toml
 │       └── src/
 │           └── main.rs              # Uses S3HttpService instead of s3s
@@ -1012,16 +1012,16 @@ localstack-rs/
 ### 10.1 Dependency Graph
 
 ```
-ruststack-s3-server (binary)
-├── ruststack-s3-http
-│   ├── ruststack-s3-core
-│   │   ├── ruststack-s3-model      (generated types)
-│   │   ├── ruststack-core           (AccountRegionStore, etc.)
+rustack-s3-server (binary)
+├── rustack-s3-http
+│   ├── rustack-s3-core
+│   │   ├── rustack-s3-model      (generated types)
+│   │   ├── rustack-core           (AccountRegionStore, etc.)
 │   │   └── (crypto, dashmap, etc.)
-│   ├── ruststack-s3-model
-│   ├── ruststack-s3-xml
-│   │   └── ruststack-s3-model
-│   ├── ruststack-s3-auth
+│   ├── rustack-s3-model
+│   ├── rustack-s3-xml
+│   │   └── rustack-s3-model
+│   ├── rustack-s3-auth
 │   │   └── (hmac, sha2, etc.)
 │   ├── hyper, hyper-util, tower
 │   └── tracing
@@ -1043,7 +1043,7 @@ ruststack-s3-server (binary)
 | Request validation (bucket names, keys) | `s3-core/src/validation.rs` | **None** - pure validation functions |
 | Utility functions (ETags, version IDs) | `s3-core/src/utils.rs` | **None** |
 | Configuration (S3Config, env vars) | `s3-core/src/config.rs` | **None** |
-| Core types (AccountRegionStore) | `ruststack-core/` | **None** |
+| Core types (AccountRegionStore) | `rustack-core/` | **None** |
 | Operation handler logic | `s3-core/src/ops/*.rs` | **Signature changes** - swap s3s types for our generated types |
 | Integration tests | `tests/integration/` | **None** - test against HTTP API, not internal types |
 | CI workflows | `.github/workflows/` | **None** |
@@ -1058,7 +1058,7 @@ Each operation handler changes from:
 use s3s::dto::*;
 use s3s::{S3Request, S3Response, S3Result};
 
-impl RustStackS3 {
+impl RustackS3 {
     pub(crate) async fn handle_create_bucket(
         &self,
         req: S3Request<CreateBucketInput>,
@@ -1076,11 +1076,11 @@ To:
 
 ```rust
 // AFTER (our types)
-use ruststack_s3_model::input::CreateBucketInput;
-use ruststack_s3_model::output::CreateBucketOutput;
-use ruststack_s3_model::error::S3Error;
+use rustack_s3_model::input::CreateBucketInput;
+use rustack_s3_model::output::CreateBucketOutput;
+use rustack_s3_model::error::S3Error;
 
-impl RustStackS3 {
+impl RustackS3 {
     pub(crate) async fn handle_create_bucket(
         &self,
         input: CreateBucketInput,
@@ -1101,15 +1101,15 @@ The **business logic inside each handler stays the same**. Only the type imports
 | Component | Crate | Estimated LOC | Complexity |
 |-----------|-------|--------------|------------|
 | Smithy JSON → Rust type codegen tool | `codegen/` | 1,500-2,000 | Medium |
-| S3 operation types (generated) | `ruststack-s3-model/` | ~5,000 (generated) | Low (automated) |
-| XML serialization (generated + manual) | `ruststack-s3-xml/` | ~2,000 | Medium |
-| SigV4 authentication | `ruststack-s3-auth/` | ~800 | Medium |
-| HTTP router + virtual hosting | `ruststack-s3-http/router.rs` | ~400 | Medium |
-| HTTP service (dispatch, middleware) | `ruststack-s3-http/service.rs` | ~500 | Medium |
-| Request deserialization (per-operation) | `ruststack-s3-http/request.rs` | ~2,000 (generated) | Medium |
-| Response serialization (per-operation) | `ruststack-s3-http/response.rs` | ~1,500 (generated) | Medium |
-| S3 error formatting | `ruststack-s3-model/error.rs` | ~300 | Low |
-| Response body type | `ruststack-s3-http/body.rs` | ~150 | Low |
+| S3 operation types (generated) | `rustack-s3-model/` | ~5,000 (generated) | Low (automated) |
+| XML serialization (generated + manual) | `rustack-s3-xml/` | ~2,000 | Medium |
+| SigV4 authentication | `rustack-s3-auth/` | ~800 | Medium |
+| HTTP router + virtual hosting | `rustack-s3-http/router.rs` | ~400 | Medium |
+| HTTP service (dispatch, middleware) | `rustack-s3-http/service.rs` | ~500 | Medium |
+| Request deserialization (per-operation) | `rustack-s3-http/request.rs` | ~2,000 (generated) | Medium |
+| Response serialization (per-operation) | `rustack-s3-http/response.rs` | ~1,500 (generated) | Medium |
+| S3 error formatting | `rustack-s3-model/error.rs` | ~300 | Low |
+| Response body type | `rustack-s3-http/body.rs` | ~150 | Low |
 | **Total new code** | | **~14,000** | |
 
 Of this, ~8,500 LOC is auto-generated by our codegen tool.
@@ -1125,16 +1125,16 @@ Of this, ~8,500 LOC is auto-generated by our codegen tool.
 1. **Create `codegen/` tool**
    - Build the Smithy JSON parser in Rust
    - Download the S3 Smithy model from `aws/api-models-aws`
-   - Generate `ruststack-s3-model` crate with all S3 types
+   - Generate `rustack-s3-model` crate with all S3 types
    - Verify generated types compile
 
-2. **Create `ruststack-s3-model` crate**
+2. **Create `rustack-s3-model` crate**
    - Commit generated types
    - Add `S3Operation` enum
    - Add `S3ErrorCode` and `S3Error` types
    - Write unit tests for key types
 
-3. **Create `ruststack-s3-auth` crate**
+3. **Create `rustack-s3-auth` crate**
    - Implement SigV4 signature verification
    - Implement presigned URL verification
    - Write unit tests with known test vectors from AWS docs
@@ -1143,13 +1143,13 @@ Of this, ~8,500 LOC is auto-generated by our codegen tool.
 
 **Goal**: Build the HTTP routing, serialization, and service layer.
 
-4. **Create `ruststack-s3-xml` crate**
+4. **Create `rustack-s3-xml` crate**
    - Implement `S3Serialize` and `S3Deserialize` traits
    - Implement XML serialization for all output types
    - Implement XML deserialization for all input types with XML bodies
    - Write unit tests against AWS SDK request/response samples
 
-5. **Create `ruststack-s3-http` crate**
+5. **Create `rustack-s3-http` crate**
    - Implement `S3Router` (virtual hosting + operation identification)
    - Implement `S3HttpService` (hyper Service)
    - Implement `FromS3Request` for all operations (header/query/path/body extraction)
@@ -1159,18 +1159,18 @@ Of this, ~8,500 LOC is auto-generated by our codegen tool.
 
 ### Phase 3: Core Refactoring (Week 5-6)
 
-**Goal**: Update `ruststack-s3-core` to use our types instead of s3s types.
+**Goal**: Update `rustack-s3-core` to use our types instead of s3s types.
 
-6. **Refactor `ruststack-s3-core`**
+6. **Refactor `rustack-s3-core`**
    - Remove `s3s` and `s3s-aws` dependencies from `Cargo.toml`
-   - Add `ruststack-s3-model` dependency
+   - Add `rustack-s3-model` dependency
    - Update all `ops/*.rs` handler signatures (mechanical: swap type imports)
    - Update `provider.rs` (remove `impl s3s::S3`, add operation dispatch)
    - Verify all 242 unit tests pass with new types
 
-7. **Refactor `ruststack-s3-server` (main.rs)**
+7. **Refactor `rustack-s3-server` (main.rs)**
    - Remove s3s service builder code
-   - Use `S3HttpService` from `ruststack-s3-http`
+   - Use `S3HttpService` from `rustack-s3-http`
    - Keep health check logic
    - Verify server starts and accepts requests
 
@@ -1201,9 +1201,9 @@ Of this, ~8,500 LOC is auto-generated by our codegen tool.
     generate-s3-types:
         cd codegen && cargo run -- \
             --model smithy-model/s3.json \
-            --output ../crates/ruststack-s3-model/src/ \
-            --xml-output ../crates/ruststack-s3-xml/src/ \
-            --http-output ../crates/ruststack-s3-http/src/
+            --output ../crates/rustack-s3-model/src/ \
+            --xml-output ../crates/rustack-s3-xml/src/ \
+            --http-output ../crates/rustack-s3-http/src/
         cargo +nightly fmt
     ```
 

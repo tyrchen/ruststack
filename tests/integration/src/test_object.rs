@@ -13,7 +13,7 @@ mod tests {
         let client = s3_client();
         let bucket = create_test_bucket(&client, "putget").await;
 
-        let body = b"hello, ruststack!";
+        let body = b"hello, rustack!";
         client
             .put_object()
             .bucket(&bucket)

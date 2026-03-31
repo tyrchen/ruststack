@@ -68,15 +68,15 @@ jobs:
           context: .
           push: false
           load: true
-          tags: ruststack:ci
+          tags: rustack:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Verify Docker image starts and passes health check
         run: |
-          docker run -d --name ruststack-ci \
+          docker run -d --name rustack-ci \
             -p 4566:4566 \
-            ruststack:ci
+            rustack:ci
 
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then
@@ -85,7 +85,7 @@ jobs:
             fi
             if [ "$i" -eq 30 ]; then
               echo "::error::Docker container did not become healthy within 30s"
-              docker logs ruststack-ci
+              docker logs rustack-ci
               exit 1
             fi
             sleep 1
@@ -104,8 +104,8 @@ jobs:
           fi
 
       - name: Print Docker image size
-        run: docker images ruststack:ci --format '{{.Size}}'
+        run: docker images rustack:ci --format '{{.Size}}'
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack-ci 2>/dev/null || true
+        run: docker rm -f rustack-ci 2>/dev/null || true

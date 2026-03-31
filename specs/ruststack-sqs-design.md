@@ -1,9 +1,9 @@
-# RustStack SQS: Native Rust Implementation Design
+# Rustack SQS: Native Rust Implementation Design
 
 **Date:** 2026-03-02
 **Status:** Draft / RFC
-**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-dynamodb-design.md](./ruststack-dynamodb-design.md), [SQS API Research](../docs/research/sqs-api-research.md)
-**Scope:** Add native SQS support to RustStack using the same Smithy-based codegen approach as DynamoDB, with an actor-based in-memory message queue engine (no ElasticMQ/GoAWS wrapping).
+**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-dynamodb-design.md](./rustack-dynamodb-design.md), [SQS API Research](../docs/research/sqs-api-research.md)
+**Scope:** Add native SQS support to Rustack using the same Smithy-based codegen approach as DynamoDB, with an actor-based in-memory message queue engine (no ElasticMQ/GoAWS wrapping).
 
 ---
 
@@ -30,13 +30,13 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding SQS support to RustStack as a fully native Rust implementation, following the same architectural patterns established by S3 and DynamoDB. Key design decisions:
+This spec proposes adding SQS support to Rustack as a fully native Rust implementation, following the same architectural patterns established by S3 and DynamoDB. Key design decisions:
 
 - **Native Rust message queue engine** -- unlike LocalStack which wraps ElasticMQ (a Scala/Pekko application), we build a purpose-built in-memory queue engine with actor-per-queue concurrency. This maintains the ~10MB Docker image and millisecond startup.
-- **Smithy codegen reuse** -- extend the existing `codegen/` system to generate SQS model types from the official AWS SQS Smithy JSON AST (`aws/api-models-aws`), producing a `ruststack-sqs-model` crate.
+- **Smithy codegen reuse** -- extend the existing `codegen/` system to generate SQS model types from the official AWS SQS Smithy JSON AST (`aws/api-models-aws`), producing a `rustack-sqs-model` crate.
 - **JSON protocol with awsQuery backward compatibility** -- SQS uses `awsJson1_0` with the `awsQueryCompatible` trait, identical dispatch pattern to DynamoDB (HTTP POST with `X-Amz-Target: AmazonSQS.*`). Legacy SDKs send `application/x-www-form-urlencoded` with `Action=` parameter; we must support both.
 - **Actor-based concurrency** -- each queue runs as an independent actor owning its message state, communicating via `tokio::sync::mpsc` channels. Long-polling consumers wait on `tokio::sync::Notify`. This follows the actor model mandated by CLAUDE.md.
-- **Shared infrastructure** -- reuse `ruststack-core` (multi-account/region state), `ruststack-auth` (SigV4 verification), and the DynamoDB-established `awsJson1_0` HTTP layer patterns unchanged.
+- **Shared infrastructure** -- reuse `rustack-core` (multi-account/region state), `rustack-auth` (SigV4 verification), and the DynamoDB-established `awsJson1_0` HTTP layer patterns unchanged.
 - **Phased delivery** -- 4 phases from MVP (9 operations, standard queues, short polling) to full feature parity including FIFO queues, DLQ redrive, and awsQuery protocol support.
 
 ---
@@ -96,7 +96,7 @@ A native Rust implementation provides:
 | GoAWS | Go | ~30MB | No | No | Lightweight but incomplete |
 | LocalStack SQS | Python+ElasticMQ | ~1GB | Yes | Yes | Wraps ElasticMQ, adds multi-account |
 | fake_sqs | Ruby | ~200MB | No | No | Abandoned, incomplete |
-| **RustStack SQS** | **Rust** | **~10MB** | **Yes** | **Yes** | **This proposal** |
+| **Rustack SQS** | **Rust** | **~10MB** | **Yes** | **Yes** | **This proposal** |
 
 No existing Rust-based SQS emulator exists. This would be the first.
 
@@ -114,7 +114,7 @@ No existing Rust-based SQS emulator exists. This would be the first.
 6. **Long polling** -- hold HTTP connections and wake on message arrival or timeout
 7. **FIFO queues** -- strict ordering within message groups, exactly-once deduplication
 8. **Same Docker image** -- single binary serves S3, DynamoDB, and SQS on the same port (4566)
-9. **GitHub Action compatibility** -- extend the existing `tyrchen/ruststack` GitHub Action
+9. **GitHub Action compatibility** -- extend the existing `tyrchen/rustack` GitHub Action
 10. **Pass LocalStack SQS test suite** -- validate against vendored `test_sqs.py`
 
 ### 3.2 Non-Goals
@@ -158,8 +158,8 @@ No existing Rust-based SQS emulator exists. This would be the first.
          +-------------+------------+                   |
                        v                                |
               +-----------------+                       |
-              | ruststack-core  |  <-- Shared: multi-account/region
-              | ruststack-auth  |  <-- Shared: SigV4 authentication
+              | rustack-core  |  <-- Shared: multi-account/region
+              | rustack-auth  |  <-- Shared: SigV4 authentication
               +-----------------+
 ```
 
@@ -184,31 +184,31 @@ SQS, DynamoDB, and S3 are distinguishable by their request signatures:
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app) <-- unified binary
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-core
-+-- ruststack-s3-http
-+-- ruststack-s3-model
-+-- ruststack-dynamodb-core
-+-- ruststack-dynamodb-http
-+-- ruststack-dynamodb-model
-+-- ruststack-sqs-core       <-- NEW
-+-- ruststack-sqs-http       <-- NEW
-+-- ruststack-sqs-model      <-- NEW (auto-generated)
+rustack-server (app) <-- unified binary
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-core
++-- rustack-s3-http
++-- rustack-s3-model
++-- rustack-dynamodb-core
++-- rustack-dynamodb-http
++-- rustack-dynamodb-model
++-- rustack-sqs-core       <-- NEW
++-- rustack-sqs-http       <-- NEW
++-- rustack-sqs-model      <-- NEW (auto-generated)
 
-ruststack-sqs-http
-+-- ruststack-sqs-model
-+-- ruststack-auth
+rustack-sqs-http
++-- rustack-sqs-model
++-- rustack-auth
 
-ruststack-sqs-core
-+-- ruststack-core
-+-- ruststack-sqs-model
-+-- ruststack-auth
+rustack-sqs-core
++-- rustack-core
++-- rustack-sqs-model
++-- rustack-auth
 +-- tokio (channels, Notify, timers)
 +-- dashmap
 
-ruststack-sqs-model (auto-generated, standalone)
+rustack-sqs-model (auto-generated, standalone)
 ```
 
 ---
@@ -436,7 +436,7 @@ pub struct SendMessageOutput {
 ```makefile
 codegen-sqs:
     @cd codegen && cargo run -- --service sqs
-    @cargo +nightly fmt -p ruststack-sqs-model
+    @cargo +nightly fmt -p rustack-sqs-model
 
 codegen: codegen-s3 codegen-dynamodb codegen-sqs
 ```
@@ -447,10 +447,10 @@ codegen: codegen-s3 codegen-dynamodb codegen-sqs
 
 ### 7.1 New Crates
 
-#### `ruststack-sqs-model` (auto-generated)
+#### `rustack-sqs-model` (auto-generated)
 
 ```
-crates/ruststack-sqs-model/
+crates/rustack-sqs-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs                    # Module re-exports
@@ -479,10 +479,10 @@ crates/ruststack-sqs-model/
 
 **Dependencies**: `serde`, `serde_json`, `bytes`, `http`
 
-#### `ruststack-sqs-http`
+#### `rustack-sqs-http`
 
 ```
-crates/ruststack-sqs-http/
+crates/rustack-sqs-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -499,17 +499,17 @@ crates/ruststack-sqs-http/
     +-- body.rs                   # Response body type
 ```
 
-**Dependencies**: `ruststack-sqs-model`, `ruststack-auth`, `hyper`, `serde_json`, `serde_urlencoded`, `quick-xml`, `bytes`
+**Dependencies**: `rustack-sqs-model`, `rustack-auth`, `hyper`, `serde_json`, `serde_urlencoded`, `quick-xml`, `bytes`
 
-#### `ruststack-sqs-core`
+#### `rustack-sqs-core`
 
 ```
-crates/ruststack-sqs-core/
+crates/rustack-sqs-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs                 # SqsConfig
-    +-- provider.rs               # RustStackSqs (main provider, QueueManager actor)
+    +-- provider.rs               # RustackSqs (main provider, QueueManager actor)
     +-- error.rs                  # SqsServiceError
     +-- queue/
     |   +-- mod.rs
@@ -545,7 +545,7 @@ crates/ruststack-sqs-core/
         +-- dlq.rs                # ListDeadLetterSourceQueues, message move task ops
 ```
 
-**Dependencies**: `ruststack-core`, `ruststack-sqs-model`, `tokio` (mpsc, Notify, time, sync), `dashmap`, `uuid`, `md-5`, `sha2`, `tracing`, `chrono`
+**Dependencies**: `rustack-core`, `rustack-sqs-model`, `tokio` (mpsc, Notify, time, sync), `dashmap`, `uuid`, `md-5`, `sha2`, `tracing`, `chrono`
 
 ### 7.2 Workspace Changes
 
@@ -553,9 +553,9 @@ crates/ruststack-sqs-core/
 # Root Cargo.toml
 [workspace.dependencies]
 # ... existing deps ...
-ruststack-sqs-model = { path = "crates/ruststack-sqs-model" }
-ruststack-sqs-http = { path = "crates/ruststack-sqs-http" }
-ruststack-sqs-core = { path = "crates/ruststack-sqs-core" }
+rustack-sqs-model = { path = "crates/rustack-sqs-model" }
+rustack-sqs-http = { path = "crates/rustack-sqs-http" }
+rustack-sqs-core = { path = "crates/rustack-sqs-core" }
 quick-xml = "0.37"
 serde_urlencoded = "0.7"
 md-5 = "0.10"
@@ -1019,7 +1019,7 @@ Default queue URL example: `http://localhost:4566/000000000000/my-queue`.
 
 ```rust
 /// Main SQS provider. Acts as the QueueManager actor that owns all queue actors.
-pub struct RustStackSqs {
+pub struct RustackSqs {
     /// Queue registry: queue_name -> (QueueHandle, QueueMetadata).
     queues: DashMap<String, QueueHandle>,
     /// Configuration.
@@ -1105,7 +1105,7 @@ pub struct QueueMetadata {
 ### 10.3 CreateQueue Logic
 
 ```rust
-impl RustStackSqs {
+impl RustackSqs {
     pub async fn create_queue(
         &self,
         input: CreateQueueInput,
@@ -1611,12 +1611,12 @@ mod sqs_router {
 ### 12.2 Feature Gate
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack-server/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs"]
-s3 = ["dep:ruststack-s3-core", "dep:ruststack-s3-http", "dep:ruststack-s3-model"]
-dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
-sqs = ["dep:ruststack-sqs-core", "dep:ruststack-sqs-http"]
+s3 = ["dep:rustack-s3-core", "dep:rustack-s3-http", "dep:rustack-s3-model"]
+dynamodb = ["dep:rustack-dynamodb-core", "dep:rustack-dynamodb-http"]
+sqs = ["dep:rustack-sqs-core", "dep:rustack-sqs-http"]
 ```
 
 ### 12.3 Gateway Registration Order
@@ -1777,7 +1777,7 @@ The most comprehensive open-source SQS test suite. Already vendored at `vendors/
 - **`test_sqs_move_task.py`** -- message move task operation tests
 - **Framework**: pytest with snapshot testing
 
-Adaptation strategy: same approach as DynamoDB -- run the Python test suite against RustStack's SQS endpoint, track pass/fail counts, progressively fix failures.
+Adaptation strategy: same approach as DynamoDB -- run the Python test suite against Rustack's SQS endpoint, track pass/fail counts, progressively fix failures.
 
 ```makefile
 test-sqs-localstack:
@@ -1827,7 +1827,7 @@ aws sqs delete-queue $ENDPOINT --queue-url "$QUEUE_URL"
 test-sqs: test-sqs-unit test-sqs-integration
 
 test-sqs-unit:
-    @cargo test -p ruststack-sqs-model -p ruststack-sqs-core -p ruststack-sqs-http
+    @cargo test -p rustack-sqs-model -p rustack-sqs-core -p rustack-sqs-http
 
 test-sqs-integration:
     @cargo test -p integration-tests -- sqs --ignored
@@ -1851,7 +1851,7 @@ test-sqs-localstack:
 #### Step 0.1: Codegen Extension
 - Add `SqsServiceConfig` to codegen `services/` module
 - Download SQS Smithy model JSON from `aws/api-models-aws`
-- Generate `ruststack-sqs-model` crate (operations enum, input/output structs, error codes)
+- Generate `rustack-sqs-model` crate (operations enum, input/output structs, error codes)
 - Generate serde derives with `#[serde(rename_all = "PascalCase")]`
 
 #### Step 0.2: HTTP Layer (JSON Protocol Only)
@@ -1952,7 +1952,7 @@ test-sqs-localstack:
 
 Our implementation will intentionally differ from ElasticMQ and LocalStack in some areas:
 
-| Behavior | ElasticMQ | LocalStack | RustStack | Justification |
+| Behavior | ElasticMQ | LocalStack | Rustack | Justification |
 |----------|-----------|------------|-----------|---------------|
 | Queue URL format | `http://host:port/queue/name` | `http://host:port/acct/name` | `http://host:port/acct/name` | Match LocalStack/AWS convention |
 | Error message text | Custom messages | Custom messages | Match AWS messages | Better SDK compatibility |
@@ -2042,7 +2042,7 @@ SQS is simpler than DynamoDB primarily because there is no expression language. 
 
 ## Appendix C: SQS Constraints and Limits
 
-| Resource | Limit | Enforced in RustStack? |
+| Resource | Limit | Enforced in Rustack? |
 |----------|-------|----------------------|
 | Max message size | 256 KiB | Yes |
 | Max message retention | 14 days | Yes |

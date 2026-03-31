@@ -20,7 +20,7 @@ mod tests {
     }
 
     /// Simulate the exact same TCP-level health check that the Docker
-    /// HEALTHCHECK uses (`ruststack-server --health-check`).  The fix for
+    /// HEALTHCHECK uses (`rustack --health-check`).  The fix for
     /// issue #1 removed the `writer.shutdown()` call; this test verifies
     /// the server responds correctly without a TCP half-close.
     #[tokio::test]

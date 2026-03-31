@@ -19,7 +19,7 @@
 10. [NerveMQ (Rust)](#10-nervemq-rust)
 11. [Comparison Matrix](#11-comparison-matrix)
 12. [Protocol Considerations (JSON vs Query)](#12-protocol-considerations-json-vs-query)
-13. [Recommendations for RustStack SQS](#13-recommendations-for-ruststack-sqs)
+13. [Recommendations for Rustack SQS](#13-recommendations-for-rustack-sqs)
 
 ---
 
@@ -589,7 +589,7 @@ Not a conformance test suite -- purely a load testing tool. Not useful for API c
 
 ### Overview
 
-NerveMQ is a portable, SQS-compatible message queue backed by SQLite, written in Rust. It is the most directly comparable project to what RustStack is building.
+NerveMQ is a portable, SQS-compatible message queue backed by SQLite, written in Rust. It is the most directly comparable project to what Rustack is building.
 
 ### Test Status
 
@@ -636,9 +636,9 @@ SQS historically used the `awsQuery` protocol (XML request/response). In late 20
 | Moto | Both (internal mock) | Protocol is handled internally |
 | GoAWS | Query (likely) | Uses `x-www-form-urlencoded` request handling |
 
-### Key Implication for RustStack
+### Key Implication for Rustack
 
-Since RustStack's SQS will use `@awsJson1_0` with `@awsQueryCompatible` (matching the Smithy model), our implementation must handle both protocols. Test suites using newer AWS SDKs will send JSON requests by default. ElasticMQ's JSON protocol issues provide useful reference for what can go wrong:
+Since Rustack's SQS will use `@awsJson1_0` with `@awsQueryCompatible` (matching the Smithy model), our implementation must handle both protocols. Test suites using newer AWS SDKs will send JSON requests by default. ElasticMQ's JSON protocol issues provide useful reference for what can go wrong:
 
 - Error responses must be properly formatted for JSON protocol
 - MD5 checksum calculation differs between protocols for message attributes
@@ -646,7 +646,7 @@ Since RustStack's SQS will use `@awsJson1_0` with `@awsQueryCompatible` (matchin
 
 ---
 
-## 13. Recommendations for RustStack SQS
+## 13. Recommendations for Rustack SQS
 
 ### Recommended Multi-Layer Testing Strategy
 
@@ -752,7 +752,7 @@ PR Checks (fast feedback):
   - cargo clippy, cargo fmt
 
 Merge / Nightly (thorough validation):
-  - Start ruststack-server
+  - Start rustack-server
   - Run pytest + boto3 suite (Tier 2) -- all SQS tests
   - Upload test artifacts (pytest output, pass/fail counts)
 ```

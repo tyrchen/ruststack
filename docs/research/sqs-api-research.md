@@ -21,13 +21,13 @@
 12. [Implementation Challenges](#12-implementation-challenges)
 13. [Key Differences from DynamoDB Implementation](#13-key-differences-from-dynamodb-implementation)
 14. [Implementation Priority Matrix](#14-implementation-priority-matrix)
-15. [Architecture Considerations for RustStack](#15-architecture-considerations-for-ruststack)
+15. [Architecture Considerations for Rustack](#15-architecture-considerations-for-rustack)
 
 ---
 
 ## 1. Protocol: AWS JSON 1.0 with awsQuery Compatibility
 
-SQS uses the `@awsJson1_0` Smithy protocol with the `@awsQueryCompatible` trait. This is the same protocol as DynamoDB, which means the ruststack infrastructure for DynamoDB HTTP routing and JSON serde can be largely reused.
+SQS uses the `@awsJson1_0` Smithy protocol with the `@awsQueryCompatible` trait. This is the same protocol as DynamoDB, which means the rustack infrastructure for DynamoDB HTTP routing and JSON serde can be largely reused.
 
 ### 1.1 Protocol History
 
@@ -164,7 +164,7 @@ Key traits:
   - `json_errors.rs` - JSON error handling
   - `aws_query_compatible_errors.rs` - awsQuery backward-compatible error support
 
-### 2.4 Code Generation for RustStack
+### 2.4 Code Generation for Rustack
 
 Since SQS uses the same `@awsJson1_0` protocol as DynamoDB, the existing codegen approach from the DynamoDB implementation should be adaptable. The codegen would:
 
@@ -607,7 +607,7 @@ With `x-amzn-query-error: AWS.SimpleQueueService.NonExistentQueue;Sender` header
 - **aws-sdk-rust**: Generated from Smithy models; protocol-level tests but focused on serialization correctness
 - **aws-sdk-java**: ElasticMQ's AmazonJavaSdkTestSuite uses this SDK extensively
 
-### 11.7 Recommended Test Strategy for RustStack
+### 11.7 Recommended Test Strategy for Rustack
 
 1. **Primary**: Adapt LocalStack's `test_sqs.py` as the compatibility test suite (similar to what was done for DynamoDB)
 2. **Secondary**: Port ElasticMQ's AmazonJavaSdkTestSuite tests as a second validation layer
@@ -784,15 +784,15 @@ With `x-amzn-query-error: AWS.SimpleQueueService.NonExistentQueue;Sender` header
 
 ---
 
-## 15. Architecture Considerations for RustStack
+## 15. Architecture Considerations for Rustack
 
 ### 15.1 Crate Structure
 
 Following the existing pattern:
-- `ruststack-sqs-model` - Auto-generated types from Smithy model (via codegen)
-- `ruststack-sqs-core` - Business logic (queue management, message lifecycle)
-- `ruststack-sqs-http` - HTTP routing, protocol handling (JSON + Query)
-- `apps/ruststack-sqs-server` - Binary server
+- `rustack-sqs-model` - Auto-generated types from Smithy model (via codegen)
+- `rustack-sqs-core` - Business logic (queue management, message lifecycle)
+- `rustack-sqs-http` - HTTP routing, protocol handling (JSON + Query)
+- `apps/rustack-sqs-server` - Binary server
 
 ### 15.2 Core Data Structures
 

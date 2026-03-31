@@ -1,9 +1,9 @@
-# RustStack DynamoDB Streams: Native Rust Implementation Design
+# Rustack DynamoDB Streams: Native Rust Implementation Design
 
 **Date:** 2026-03-19
 **Status:** Draft / RFC
-**Depends on:** [ruststack-dynamodb-design.md](./ruststack-dynamodb-design.md), [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design.md)
-**Scope:** Add DynamoDB Streams support to RustStack -- 4 API operations (DescribeStream, GetShardIterator, GetRecords, ListStreams) plus deep integration into DynamoDB core for change data capture. Completes the DynamoDB -> Stream -> Lambda event pipeline.
+**Depends on:** [rustack-dynamodb-design.md](./rustack-dynamodb-design.md), [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design.md)
+**Scope:** Add DynamoDB Streams support to Rustack -- 4 API operations (DescribeStream, GetShardIterator, GetRecords, ListStreams) plus deep integration into DynamoDB core for change data capture. Completes the DynamoDB -> Stream -> Lambda event pipeline.
 
 ---
 
@@ -32,9 +32,9 @@
 DynamoDB Streams is the bridge between DynamoDB and event-driven architectures. It provides a time-ordered sequence of item-level changes (insert, modify, remove) on a DynamoDB table, enabling patterns like cross-region replication, materialized views, and Lambda triggers. Key points:
 
 - **Small API surface, deep integration** -- only 4 DynamoDB Streams API operations, but requires instrumenting every DynamoDB write path (PutItem, UpdateItem, DeleteItem, BatchWriteItem) to capture old/new item images and emit change records. This cross-crate integration is the core architectural challenge.
-- **Native in-memory change log** -- unlike LocalStack which uses Kinesis as a backing store (creating `__ddb_stream_TABLE_NAME` Kinesis streams and proxying all Streams API calls through Kinesis shard management), RustStack implements DynamoDB Streams natively with a per-table append-only change log. This is simpler (no cross-service dependency), faster (no Kinesis shard actor overhead for what is essentially a per-table ring buffer), and avoids the complexity of shard ID remapping.
+- **Native in-memory change log** -- unlike LocalStack which uses Kinesis as a backing store (creating `__ddb_stream_TABLE_NAME` Kinesis streams and proxying all Streams API calls through Kinesis shard management), Rustack implements DynamoDB Streams natively with a per-table append-only change log. This is simpler (no cross-service dependency), faster (no Kinesis shard actor overhead for what is essentially a per-table ring buffer), and avoids the complexity of shard ID remapping.
 - **Completes the event pipeline** -- with DynamoDB Streams, the DynamoDB -> Stream -> Lambda event source mapping pipeline becomes possible. This is one of the most common serverless patterns on AWS.
-- **Two crate groups** -- (1) `ruststack-dynamodbstreams-{model,http,core}` for the 4 Streams API operations, and (2) change capture integration in `ruststack-dynamodb-core` via a `StreamEmitter` trait that DynamoDB Streams implements and DynamoDB core calls after each successful write.
+- **Two crate groups** -- (1) `rustack-dynamodbstreams-{model,http,core}` for the 4 Streams API operations, and (2) change capture integration in `rustack-dynamodb-core` via a `StreamEmitter` trait that DynamoDB Streams implements and DynamoDB core calls after each successful write.
 - **awsJson1.0 protocol** -- same protocol as DynamoDB itself, but distinguished by the `X-Amz-Target` prefix `DynamoDBStreams_20120810.` (vs DynamoDB's `DynamoDB_20120810.`). SigV4 service name is `dynamodb` for both.
 - **Estimated effort** -- 3-4 days for full implementation (4 API operations + DynamoDB change capture integration + testing).
 
@@ -63,7 +63,7 @@ DynamoDB Streams is the cornerstone of event-driven architectures built on Dynam
 | Concurrency model | Read-heavy, append-only | Transactions, batch | Streaming, fan-out |
 | Estimated lines of code | ~2,500 (Streams) + ~500 (DDB integration) | ~15,000 | ~8,000 |
 
-DynamoDB Streams is small in API surface but architecturally significant because it introduces the first cross-crate data flow in RustStack: DynamoDB core must emit change records that DynamoDB Streams core consumes. This requires careful trait design to avoid tight coupling.
+DynamoDB Streams is small in API surface but architecturally significant because it introduces the first cross-crate data flow in Rustack: DynamoDB core must emit change records that DynamoDB Streams core consumes. This requires careful trait design to avoid tight coupling.
 
 ### 2.3 Tool Coverage
 
@@ -105,7 +105,7 @@ With all 4 operations implemented plus DynamoDB-side change capture, the followi
 5. **Cross-region stream replication** -- no multi-region support.
 6. **Lambda event source mapping integration** -- Streams provides the data; the polling/batching logic lives in Lambda. Lambda integration is a separate concern.
 7. **Kinesis adapter compatibility** -- the DynamoDB Streams Kinesis Adapter (KCL-based) translates Streams into Kinesis-compatible interface. Not in scope.
-8. **Data persistence across restarts** -- in-memory only, matching all other RustStack services.
+8. **Data persistence across restarts** -- in-memory only, matching all other Rustack services.
 9. **StreamViewType change on existing stream** -- real DynamoDB does not allow changing StreamViewType on an existing stream (must disable and re-enable). We enforce this.
 
 ---
@@ -116,9 +116,9 @@ With all 4 operations implemented plus DynamoDB-side change capture, the followi
 
 DynamoDB Streams requires two distinct components:
 
-1. **DynamoDB Streams API crate** (`ruststack-dynamodbstreams-{model,http,core}`) -- handles the 4 Streams API operations (DescribeStream, GetShardIterator, GetRecords, ListStreams). This is a standard service crate following the same pattern as SSM, Secrets Manager, etc.
+1. **DynamoDB Streams API crate** (`rustack-dynamodbstreams-{model,http,core}`) -- handles the 4 Streams API operations (DescribeStream, GetShardIterator, GetRecords, ListStreams). This is a standard service crate following the same pattern as SSM, Secrets Manager, etc.
 
-2. **Change capture integration in `ruststack-dynamodb-core`** -- instruments DynamoDB write operations to emit change records. This is the architecturally significant piece: DynamoDB core must call into Streams after each successful write, passing old/new item images.
+2. **Change capture integration in `rustack-dynamodb-core`** -- instruments DynamoDB write operations to emit change records. This is the architecturally significant piece: DynamoDB core must call into Streams after each successful write, passing old/new item images.
 
 ```
           AWS SDK / CLI / Terraform / Lambda ESM
@@ -165,42 +165,42 @@ Note that both services share the same SigV4 service name (`dynamodb`), which me
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app)
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-dynamodbstreams-model        <-- NEW (auto-generated)
-+-- ruststack-dynamodbstreams-core         <-- NEW
-+-- ruststack-dynamodbstreams-http         <-- NEW
+rustack-server (app)
++-- rustack-core
++-- rustack-auth
++-- rustack-dynamodb-{model,core,http}
++-- rustack-dynamodbstreams-model        <-- NEW (auto-generated)
++-- rustack-dynamodbstreams-core         <-- NEW
++-- rustack-dynamodbstreams-http         <-- NEW
 +-- ... (other services)
 
-ruststack-dynamodbstreams-http
-+-- ruststack-dynamodbstreams-model
-+-- ruststack-auth
+rustack-dynamodbstreams-http
++-- rustack-dynamodbstreams-model
++-- rustack-auth
 
-ruststack-dynamodbstreams-core
-+-- ruststack-core
-+-- ruststack-dynamodbstreams-model
-+-- ruststack-dynamodb-model              <-- for AttributeValue, KeySchemaElement types
+rustack-dynamodbstreams-core
++-- rustack-core
++-- rustack-dynamodbstreams-model
++-- rustack-dynamodb-model              <-- for AttributeValue, KeySchemaElement types
 
-ruststack-dynamodb-core (MODIFIED)
-+-- ruststack-core
-+-- ruststack-dynamodb-model
+rustack-dynamodb-core (MODIFIED)
++-- rustack-core
++-- rustack-dynamodb-model
 +-- (NO dependency on dynamodbstreams-core; uses trait inversion)
 ```
 
-The key architectural insight is that `ruststack-dynamodb-core` does NOT depend on `ruststack-dynamodbstreams-core`. Instead, DynamoDB core defines a `StreamEmitter` trait, and the server binary wires in the concrete implementation from DynamoDB Streams core. This follows the dependency inversion principle and keeps the two crates independently compilable.
+The key architectural insight is that `rustack-dynamodb-core` does NOT depend on `rustack-dynamodbstreams-core`. Instead, DynamoDB core defines a `StreamEmitter` trait, and the server binary wires in the concrete implementation from DynamoDB Streams core. This follows the dependency inversion principle and keeps the two crates independently compilable.
 
 ### 4.4 Cross-Crate Integration Pattern
 
 ```
-                    ruststack-dynamodb-core
+                    rustack-dynamodb-core
                     +------------------------+
                     | trait StreamEmitter {   |
                     |   fn emit_change(...)   |
                     | }                       |
                     |                         |
-                    | struct RustStackDynamoDB|
+                    | struct RustackDynamoDB|
                     |   emitter: Option<      |
                     |     Arc<dyn StreamEmitter>|
                     |   >                     |
@@ -208,14 +208,14 @@ The key architectural insight is that `ruststack-dynamodb-core` does NOT depend 
                                  ^
                                  | implements
                     +------------+------------+
-                    | ruststack-dynamodbstreams-core |
+                    | rustack-dynamodbstreams-core |
                     | struct DynamoDBStreamEmitter   |
                     |   impl StreamEmitter           |
                     +-------------------------------+
                                  ^
                                  | wired by
                     +------------+------------+
-                    | ruststack-server (main.rs)    |
+                    | rustack-server (main.rs)    |
                     | let emitter = StreamEmitter;  |
                     | dynamodb.set_emitter(emitter); |
                     +-------------------------------+
@@ -254,8 +254,8 @@ The DynamoDB implementation provides all the infrastructure DynamoDB Streams nee
 | SigV4 auth | Yes | Same service name `dynamodb` |
 | `AttributeValue` type | Yes | Stream records reference DynamoDB `AttributeValue` |
 | `KeySchemaElement` type | Yes | DescribeStream returns table's KeySchema |
-| `StreamViewType` enum | Yes | Already defined in `ruststack-dynamodb-model` |
-| `StreamSpecification` struct | Yes | Already defined in `ruststack-dynamodb-model` |
+| `StreamViewType` enum | Yes | Already defined in `rustack-dynamodb-model` |
+| `StreamSpecification` struct | Yes | Already defined in `rustack-dynamodb-model` |
 
 ### 5.3 Wire Format Examples
 
@@ -385,7 +385,7 @@ file_layout = "flat"
 
 ### 6.3 Generated Output
 
-The codegen produces 6 files in `crates/ruststack-dynamodbstreams-model/src/`:
+The codegen produces 6 files in `crates/rustack-dynamodbstreams-model/src/`:
 
 | File | Contents |
 |------|----------|
@@ -401,21 +401,21 @@ The codegen produces 6 files in `crates/ruststack-dynamodbstreams-model/src/`:
 DynamoDB Streams model types reference `AttributeValue` from DynamoDB. The codegen has two options:
 
 1. **Duplicate `AttributeValue` in the Streams model crate** -- simpler codegen, but type mismatch when passing data between DynamoDB and Streams.
-2. **Re-export `AttributeValue` from `ruststack-dynamodb-model`** -- requires the Streams model crate to depend on the DynamoDB model crate.
+2. **Re-export `AttributeValue` from `rustack-dynamodb-model`** -- requires the Streams model crate to depend on the DynamoDB model crate.
 
-We choose option 2: `ruststack-dynamodbstreams-model` depends on `ruststack-dynamodb-model` and re-exports `AttributeValue`. The codegen configuration includes an import mapping that replaces the generated `AttributeValue` with a re-export. This ensures type compatibility when DynamoDB core passes item images to Streams core.
+We choose option 2: `rustack-dynamodbstreams-model` depends on `rustack-dynamodb-model` and re-exports `AttributeValue`. The codegen configuration includes an import mapping that replaces the generated `AttributeValue` with a re-export. This ensures type compatibility when DynamoDB core passes item images to Streams core.
 
 ---
 
 ## 7. Crate Structure
 
-### 7.1 `ruststack-dynamodbstreams-model` (auto-generated)
+### 7.1 `rustack-dynamodbstreams-model` (auto-generated)
 
 ```
-crates/ruststack-dynamodbstreams-model/
+crates/rustack-dynamodbstreams-model/
 +-- Cargo.toml
 +-- src/
-    +-- lib.rs              # Module re-exports + pub use ruststack_dynamodb_model::AttributeValue
+    +-- lib.rs              # Module re-exports + pub use rustack_dynamodb_model::AttributeValue
     +-- types.rs            # Auto-generated: Stream, StreamDescription, Shard, etc.
     +-- operations.rs       # Auto-generated: DynamoDBStreamsOperation enum
     +-- error.rs            # Auto-generated: error types + error codes
@@ -423,29 +423,29 @@ crates/ruststack-dynamodbstreams-model/
     +-- output.rs           # Auto-generated: 4 output structs
 ```
 
-**Dependencies:** `serde`, `serde_json`, `ruststack-dynamodb-model`
+**Dependencies:** `serde`, `serde_json`, `rustack-dynamodb-model`
 
-### 7.2 `ruststack-dynamodbstreams-core`
+### 7.2 `rustack-dynamodbstreams-core`
 
 ```
-crates/ruststack-dynamodbstreams-core/
+crates/rustack-dynamodbstreams-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs           # DynamoDBStreamsConfig
-    +-- handler.rs          # RustStackDynamoDBStreamsHandler (bridges HTTP to provider)
-    +-- provider.rs         # RustStackDynamoDBStreams (main provider, all 4 operations)
+    +-- handler.rs          # RustackDynamoDBStreamsHandler (bridges HTTP to provider)
+    +-- provider.rs         # RustackDynamoDBStreams (main provider, all 4 operations)
     +-- emitter.rs          # DynamoDBStreamEmitter (implements StreamEmitter trait)
     +-- storage.rs          # StreamStore, StreamRecord, ShardRecord, StreamChangeRecord
     +-- iterator.rs         # ShardIterator encoding/decoding, iterator state
 ```
 
-**Dependencies:** `ruststack-core`, `ruststack-dynamodbstreams-model`, `ruststack-dynamodb-model`, `dashmap`, `serde_json`, `tracing`, `uuid`, `chrono`, `parking_lot`
+**Dependencies:** `rustack-core`, `rustack-dynamodbstreams-model`, `rustack-dynamodb-model`, `dashmap`, `serde_json`, `tracing`, `uuid`, `chrono`, `parking_lot`
 
-### 7.3 `ruststack-dynamodbstreams-http`
+### 7.3 `rustack-dynamodbstreams-http`
 
 ```
-crates/ruststack-dynamodbstreams-http/
+crates/rustack-dynamodbstreams-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -456,16 +456,16 @@ crates/ruststack-dynamodbstreams-http/
     +-- response.rs         # HTTP response construction
 ```
 
-**Dependencies:** `ruststack-dynamodbstreams-model`, `ruststack-auth`, `hyper`, `http`, `serde_json`, `bytes`
+**Dependencies:** `rustack-dynamodbstreams-model`, `rustack-auth`, `hyper`, `http`, `serde_json`, `bytes`
 
-This crate is structurally identical to `ruststack-dynamodb-http`. The router parses `DynamoDBStreams_20120810.<Op>` instead of `DynamoDB_20120810.<Op>`.
+This crate is structurally identical to `rustack-dynamodb-http`. The router parses `DynamoDBStreams_20120810.<Op>` instead of `DynamoDB_20120810.<Op>`.
 
-### 7.4 Modifications to `ruststack-dynamodb-core`
+### 7.4 Modifications to `rustack-dynamodb-core`
 
 The DynamoDB core crate is modified to support change capture:
 
 ```
-crates/ruststack-dynamodb-core/
+crates/rustack-dynamodb-core/
 +-- src/
     +-- lib.rs              # (add stream module)
     +-- stream.rs           # NEW: StreamEmitter trait + ChangeEvent types
@@ -473,15 +473,15 @@ crates/ruststack-dynamodb-core/
     +-- state.rs            # MODIFIED: store stream_arn on DynamoDBTable
 ```
 
-The `stream.rs` module defines the `StreamEmitter` trait and `ChangeEvent` types. These types use `ruststack-dynamodb-model::AttributeValue` directly, so no new dependencies are needed.
+The `stream.rs` module defines the `StreamEmitter` trait and `ChangeEvent` types. These types use `rustack-dynamodb-model::AttributeValue` directly, so no new dependencies are needed.
 
 ### 7.5 Workspace Changes
 
 ```toml
 [workspace.dependencies]
-ruststack-dynamodbstreams-model = { path = "crates/ruststack-dynamodbstreams-model" }
-ruststack-dynamodbstreams-http = { path = "crates/ruststack-dynamodbstreams-http" }
-ruststack-dynamodbstreams-core = { path = "crates/ruststack-dynamodbstreams-core" }
+rustack-dynamodbstreams-model = { path = "crates/rustack-dynamodbstreams-model" }
+rustack-dynamodbstreams-http = { path = "crates/rustack-dynamodbstreams-http" }
+rustack-dynamodbstreams-core = { path = "crates/rustack-dynamodbstreams-core" }
 ```
 
 ---
@@ -563,20 +563,20 @@ pub trait DynamoDBStreamsHandler: Send + Sync + 'static {
 
 ## 9. Storage Engine Design
 
-This is the core of the spec. The storage engine has two sides: the **change capture** side (in `ruststack-dynamodb-core`) that emits records, and the **stream store** side (in `ruststack-dynamodbstreams-core`) that stores and serves records.
+This is the core of the spec. The storage engine has two sides: the **change capture** side (in `rustack-dynamodb-core`) that emits records, and the **stream store** side (in `rustack-dynamodbstreams-core`) that stores and serves records.
 
-### 9.1 StreamEmitter Trait (in `ruststack-dynamodb-core`)
+### 9.1 StreamEmitter Trait (in `rustack-dynamodb-core`)
 
-The `StreamEmitter` trait is defined in `ruststack-dynamodb-core` and implemented by `ruststack-dynamodbstreams-core`. This follows the dependency inversion principle: DynamoDB core depends only on its own trait, not on the Streams crate.
+The `StreamEmitter` trait is defined in `rustack-dynamodb-core` and implemented by `rustack-dynamodbstreams-core`. This follows the dependency inversion principle: DynamoDB core depends only on its own trait, not on the Streams crate.
 
 ```rust
-// crates/ruststack-dynamodb-core/src/stream.rs
+// crates/rustack-dynamodb-core/src/stream.rs
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ruststack_dynamodb_model::AttributeValue;
-use ruststack_dynamodb_model::types::StreamViewType;
+use rustack_dynamodb_model::AttributeValue;
+use rustack_dynamodb_model::types::StreamViewType;
 
 /// Event name for a stream change record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -627,10 +627,10 @@ pub struct ChangeEvent {
 /// Trait for emitting DynamoDB change events to a stream consumer.
 ///
 /// DynamoDB core calls `emit` after each successful write operation.
-/// The implementation is provided by `ruststack-dynamodbstreams-core` and
+/// The implementation is provided by `rustack-dynamodbstreams-core` and
 /// wired in by the server binary.
 ///
-/// This trait is defined in `ruststack-dynamodb-core` to avoid a dependency
+/// This trait is defined in `rustack-dynamodb-core` to avoid a dependency
 /// from DynamoDB core on the Streams crate (dependency inversion).
 pub trait StreamEmitter: Send + Sync + 'static {
     /// Emit a change event for a successful write operation.
@@ -656,20 +656,20 @@ impl StreamEmitter for NoopStreamEmitter {
 
 ### 9.2 DynamoDB Provider Modifications
 
-The `RustStackDynamoDB` provider is modified to hold an optional `StreamEmitter` and call it after each successful write.
+The `RustackDynamoDB` provider is modified to hold an optional `StreamEmitter` and call it after each successful write.
 
 ```rust
-// In crates/ruststack-dynamodb-core/src/provider.rs
+// In crates/rustack-dynamodb-core/src/provider.rs
 
 use crate::stream::{ChangeEvent, ChangeEventName, NoopStreamEmitter, StreamEmitter};
 
-pub struct RustStackDynamoDB {
+pub struct RustackDynamoDB {
     pub(crate) state: Arc<DynamoDBServiceState>,
     pub(crate) config: Arc<DynamoDBConfig>,
     pub(crate) emitter: Arc<dyn StreamEmitter>,
 }
 
-impl RustStackDynamoDB {
+impl RustackDynamoDB {
     /// Create a new DynamoDB provider with no stream emitter.
     pub fn new(config: DynamoDBConfig) -> Self {
         Self {
@@ -801,12 +801,12 @@ fn handle_delete_item(&self, input: DeleteItemInput) -> Result<DeleteItemOutput,
 
 **Performance note:** Capturing the old image requires an additional read before each write. For PutItem, the storage engine's `put_item` already returns the replaced item in some implementations. For UpdateItem, the old image is naturally available from the read-modify-write cycle. For DeleteItem, the storage engine's `delete_item` returns the removed item. In practice, the overhead is minimal because the old item is often already in the read path.
 
-### 9.4 Stream Store (in `ruststack-dynamodbstreams-core`)
+### 9.4 Stream Store (in `rustack-dynamodbstreams-core`)
 
 The `StreamStore` holds per-table change logs and serves the 4 Streams API operations.
 
 ```rust
-// crates/ruststack-dynamodbstreams-core/src/storage.rs
+// crates/rustack-dynamodbstreams-core/src/storage.rs
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -814,8 +814,8 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 
-use ruststack_dynamodb_model::AttributeValue;
-use ruststack_dynamodb_model::types::{KeySchemaElement, StreamViewType};
+use rustack_dynamodb_model::AttributeValue;
+use rustack_dynamodb_model::types::{KeySchemaElement, StreamViewType};
 
 /// Top-level stream store managing all DynamoDB Streams.
 ///
@@ -1029,7 +1029,7 @@ impl TableStream {
 Shard iterators are opaque tokens that encode the stream ARN, shard ID, and position. For local development, we use a simple pipe-delimited format:
 
 ```rust
-// crates/ruststack-dynamodbstreams-core/src/iterator.rs
+// crates/rustack-dynamodbstreams-core/src/iterator.rs
 
 /// Shard iterator types supported by DynamoDB Streams.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1138,14 +1138,14 @@ This model is simple and sufficient. DynamoDB Streams for local dev does not fac
 
 ### 10.1 DynamoDB Stream Emitter
 
-The `DynamoDBStreamEmitter` struct in `ruststack-dynamodbstreams-core` implements the `StreamEmitter` trait defined in `ruststack-dynamodb-core`:
+The `DynamoDBStreamEmitter` struct in `rustack-dynamodbstreams-core` implements the `StreamEmitter` trait defined in `rustack-dynamodb-core`:
 
 ```rust
-// crates/ruststack-dynamodbstreams-core/src/emitter.rs
+// crates/rustack-dynamodbstreams-core/src/emitter.rs
 
 use std::sync::Arc;
 
-use ruststack_dynamodb_core::stream::{ChangeEvent, StreamEmitter};
+use rustack_dynamodb_core::stream::{ChangeEvent, StreamEmitter};
 
 use crate::storage::StreamStore;
 
@@ -1597,7 +1597,7 @@ Alternative approach (simpler): since the server binary has access to both the D
 The recommended approach uses a `StreamLifecycleManager` in the server binary:
 
 ```rust
-// In ruststack-server main.rs or a bridge module:
+// In rustack-server main.rs or a bridge module:
 
 /// Manages the lifecycle of DynamoDB Streams alongside DynamoDB tables.
 ///
@@ -1662,7 +1662,7 @@ This keeps the `StreamEmitter` trait focused on change events only and moves lif
 The `DynamoDBTable` struct already has a `stream_specification` field. We add a `stream_arn` field to track the associated stream:
 
 ```rust
-// In crates/ruststack-dynamodb-core/src/state.rs (modification):
+// In crates/rustack-dynamodb-core/src/state.rs (modification):
 
 pub struct DynamoDBTable {
     // ... existing fields ...
@@ -1770,14 +1770,14 @@ DynamoDB Streams uses lowercase `"message"` in error responses (same as DynamoDB
 DynamoDB Streams is gated behind its own cargo feature but automatically enabled when DynamoDB is enabled:
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack-server/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "dynamodbstreams", "sqs", "ssm", ...]
-dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
+dynamodb = ["dep:rustack-dynamodb-core", "dep:rustack-dynamodb-http"]
 dynamodbstreams = [
     "dynamodb",
-    "dep:ruststack-dynamodbstreams-core",
-    "dep:ruststack-dynamodbstreams-http",
+    "dep:rustack-dynamodbstreams-core",
+    "dep:rustack-dynamodbstreams-http",
 ]
 ```
 
@@ -1792,7 +1792,7 @@ DynamoDB Streams is registered as a separate service router in the gateway, dist
 #[cfg(feature = "dynamodb")]
 let dynamodb_provider = if is_enabled("dynamodb") {
     let dynamodb_config = DynamoDBConfig::from_env();
-    let mut provider = RustStackDynamoDB::new(dynamodb_config.clone());
+    let mut provider = RustackDynamoDB::new(dynamodb_config.clone());
 
     // Wire in DynamoDB Streams emitter if enabled.
     #[cfg(feature = "dynamodbstreams")]
@@ -1808,7 +1808,7 @@ let dynamodb_provider = if is_enabled("dynamodb") {
         None
     };
 
-    let dynamodb_handler = RustStackDynamoDBHandler::new(Arc::new(provider));
+    let dynamodb_handler = RustackDynamoDBHandler::new(Arc::new(provider));
     let dynamodb_http_config = build_dynamodb_http_config(&dynamodb_config);
     let dynamodb_service =
         DynamoDBHttpService::new(Arc::new(dynamodb_handler), dynamodb_http_config);
@@ -1818,8 +1818,8 @@ let dynamodb_provider = if is_enabled("dynamodb") {
     #[cfg(feature = "dynamodbstreams")]
     if let Some(store) = stream_store {
         let streams_config = DynamoDBStreamsConfig::from_env();
-        let streams_provider = RustStackDynamoDBStreams::new(store, streams_config.clone());
-        let streams_handler = RustStackDynamoDBStreamsHandler::new(Arc::new(streams_provider));
+        let streams_provider = RustackDynamoDBStreams::new(store, streams_config.clone());
+        let streams_handler = RustackDynamoDBStreamsHandler::new(Arc::new(streams_provider));
         let streams_http_config = build_dynamodbstreams_http_config(&streams_config);
         let streams_service = DynamoDBStreamsHttpService::new(
             Arc::new(streams_handler),
@@ -1844,11 +1844,11 @@ The server binary also needs to wire stream lifecycle events (CreateTable, Updat
 // responses and trigger stream lifecycle operations.
 
 // Option B: StreamLifecycleManager registered on the DynamoDB provider
-// The RustStackDynamoDB provider holds an optional Arc<StreamLifecycleManager> and
+// The RustackDynamoDB provider holds an optional Arc<StreamLifecycleManager> and
 // calls it after table operations.
 
 // We choose Option B for cleaner separation:
-impl RustStackDynamoDB {
+impl RustackDynamoDB {
     pub fn set_stream_lifecycle_manager(&mut self, manager: Arc<StreamLifecycleManager>) {
         self.stream_lifecycle = Some(manager);
     }
@@ -2134,10 +2134,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -p ruststack-dynamodbstreams-model
-      - run: cargo test -p ruststack-dynamodbstreams-core
-      - run: cargo test -p ruststack-dynamodbstreams-http
-      - run: cargo test -p ruststack-dynamodb-core  # includes stream emitter tests
+      - run: cargo test -p rustack-dynamodbstreams-model
+      - run: cargo test -p rustack-dynamodbstreams-core
+      - run: cargo test -p rustack-dynamodbstreams-http
+      - run: cargo test -p rustack-dynamodb-core  # includes stream emitter tests
 
   integration:
     runs-on: ubuntu-latest
@@ -2145,7 +2145,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release
-      - run: ./target/release/ruststack-server &
+      - run: ./target/release/rustack-server &
       - run: sleep 2
       - run: |
           # Full pipeline smoke test
@@ -2181,18 +2181,18 @@ DynamoDB Streams has only 4 operations and the implementation is not large enoug
 **Day 1: Model + Storage + Emitter Trait**
 
 1. Download DynamoDB Streams Smithy model, create `codegen/services/dynamodbstreams.toml`
-2. Generate `ruststack-dynamodbstreams-model` crate
-3. Add `StreamEmitter` trait and `ChangeEvent` types to `ruststack-dynamodb-core`
-4. Implement `StreamStore`, `TableStream`, `ShardRecord`, `StreamChangeRecord` in `ruststack-dynamodbstreams-core`
+2. Generate `rustack-dynamodbstreams-model` crate
+3. Add `StreamEmitter` trait and `ChangeEvent` types to `rustack-dynamodb-core`
+4. Implement `StreamStore`, `TableStream`, `ShardRecord`, `StreamChangeRecord` in `rustack-dynamodbstreams-core`
 5. Implement `DynamoDBStreamEmitter` (the `StreamEmitter` impl)
 
 **Day 2: DynamoDB Integration + Streams API**
 
-1. Modify `RustStackDynamoDB` to hold `Arc<dyn StreamEmitter>` and call it in PutItem, UpdateItem, DeleteItem, BatchWriteItem handlers
+1. Modify `RustackDynamoDB` to hold `Arc<dyn StreamEmitter>` and call it in PutItem, UpdateItem, DeleteItem, BatchWriteItem handlers
 2. Add `stream_arn` / `stream_label` to `DynamoDBTable` state
 3. Wire stream creation in CreateTable/UpdateTable handlers
 4. Implement all 4 DynamoDB Streams operations: DescribeStream, GetShardIterator, GetRecords, ListStreams
-5. Create `ruststack-dynamodbstreams-http` crate with router and service
+5. Create `rustack-dynamodbstreams-http` crate with router and service
 
 **Day 3: Server Integration + Testing**
 
@@ -2231,10 +2231,10 @@ DynamoDB Streams has only 4 operations and the implementation is not large enoug
 
 ### 15.2 Dependencies
 
-- `ruststack-core` -- no changes needed
-- `ruststack-auth` -- no changes needed (SigV4 with service=`dynamodb`)
-- `ruststack-dynamodb-model` -- no changes needed (already has `StreamSpecification`, `StreamViewType`)
-- `ruststack-dynamodb-core` -- **modified**: adds `StreamEmitter` trait, `ChangeEvent`, emitter calls in write handlers
+- `rustack-core` -- no changes needed
+- `rustack-auth` -- no changes needed (SigV4 with service=`dynamodb`)
+- `rustack-dynamodb-model` -- no changes needed (already has `StreamSpecification`, `StreamViewType`)
+- `rustack-dynamodb-core` -- **modified**: adds `StreamEmitter` trait, `ChangeEvent`, emitter calls in write handlers
 - `dashmap` -- already in workspace
 - `parking_lot` -- already in workspace (used for shard `RwLock`)
 - `uuid` -- already in workspace
@@ -2247,7 +2247,7 @@ No new external dependencies required.
 | Decision | Rationale |
 |----------|-----------|
 | Native change log instead of Kinesis backing | LocalStack's approach (Kinesis backing) adds complexity (shard ID remapping, cross-service dependency, Kinesis actor overhead) for no benefit in local dev. A simple `VecDeque` per table is sufficient and 10x simpler. |
-| `StreamEmitter` trait in `ruststack-dynamodb-core` (dependency inversion) | DynamoDB core must not depend on Streams core. Defining the trait in DynamoDB core and implementing it in Streams core follows the dependency inversion principle. The server binary wires them together. |
+| `StreamEmitter` trait in `rustack-dynamodb-core` (dependency inversion) | DynamoDB core must not depend on Streams core. Defining the trait in DynamoDB core and implementing it in Streams core follows the dependency inversion principle. The server binary wires them together. |
 | Single shard per table (MVP) | Real DynamoDB splits shards based on throughput. For local dev, a single shard is sufficient and avoids partition routing complexity. Multi-shard support can be added later without API changes. |
 | `parking_lot::RwLock` for shard access | Shards are read-heavy (GetRecords) with infrequent writes (change events). `RwLock` allows concurrent reads. `parking_lot` is faster than `std::sync::RwLock`. |
 | Pipe-delimited shard iterator token | Opaque to SDKs. Simpler than base64-encoded protobuf (which real DynamoDB uses). Easy to debug. Could add HMAC signing later if tampering is a concern. |

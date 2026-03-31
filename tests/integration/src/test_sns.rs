@@ -1,4 +1,4 @@
-//! SNS integration tests against a running `RustStack` server.
+//! SNS integration tests against a running `Rustack` server.
 //!
 //! These tests cover topic lifecycle, subscriptions, publishing,
 //! fan-out to SQS, tags, batch publishing, and FIFO topics.
@@ -431,7 +431,7 @@ mod tests {
             .unwrap();
         let project_tag = sns::types::Tag::builder()
             .key("project")
-            .value("ruststack")
+            .value("rustack")
             .build()
             .unwrap();
 
@@ -458,7 +458,7 @@ mod tests {
             .map(|t| (t.key().to_string(), t.value().to_string()))
             .collect();
         assert_eq!(tag_map.get("env").unwrap(), "test");
-        assert_eq!(tag_map.get("project").unwrap(), "ruststack");
+        assert_eq!(tag_map.get("project").unwrap(), "rustack");
 
         // Untag.
         client

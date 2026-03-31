@@ -1,4 +1,4 @@
-//! STS integration tests against a running `RustStack` server.
+//! STS integration tests against a running `Rustack` server.
 //!
 //! These tests cover all 8 STS operations: GetCallerIdentity, AssumeRole,
 //! GetSessionToken, GetAccessKeyInfo, AssumeRoleWithSAML,

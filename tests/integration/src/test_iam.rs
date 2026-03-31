@@ -1,7 +1,7 @@
 //! Integration tests for the IAM service.
 //!
-//! These tests require a running RustStack server at `localhost:4566`.
-//! They are marked `#[ignore = "requires running RustStack server"]` so they don't run during
+//! These tests require a running Rustack server at `localhost:4566`.
+//! They are marked `#[ignore = "requires running Rustack server"]` so they don't run during
 //! normal `cargo test`.
 
 #[allow(unused_imports)]
@@ -12,7 +12,7 @@ use crate::iam_client;
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_create_and_get_user() {
     let client = iam_client();
 
@@ -48,7 +48,7 @@ async fn test_should_create_and_get_user() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_list_users() {
     let client = iam_client();
 
@@ -78,7 +78,7 @@ async fn test_should_list_users() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_create_role_and_get_role() {
     let client = iam_client();
     let trust_policy = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}"#;
@@ -116,7 +116,7 @@ async fn test_should_create_role_and_get_role() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_create_policy_and_attach_to_role() {
     let client = iam_client();
     let trust_policy = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}"#;
@@ -190,7 +190,7 @@ async fn test_should_create_policy_and_attach_to_role() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_manage_access_keys() {
     let client = iam_client();
 
@@ -241,7 +241,7 @@ async fn test_should_manage_access_keys() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_enforce_delete_conflicts() {
     let client = iam_client();
     let trust_policy = r#"{"Version":"2012-10-17","Statement":[]}"#;
@@ -314,7 +314,7 @@ async fn test_should_enforce_delete_conflicts() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_manage_groups_and_membership() {
     let client = iam_client();
 
@@ -386,7 +386,7 @@ async fn test_should_manage_groups_and_membership() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_manage_instance_profiles() {
     let client = iam_client();
     let trust_policy = r#"{"Version":"2012-10-17","Statement":[]}"#;
@@ -453,7 +453,7 @@ async fn test_should_manage_instance_profiles() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_manage_policy_versions() {
     let client = iam_client();
     let policy_doc_v1 = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"*"}]}"#;
@@ -527,7 +527,7 @@ async fn test_should_manage_policy_versions() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_manage_inline_policies() {
     let client = iam_client();
     let trust_policy = r#"{"Version":"2012-10-17","Statement":[]}"#;
@@ -595,7 +595,7 @@ async fn test_should_manage_inline_policies() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_manage_tags() {
     let client = iam_client();
     let trust_policy = r#"{"Version":"2012-10-17","Statement":[]}"#;
@@ -668,7 +668,7 @@ async fn test_should_manage_tags() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_update_assume_role_policy() {
     let client = iam_client();
     let trust_policy = r#"{"Version":"2012-10-17","Statement":[]}"#;
@@ -700,7 +700,7 @@ async fn test_should_update_assume_role_policy() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_create_service_linked_role() {
     let client = iam_client();
 
@@ -736,7 +736,7 @@ async fn test_should_create_service_linked_role() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_list_entities_for_policy() {
     let client = iam_client();
     let trust_policy = r#"{"Version":"2012-10-17","Statement":[]}"#;
@@ -804,7 +804,7 @@ async fn test_should_list_entities_for_policy() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_get_account_authorization_details() {
     let client = iam_client();
     let trust_policy = r#"{"Version":"2012-10-17","Statement":[]}"#;
@@ -855,7 +855,7 @@ async fn test_should_get_account_authorization_details() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_create_and_get_oidc_provider() {
     let client = iam_client();
 
@@ -905,7 +905,7 @@ async fn test_should_create_and_get_oidc_provider() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_list_oidc_providers() {
     let client = iam_client();
 
@@ -945,7 +945,7 @@ async fn test_should_list_oidc_providers() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_delete_oidc_provider() {
     let client = iam_client();
 
@@ -987,7 +987,7 @@ async fn test_should_delete_oidc_provider() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_tag_and_list_policy_tags() {
     let client = iam_client();
     let policy_doc = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"*"}]}"#;
@@ -1061,7 +1061,7 @@ async fn test_should_tag_and_list_policy_tags() {
 }
 
 #[tokio::test]
-#[ignore = "requires running RustStack server"]
+#[ignore = "requires running Rustack server"]
 async fn test_should_tag_and_list_instance_profile_tags() {
     let client = iam_client();
 

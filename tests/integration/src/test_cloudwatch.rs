@@ -1,9 +1,9 @@
-//! CloudWatch Metrics integration tests against a running `RustStack` server.
+//! CloudWatch Metrics integration tests against a running `Rustack` server.
 //!
 //! These tests cover metrics, alarms, dashboards, composite alarms, tags,
 //! insight rules, anomaly detectors, and metric streams.
 //!
-//! Run with: `cargo test -p ruststack-integration -- cloudwatch --ignored`
+//! Run with: `cargo test -p rustack-integration -- cloudwatch --ignored`
 
 #[cfg(test)]
 mod tests {

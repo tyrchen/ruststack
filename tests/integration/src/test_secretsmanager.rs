@@ -1,4 +1,4 @@
-//! Secrets Manager integration tests against a running `RustStack` server.
+//! Secrets Manager integration tests against a running `Rustack` server.
 //!
 //! These tests cover all 23 Secrets Manager operations across all phases:
 //! Phase 0: Core CRUD, Phase 1: Tags/Rotation/Batch, Phase 2: Policies/Replication.

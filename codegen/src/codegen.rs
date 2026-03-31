@@ -1446,8 +1446,8 @@ fn generate_error_s3(config: &ServiceConfig) -> Result<String> {
     writeln!(out, "/// # Examples")?;
     writeln!(out, "///")?;
     writeln!(out, "/// ```")?;
-    writeln!(out, "/// use ruststack_s3_model::s3_error;")?;
-    writeln!(out, "/// use ruststack_s3_model::error::S3ErrorCode;")?;
+    writeln!(out, "/// use rustack_s3_model::s3_error;")?;
+    writeln!(out, "/// use rustack_s3_model::error::S3ErrorCode;")?;
     writeln!(out, "///")?;
     writeln!(out, "/// let err = s3_error!(NoSuchBucket);")?;
     writeln!(out, "/// assert_eq!(err.code, S3ErrorCode::NoSuchBucket);")?;

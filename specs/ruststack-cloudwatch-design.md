@@ -1,9 +1,9 @@
-# RustStack CloudWatch Metrics & Alarms: Native Rust Implementation Design
+# Rustack CloudWatch Metrics & Alarms: Native Rust Implementation Design
 
 **Date:** 2026-03-19
 **Status:** Draft / RFC
-**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-sns-design.md](./ruststack-sns-design.md), [ruststack-logs-design.md](./ruststack-logs-design.md)
-**Scope:** Add CloudWatch Metrics & Alarms support to RustStack -- ~31 operations across three phases covering metric ingestion, retrieval, aggregation, alarms, dashboards, anomaly detection, and metric streams. Uses the `awsQuery` protocol (XML responses), the same protocol infrastructure established by SNS.
+**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-sns-design.md](./rustack-sns-design.md), [rustack-logs-design.md](./rustack-logs-design.md)
+**Scope:** Add CloudWatch Metrics & Alarms support to Rustack -- ~31 operations across three phases covering metric ingestion, retrieval, aggregation, alarms, dashboards, anomaly detection, and metric streams. Uses the `awsQuery` protocol (XML responses), the same protocol infrastructure established by SNS.
 
 ---
 
@@ -29,15 +29,15 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding CloudWatch Metrics & Alarms support to RustStack. Key points:
+This spec proposes adding CloudWatch Metrics & Alarms support to Rustack. Key points:
 
-- **Completes the observability story** -- RustStack already implements CloudWatch Logs (`ruststack-logs-{model,http,core}` using `awsJson1.1`). CloudWatch Metrics is the natural companion, covering metric ingestion, statistical queries, alarms, and dashboards. Together they provide the full CloudWatch experience for local development.
+- **Completes the observability story** -- Rustack already implements CloudWatch Logs (`rustack-logs-{model,http,core}` using `awsJson1.1`). CloudWatch Metrics is the natural companion, covering metric ingestion, statistical queries, alarms, and dashboards. Together they provide the full CloudWatch experience for local development.
 - **Moderate scope** -- ~31 operations across three phases. Phase 0 delivers ~15 core operations (metrics CRUD, alarms, tags) sufficient for most local development workflows. Phase 1 adds composite alarms and dashboards (~8 ops). Phase 2 adds anomaly detection and metric streams (~8 ops).
 - **Different service, different protocol** -- despite sharing the "CloudWatch" brand name, CloudWatch Metrics is a completely separate AWS service from CloudWatch Logs. It uses the `awsQuery` protocol (form-urlencoded requests, XML responses) with SigV4 service name `monitoring`, whereas CloudWatch Logs uses `awsJson1.1` with service name `logs`. They share no API operations, no data structures, and no wire format.
-- **awsQuery protocol reuse from SNS** -- CloudWatch Metrics uses the same `awsQuery` protocol as SNS. The entire form-encoded request parsing, XML response serialization, and error formatting infrastructure from `ruststack-sns-http` can be reused. The key difference is the XML namespace (`http://monitoring.amazonaws.com/doc/2010-08-01/`) and the Action names.
+- **awsQuery protocol reuse from SNS** -- CloudWatch Metrics uses the same `awsQuery` protocol as SNS. The entire form-encoded request parsing, XML response serialization, and error formatting infrastructure from `rustack-sns-http` can be reused. The key difference is the XML namespace (`http://monitoring.amazonaws.com/doc/2010-08-01/`) and the Action names.
 - **Time-series storage engine** -- the core data structure is a time-series store keyed by `(namespace, metric_name, sorted_dimensions)`. Each series stores a `Vec<DataPoint>` with timestamp, value, unit, and optional `StatisticValues`/`Values`/`Counts` for pre-aggregated data. Range queries and period-aligned aggregation support `GetMetricStatistics` and `GetMetricData`.
 - **Alarm evaluation** -- for MVP, alarms are stored and their state is managed via explicit `SetAlarmState` calls. Future phases can add a background alarm evaluator that periodically checks metric values against thresholds and triggers alarm actions (SNS publish, Lambda invoke).
-- **Smithy codegen reuse** -- generate a `ruststack-cloudwatch-model` crate from the official Smithy model (`monitoring-2010-08-01.json`) using the same codegen infrastructure as all other services.
+- **Smithy codegen reuse** -- generate a `rustack-cloudwatch-model` crate from the official Smithy model (`monitoring-2010-08-01.json`) using the same codegen infrastructure as all other services.
 - **Estimated effort** -- 4-5 days for Phase 0 (15 core operations), 2-3 days for Phase 1 (composite alarms + dashboards), 2-3 days for Phase 2 (anomaly detection + streams), plus 1 day for CI integration. Total: ~10-12 days.
 
 ---
@@ -46,15 +46,15 @@ This spec proposes adding CloudWatch Metrics & Alarms support to RustStack. Key 
 
 ### 2.1 Why CloudWatch Metrics?
 
-CloudWatch Metrics is the universal metrics destination for AWS workloads. With CloudWatch Logs already implemented, CloudWatch Metrics is the natural next step to complete RustStack's observability surface:
+CloudWatch Metrics is the universal metrics destination for AWS workloads. With CloudWatch Logs already implemented, CloudWatch Metrics is the natural next step to complete Rustack's observability surface:
 
 - **Custom application metrics** -- every non-trivial AWS application publishes custom metrics via `PutMetricData`. Without a local endpoint, developers either skip metrics testing or make real AWS API calls during development.
-- **Infrastructure metrics** -- ECS, EKS, Lambda, and other services emit metrics to CloudWatch. Local emulations of these services (already in RustStack) benefit from having a metrics endpoint to validate metric publication logic.
+- **Infrastructure metrics** -- ECS, EKS, Lambda, and other services emit metrics to CloudWatch. Local emulations of these services (already in Rustack) benefit from having a metrics endpoint to validate metric publication logic.
 - **Alarms and alerting** -- `PutMetricAlarm` is one of the most commonly used CloudWatch operations in IaC. Terraform `aws_cloudwatch_metric_alarm` and CDK `Alarm` constructs need a working endpoint for `plan`/`synth` cycles.
 - **Prometheus remote write adapter** -- the CloudWatch Prometheus remote write adapter (`aws-otel-collector` with `awsprometheusremotewrite` exporter) uses `PutMetricData` to send Prometheus metrics to CloudWatch. A local endpoint enables testing observability pipelines.
 - **Datadog, New Relic, Grafana Cloud agents** -- monitoring agents that read from CloudWatch via `GetMetricData`/`GetMetricStatistics` can be tested locally.
 - **Dashboards** -- `PutDashboard`/`GetDashboard` are used by IaC tools and are trivial to implement (JSON blob storage).
-- **EventBridge integration** -- alarm state changes emit EventBridge events. With EventBridge already implemented in RustStack, this enables testing complete alarm-to-action pipelines.
+- **EventBridge integration** -- alarm state changes emit EventBridge events. With EventBridge already implemented in Rustack, this enables testing complete alarm-to-action pipelines.
 
 ### 2.2 Relationship to CloudWatch Logs
 
@@ -69,7 +69,7 @@ CloudWatch Metrics and CloudWatch Logs are **completely separate AWS services** 
 | Operation dispatch | `X-Amz-Target: Logs_20140328.*` | `Action=PutMetricData` form param |
 | SigV4 signing service | `logs` | `monitoring` |
 | Smithy namespace | `com.amazonaws.cloudwatchlogs` | `com.amazonaws.cloudwatch` |
-| RustStack crate prefix | `ruststack-logs-*` | `ruststack-cloudwatch-*` |
+| Rustack crate prefix | `rustack-logs-*` | `rustack-cloudwatch-*` |
 
 They share no code, no storage, no types, and no protocol infrastructure. The only connection is that CloudWatch Logs metric filters can publish metrics to CloudWatch Metrics -- a cross-service integration that is a non-goal for MVP.
 
@@ -119,7 +119,7 @@ With Phase 0 implemented (~15 operations), the following tools work out of the b
 7. **Composite alarms** -- PutCompositeAlarm (store configuration, evaluate on explicit state change)
 8. **awsQuery protocol** -- full form-urlencoded request parsing and XML response serialization, reusing SNS protocol infrastructure
 9. **Smithy-generated types** -- all types generated from official AWS Smithy model
-10. **Shared infrastructure** -- reuse `ruststack-core`, `ruststack-auth`, and the awsQuery protocol layer from SNS
+10. **Shared infrastructure** -- reuse `rustack-core`, `rustack-auth`, and the awsQuery protocol layer from SNS
 11. **Same Docker image** -- single binary serves all 12 services on port 4566
 12. **Pass LocalStack CloudWatch test suite** -- validate against vendored tests
 
@@ -135,7 +135,7 @@ With Phase 0 implemented (~15 operations), the following tools work out of the b
 8. **Cross-account/cross-region metric aggregation** -- single-account, single-region for local development
 9. **High-resolution metrics** -- accept and store sub-minute periods but no special high-resolution storage optimization
 10. **CloudWatch Logs metric filter integration** -- metric filters in CloudWatch Logs do not publish to CloudWatch Metrics in MVP
-11. **Data persistence across restarts** -- in-memory only, matching all other RustStack services
+11. **Data persistence across restarts** -- in-memory only, matching all other Rustack services
 12. **Real CloudWatch Contributor Insights** -- insight rules accepted but not evaluated
 13. **Metric data retention limits** -- real AWS retains data for 15 months with resolution-based tiers; for local dev, keep all data in memory with a configurable maximum retention period
 
@@ -170,20 +170,20 @@ With Phase 0 implemented (~15 operations), the following tools work out of the b
       +--------+--------+-------+--------+--------+----------+
                                 |
                          +------+------+
-                         | ruststack-  |
+                         | rustack-  |
                          | core + auth |
                          +-------------+
 ```
 
 ### 4.2 Relationship with CloudWatch Logs
 
-CloudWatch Metrics and CloudWatch Logs are completely independent services within RustStack:
+CloudWatch Metrics and CloudWatch Logs are completely independent services within Rustack:
 
-- **Separate crates**: `ruststack-cloudwatch-{model,core,http}` vs `ruststack-logs-{model,core,http}`
+- **Separate crates**: `rustack-cloudwatch-{model,core,http}` vs `rustack-logs-{model,core,http}`
 - **Separate protocols**: awsQuery (XML) vs awsJson1.1 (JSON)
 - **Separate routing**: Action= form parameter vs X-Amz-Target header
 - **Separate storage**: MetricStore/AlarmStore vs LogGroupStore/LogStreamStore
-- **No shared code** beyond `ruststack-core` and `ruststack-auth`
+- **No shared code** beyond `rustack-core` and `rustack-auth`
 
 The naming convention uses `cloudwatch` (not `monitoring`) for the crate prefix to match the common AWS branding, while the SigV4 service name is `monitoring` as required by the AWS API.
 
@@ -203,7 +203,7 @@ CloudWatch Metrics uses `awsQuery` with `Content-Type: application/x-www-form-ur
 - Available before reading the body (header-only)
 - Unambiguous (service name is explicit)
 - Forward-compatible (any future awsQuery service is automatically distinguishable)
-- Already available in the `Authorization` header that `ruststack-auth` processes
+- Already available in the `Authorization` header that `rustack-auth` processes
 
 For the SNS router, the existing `content-type` match continues to work because CloudWatch Metrics will be checked first (via SigV4 service name). The routing order becomes:
 
@@ -243,37 +243,37 @@ fn extract_sigv4_service(req: &http::Request<Incoming>) -> Option<&str> {
 ### 4.4 Crate Dependency Graph
 
 ```
-ruststack-server (app)
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-{model,core,http}
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-sqs-{model,core,http}
-+-- ruststack-ssm-{model,core,http}
-+-- ruststack-sns-{model,core,http}
-+-- ruststack-events-{model,core,http}
-+-- ruststack-logs-{model,core,http}
-+-- ruststack-kms-{model,core,http}
-+-- ruststack-kinesis-{model,core,http}
-+-- ruststack-secretsmanager-{model,core,http}
-+-- ruststack-cloudwatch-model        <-- NEW (auto-generated)
-+-- ruststack-cloudwatch-core         <-- NEW
-+-- ruststack-cloudwatch-http         <-- NEW
+rustack-server (app)
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-{model,core,http}
++-- rustack-dynamodb-{model,core,http}
++-- rustack-sqs-{model,core,http}
++-- rustack-ssm-{model,core,http}
++-- rustack-sns-{model,core,http}
++-- rustack-events-{model,core,http}
++-- rustack-logs-{model,core,http}
++-- rustack-kms-{model,core,http}
++-- rustack-kinesis-{model,core,http}
++-- rustack-secretsmanager-{model,core,http}
++-- rustack-cloudwatch-model        <-- NEW (auto-generated)
++-- rustack-cloudwatch-core         <-- NEW
++-- rustack-cloudwatch-http         <-- NEW
 
-ruststack-cloudwatch-http
-+-- ruststack-cloudwatch-model
-+-- ruststack-auth
+rustack-cloudwatch-http
++-- rustack-cloudwatch-model
++-- rustack-auth
 +-- quick-xml (XML response serialization, reuse from SNS)
 +-- serde_urlencoded (form request deserialization, reuse from SNS)
 
-ruststack-cloudwatch-core
-+-- ruststack-core
-+-- ruststack-cloudwatch-model
+rustack-cloudwatch-core
++-- rustack-core
++-- rustack-cloudwatch-model
 +-- dashmap
 +-- tokio
 +-- serde_json (for dashboard body storage)
 
-ruststack-cloudwatch-model (auto-generated, standalone)
+rustack-cloudwatch-model (auto-generated, standalone)
 +-- serde
 +-- serde_json
 ```
@@ -306,8 +306,8 @@ The SNS implementation provides the complete awsQuery protocol infrastructure:
 | Form-urlencoded request parsing | Yes | `serde_urlencoded` for flat params; custom parser for nested `.member.N` lists |
 | XML response serialization | Yes | `quick-xml` with the same `<ActionResponse>/<ActionResult>/<ResponseMetadata>` envelope |
 | XML error formatting | Yes | Same `<ErrorResponse><Error><Type><Code><Message>` format |
-| SigV4 auth | Yes | `ruststack-auth` is service-agnostic |
-| Multi-account/region state | Yes | `ruststack-core` unchanged |
+| SigV4 auth | Yes | `rustack-auth` is service-agnostic |
+| Multi-account/region state | Yes | `rustack-core` unchanged |
 
 The protocol layer for CloudWatch Metrics is structurally identical to SNS. The only differences are the XML namespace, action names, and the specific form parameter structures for each operation.
 
@@ -449,7 +449,7 @@ Tags.member.1.Key=Environment&Tags.member.1.Value=Production
 
 ### 6.1 Universal Codegen
 
-The `ruststack-cloudwatch-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
+The `rustack-cloudwatch-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
 
 **Smithy model:** `codegen/smithy-model/monitoring.json` (namespace `com.amazonaws.cloudwatch`)
 **Service config:** `codegen/services/cloudwatch.toml`
@@ -510,7 +510,7 @@ file_layout = "flat"
 
 ### 6.3 Generated Output
 
-The codegen produces 6 files in `crates/ruststack-cloudwatch-model/src/`:
+The codegen produces 6 files in `crates/rustack-cloudwatch-model/src/`:
 
 | File | Contents |
 |------|----------|
@@ -531,10 +531,10 @@ See [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design
 
 ## 7. Crate Structure
 
-### 7.1 `ruststack-cloudwatch-model` (auto-generated)
+### 7.1 `rustack-cloudwatch-model` (auto-generated)
 
 ```
-crates/ruststack-cloudwatch-model/
+crates/rustack-cloudwatch-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs              # Module re-exports
@@ -547,16 +547,16 @@ crates/ruststack-cloudwatch-model/
 
 **Dependencies:** `serde`, `serde_json`
 
-### 7.2 `ruststack-cloudwatch-core`
+### 7.2 `rustack-cloudwatch-core`
 
 ```
-crates/ruststack-cloudwatch-core/
+crates/rustack-cloudwatch-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs           # CloudWatchConfig
     +-- handler.rs          # CloudWatchHandler trait (all operation dispatch)
-    +-- provider.rs         # RustStackCloudWatch (main provider, all operation handlers)
+    +-- provider.rs         # RustackCloudWatch (main provider, all operation handlers)
     +-- metric_store.rs     # MetricStore: time-series storage for metric data points
     +-- alarm_store.rs      # AlarmStore: alarm configuration and state management
     +-- dashboard_store.rs  # DashboardStore: dashboard JSON body storage
@@ -566,12 +566,12 @@ crates/ruststack-cloudwatch-core/
     +-- validation.rs       # Input validation (namespace, metric name, dimensions, etc.)
 ```
 
-**Dependencies:** `ruststack-core`, `ruststack-cloudwatch-model`, `dashmap`, `serde_json`, `tracing`, `chrono`
+**Dependencies:** `rustack-core`, `rustack-cloudwatch-model`, `dashmap`, `serde_json`, `tracing`, `chrono`
 
-### 7.3 `ruststack-cloudwatch-http`
+### 7.3 `rustack-cloudwatch-http`
 
 ```
-crates/ruststack-cloudwatch-http/
+crates/rustack-cloudwatch-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -583,17 +583,17 @@ crates/ruststack-cloudwatch-http/
     +-- request.rs          # Form-urlencoded request parsing (nested .member.N)
 ```
 
-**Dependencies:** `ruststack-cloudwatch-model`, `ruststack-auth`, `hyper`, `http`, `quick-xml`, `serde_urlencoded`, `bytes`
+**Dependencies:** `rustack-cloudwatch-model`, `rustack-auth`, `hyper`, `http`, `quick-xml`, `serde_urlencoded`, `bytes`
 
-This crate is structurally similar to `ruststack-sns-http`. The router parses `Action=<Op>` from the form body and dispatches to the handler.
+This crate is structurally similar to `rustack-sns-http`. The router parses `Action=<Op>` from the form body and dispatches to the handler.
 
 ### 7.4 Workspace Changes
 
 ```toml
 [workspace.dependencies]
-ruststack-cloudwatch-model = { path = "crates/ruststack-cloudwatch-model" }
-ruststack-cloudwatch-http = { path = "crates/ruststack-cloudwatch-http" }
-ruststack-cloudwatch-core = { path = "crates/ruststack-cloudwatch-core" }
+rustack-cloudwatch-model = { path = "crates/rustack-cloudwatch-model" }
+rustack-cloudwatch-http = { path = "crates/rustack-cloudwatch-http" }
+rustack-cloudwatch-core = { path = "crates/rustack-cloudwatch-core" }
 ```
 
 ---
@@ -1222,14 +1222,14 @@ The only potential background processing is alarm evaluation, which is optional 
 
 ```rust
 /// Main CloudWatch Metrics provider implementing all operations.
-pub struct RustStackCloudWatch {
+pub struct RustackCloudWatch {
     pub(crate) metric_store: Arc<MetricStore>,
     pub(crate) alarm_store: Arc<AlarmStore>,
     pub(crate) dashboard_store: Arc<DashboardStore>,
     pub(crate) config: Arc<CloudWatchConfig>,
 }
 
-impl RustStackCloudWatch {
+impl RustackCloudWatch {
     pub fn new(config: CloudWatchConfig) -> Self {
         Self {
             metric_store: Arc::new(MetricStore::new(config.metric_store_config.clone())),
@@ -1260,7 +1260,7 @@ Accept metric data points and store them in the time-series engine.
 3. Return empty success response (PutMetricData has no result body)
 
 ```rust
-impl RustStackCloudWatch {
+impl RustackCloudWatch {
     pub fn put_metric_data(
         &self,
         input: PutMetricDataInput,
@@ -1314,7 +1314,7 @@ Query metrics by namespace/name/dimensions/time range and compute statistics ove
 7. Return `{ Label, Datapoints }`
 
 ```rust
-impl RustStackCloudWatch {
+impl RustackCloudWatch {
     pub fn get_metric_statistics(
         &self,
         input: GetMetricStatisticsInput,
@@ -1384,7 +1384,7 @@ Store an alarm configuration.
 10. Return empty success response
 
 ```rust
-impl RustStackCloudWatch {
+impl RustackCloudWatch {
     pub fn put_metric_alarm(
         &self,
         input: PutMetricAlarmInput,
@@ -1512,7 +1512,7 @@ Manually set the state of an alarm. This is the primary mechanism for alarm stat
 5. Return empty success response
 
 ```rust
-impl RustStackCloudWatch {
+impl RustackCloudWatch {
     pub fn set_alarm_state(
         &self,
         input: SetAlarmStateInput,
@@ -1763,10 +1763,10 @@ The `<Type>` field is either `Sender` (client error, 4xx) or `Receiver` (server 
 CloudWatch Metrics support is gated behind a cargo feature:
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack-server/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs", "ssm", "sns", "events", "logs", "kms", "kinesis", "secretsmanager", "cloudwatch"]
-cloudwatch = ["dep:ruststack-cloudwatch-core", "dep:ruststack-cloudwatch-http"]
+cloudwatch = ["dep:rustack-cloudwatch-core", "dep:rustack-cloudwatch-http"]
 ```
 
 ### 12.2 Gateway Registration
@@ -1785,8 +1785,8 @@ if is_enabled("cloudwatch") {
         cloudwatch_skip_signature_validation = cw_config.skip_signature_validation,
         "initializing CloudWatch Metrics service",
     );
-    let cw_provider = RustStackCloudWatch::new(cw_config.clone());
-    let cw_handler = RustStackCloudWatchHandler::new(Arc::new(cw_provider));
+    let cw_provider = RustackCloudWatch::new(cw_config.clone());
+    let cw_handler = RustackCloudWatchHandler::new(Arc::new(cw_provider));
     let cw_http_config = build_cloudwatch_http_config(&cw_config);
     let cw_service = CloudWatchHttpService::new(Arc::new(cw_handler), cw_http_config);
     services.push(Box::new(service::CloudWatchServiceRouter::new(cw_service)));
@@ -2088,7 +2088,7 @@ tflocal apply
 #### 13.4.4 Prometheus Remote Write Adapter
 
 **Operations tested:** PutMetricData (high-throughput metric ingestion)
-**How to run:** Configure AWS OTel Collector with CloudWatch exporter pointing at RustStack.
+**How to run:** Configure AWS OTel Collector with CloudWatch exporter pointing at Rustack.
 
 ### 13.5 CI Integration
 
@@ -2102,9 +2102,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -p ruststack-cloudwatch-model
-      - run: cargo test -p ruststack-cloudwatch-core
-      - run: cargo test -p ruststack-cloudwatch-http
+      - run: cargo test -p rustack-cloudwatch-model
+      - run: cargo test -p rustack-cloudwatch-core
+      - run: cargo test -p rustack-cloudwatch-http
 
   integration:
     runs-on: ubuntu-latest
@@ -2112,7 +2112,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release
-      - run: ./target/release/ruststack-server &
+      - run: ./target/release/rustack-server &
       - run: sleep 2
       - run: |
           # AWS CLI smoke tests
@@ -2145,8 +2145,8 @@ jobs:
 1. **Day 1: Model + Scaffolding**
    - Create `codegen/services/cloudwatch.toml`
    - Add CloudWatch Smithy model (`monitoring-2010-08-01.json`) to codegen
-   - Generate `ruststack-cloudwatch-model` crate
-   - Create `ruststack-cloudwatch-core` and `ruststack-cloudwatch-http` crate scaffolding
+   - Generate `rustack-cloudwatch-model` crate
+   - Create `rustack-cloudwatch-core` and `rustack-cloudwatch-http` crate scaffolding
    - Implement `CloudWatchOperation` enum and router
    - Implement form parameter parser (reuse/adapt from SNS)
 
@@ -2235,8 +2235,8 @@ jobs:
 
 ### 15.2 Dependencies
 
-- `ruststack-core` -- no changes needed
-- `ruststack-auth` -- may need `extract_sigv4_service()` utility (or implement in gateway)
+- `rustack-core` -- no changes needed
+- `rustack-auth` -- may need `extract_sigv4_service()` utility (or implement in gateway)
 - `dashmap` -- already in workspace
 - `quick-xml` -- already in workspace (used by SNS)
 - `serde_urlencoded` -- already in workspace (used by SNS)

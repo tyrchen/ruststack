@@ -1,9 +1,9 @@
-# RustStack EventBridge: Native Rust Implementation Design
+# Rustack EventBridge: Native Rust Implementation Design
 
 **Date:** 2026-03-06
 **Status:** Draft / RFC
-**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-sqs-design.md](./ruststack-sqs-design.md), [ruststack-ssm-design.md](./ruststack-ssm-design.md)
-**Scope:** Add native EventBridge support to RustStack -- event bus management, rule/target CRUD, event pattern matching, and event delivery to local targets (SQS, CloudWatch Logs). Uses the same Smithy-based codegen and gateway routing patterns established by DynamoDB and SSM.
+**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-sqs-design.md](./rustack-sqs-design.md), [rustack-ssm-design.md](./rustack-ssm-design.md)
+**Scope:** Add native EventBridge support to Rustack -- event bus management, rule/target CRUD, event pattern matching, and event delivery to local targets (SQS, CloudWatch Logs). Uses the same Smithy-based codegen and gateway routing patterns established by DynamoDB and SSM.
 
 ---
 
@@ -30,12 +30,12 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding EventBridge support to RustStack as a fully native Rust implementation. Key design decisions:
+This spec proposes adding EventBridge support to Rustack as a fully native Rust implementation. Key design decisions:
 
 - **Native Rust event pattern matching engine** -- the core complexity of EventBridge is the event pattern matching language (prefix, suffix, anything-but, numeric, exists, wildcard, cidr, equals-ignore-case, $or). We implement a purpose-built pattern matcher inspired by AWS's open-source Event Ruler (Java) and quamina-rs (Rust). No JVM, no external processes.
 - **awsJson1.1 protocol** -- EventBridge (service name: `events`) uses the same `awsJson1.1` protocol as SSM. The `X-Amz-Target` prefix is `AWSEvents`. All JSON serialization, routing, and error formatting infrastructure from SSM is directly reusable.
-- **Smithy codegen reuse** -- extend the existing codegen to generate an `ruststack-events-model` crate from the official AWS EventBridge Smithy JSON AST (`aws/api-models-aws`, path `models/events/service/2015-10-07/events-2015-10-07.json`).
-- **Local target delivery** -- when `PutEvents` matches a rule, deliver the event to configured targets. For MVP, support SQS queue targets (integrate with RustStack's existing SQS service via internal channel). CloudWatch Logs targets in a later phase.
+- **Smithy codegen reuse** -- extend the existing codegen to generate an `rustack-events-model` crate from the official AWS EventBridge Smithy JSON AST (`aws/api-models-aws`, path `models/events/service/2015-10-07/events-2015-10-07.json`).
+- **Local target delivery** -- when `PutEvents` matches a rule, deliver the event to configured targets. For MVP, support SQS queue targets (integrate with Rustack's existing SQS service via internal channel). CloudWatch Logs targets in a later phase.
 - **Actor-based event bus** -- each event bus runs as an independent actor owning its rules, targets, and pattern matcher state. Communicates via `tokio::sync::mpsc` channels, following the actor model mandated by CLAUDE.md.
 - **Phased delivery** -- 4 phases from MVP (event bus CRUD, rules, targets, PutEvents with SQS delivery, TestEventPattern) to full feature parity including input transformers, scheduled rules, and archive/replay.
 
@@ -90,7 +90,7 @@ With EventBridge implemented, the following tools and frameworks work locally:
 |---------------|----------|------------|-----------------|-----------------|-------|
 | LocalStack Events | Python | ~1GB | Full (uses event-ruler via Java) | Full | Most mature, complex Python+Java hybrid |
 | Moto | Python | N/A (library) | Partial | Mock only | Test mock, no actual delivery |
-| **RustStack Events** | **Rust** | **~10MB** | **Full** | **SQS, Logs** | **This proposal** |
+| **Rustack Events** | **Rust** | **~10MB** | **Full** | **SQS, Logs** | **This proposal** |
 
 No existing Rust-based EventBridge emulator exists. This would be the first.
 
@@ -122,9 +122,9 @@ No existing Rust-based EventBridge emulator exists. This would be the first.
 5. **Endpoints (global endpoints)** -- accept CreateEndpoint but do not implement cross-region failover
 6. **Partner event sources** -- accept ActivateEventSource/CreatePartnerEventSource but no real partner integration
 7. **Cross-account event delivery** -- all buses exist within a single account context
-8. **Lambda target invocation** -- Lambda is not implemented in RustStack; Lambda targets are accepted but not invoked
+8. **Lambda target invocation** -- Lambda is not implemented in Rustack; Lambda targets are accepted but not invoked
 9. **IAM policy enforcement** -- accept PutPermission/RemovePermission, do not evaluate policies
-10. **Data persistence across restarts** -- in-memory only, matching all other RustStack services
+10. **Data persistence across restarts** -- in-memory only, matching all other Rustack services
 11. **CloudWatch metrics** -- no metrics emission
 12. **Scheduled rule execution** -- accept cron/rate ScheduleExpression in PutRule, but defer actual timer-based triggering to Phase 3
 
@@ -159,7 +159,7 @@ No existing Rust-based EventBridge emulator exists. This would be the first.
        +---------+-----+----+--------+--------+
                        |
                 +------+------+
-                | ruststack-  |
+                | rustack-  |
                 | core + auth |
                 +-----------  +
 ```
@@ -214,32 +214,32 @@ Routing logic: check `X-Amz-Target` header. If prefix is `AWSEvents.`, route to 
 ### 4.4 Crate Dependency Graph
 
 ```
-ruststack-server (app)
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-{model,core,http}
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-sqs-{model,core,http}
-+-- ruststack-ssm-{model,core,http}
-+-- ruststack-events-model       <-- NEW (auto-generated)
-+-- ruststack-events-core        <-- NEW
-+-- ruststack-events-http        <-- NEW
+rustack-server (app)
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-{model,core,http}
++-- rustack-dynamodb-{model,core,http}
++-- rustack-sqs-{model,core,http}
++-- rustack-ssm-{model,core,http}
++-- rustack-events-model       <-- NEW (auto-generated)
++-- rustack-events-core        <-- NEW
++-- rustack-events-http        <-- NEW
 
-ruststack-events-http
-+-- ruststack-events-model
-+-- ruststack-auth
+rustack-events-http
++-- rustack-events-model
++-- rustack-auth
 
-ruststack-events-core
-+-- ruststack-core
-+-- ruststack-events-model
+rustack-events-core
++-- rustack-core
++-- rustack-events-model
 +-- tokio (channels, timers)
 +-- dashmap
 +-- serde_json (for pattern matching against event JSON)
 
-ruststack-events-model (auto-generated, standalone)
+rustack-events-model (auto-generated, standalone)
 ```
 
-**Important**: `ruststack-events-core` does NOT depend on `ruststack-sqs-core`. Target delivery is abstracted via the `TargetDelivery` trait, and the server binary wires them together. This keeps crate dependencies clean and avoids circular dependencies.
+**Important**: `rustack-events-core` does NOT depend on `rustack-sqs-core`. Target delivery is abstracted via the `TargetDelivery` trait, and the server binary wires them together. This keeps crate dependencies clean and avoids circular dependencies.
 
 ---
 
@@ -428,8 +428,8 @@ From the 57 operations, the codegen will produce roughly:
 
 ```makefile
 codegen-events:
-	@cd codegen && cargo run -- smithy-model/events.json ../crates/ruststack-events-model/src
-	@cargo +nightly fmt -p ruststack-events-model
+	@cd codegen && cargo run -- smithy-model/events.json ../crates/rustack-events-model/src
+	@cargo +nightly fmt -p rustack-events-model
 
 codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-events
 ```
@@ -438,10 +438,10 @@ codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-events
 
 ## 7. Crate Structure
 
-### 7.1 `ruststack-events-model` (auto-generated)
+### 7.1 `rustack-events-model` (auto-generated)
 
 ```
-crates/ruststack-events-model/
+crates/rustack-events-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs                    # Module re-exports
@@ -454,10 +454,10 @@ crates/ruststack-events-model/
 
 **Dependencies**: `serde`, `serde_json`, `bytes`, `http`
 
-### 7.2 `ruststack-events-http`
+### 7.2 `rustack-events-http`
 
 ```
-crates/ruststack-events-http/
+crates/rustack-events-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -468,17 +468,17 @@ crates/ruststack-events-http/
     +-- body.rs                   # Response body type
 ```
 
-**Dependencies**: `ruststack-events-model`, `ruststack-auth`, `hyper`, `serde_json`, `bytes`
+**Dependencies**: `rustack-events-model`, `rustack-auth`, `hyper`, `serde_json`, `bytes`
 
-### 7.3 `ruststack-events-core`
+### 7.3 `rustack-events-core`
 
 ```
-crates/ruststack-events-core/
+crates/rustack-events-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs                 # EventsConfig
-    +-- provider.rs               # RustStackEvents (main provider, EventBusManager actor)
+    +-- provider.rs               # RustackEvents (main provider, EventBusManager actor)
     +-- error.rs                  # EventsServiceError
     +-- bus/
     |   +-- mod.rs
@@ -511,7 +511,7 @@ crates/ruststack-events-core/
         +-- stubs.rs              # Stub implementations for Archive, Replay, etc.
 ```
 
-**Dependencies**: `ruststack-core`, `ruststack-events-model`, `tokio` (mpsc, sync), `dashmap`, `uuid`, `tracing`, `chrono`, `serde_json`, `ipnet` (for CIDR matching)
+**Dependencies**: `rustack-core`, `rustack-events-model`, `tokio` (mpsc, sync), `dashmap`, `uuid`, `tracing`, `chrono`, `serde_json`, `ipnet` (for CIDR matching)
 
 ---
 
@@ -1562,7 +1562,7 @@ fn apply_json_path(event_json: &str, path: &str) -> String {
 
 ```rust
 /// Main EventBridge provider. Manages all event bus actors.
-pub struct RustStackEvents {
+pub struct RustackEvents {
     /// Event bus registry: bus_name -> EventBusHandle.
     buses: DashMap<String, EventBusHandle>,
     /// Reverse index: rule_arn -> (bus_name, rule_name).
@@ -1682,7 +1682,7 @@ All partner event source and endpoint operations are stubs that store metadata b
 ### 11.3 CreateEventBus Logic
 
 ```rust
-impl RustStackEvents {
+impl RustackEvents {
     pub async fn create_event_bus(
         &self,
         input: CreateEventBusInput,
@@ -1841,7 +1841,7 @@ impl EventBusActor {
 ### 11.5 TestEventPattern Logic
 
 ```rust
-impl RustStackEvents {
+impl RustackEvents {
     pub fn test_event_pattern(
         &self,
         input: TestEventPatternInput,
@@ -1883,7 +1883,7 @@ impl RustStackEvents {
 On startup, the provider creates a "default" event bus automatically:
 
 ```rust
-impl RustStackEvents {
+impl RustackEvents {
     pub fn new(config: EventsConfig, delivery: Arc<dyn TargetDelivery>) -> Self {
         let provider = Self {
             buses: DashMap::new(),
@@ -2082,14 +2082,14 @@ mod events_router {
 ### 13.2 Feature Gate
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack-server/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs", "ssm", "events"]
-s3 = ["dep:ruststack-s3-core", "dep:ruststack-s3-http", "dep:ruststack-s3-model"]
-dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
-sqs = ["dep:ruststack-sqs-core", "dep:ruststack-sqs-http"]
-ssm = ["dep:ruststack-ssm-core", "dep:ruststack-ssm-http"]
-events = ["dep:ruststack-events-core", "dep:ruststack-events-http"]
+s3 = ["dep:rustack-s3-core", "dep:rustack-s3-http", "dep:rustack-s3-model"]
+dynamodb = ["dep:rustack-dynamodb-core", "dep:rustack-dynamodb-http"]
+sqs = ["dep:rustack-sqs-core", "dep:rustack-sqs-http"]
+ssm = ["dep:rustack-ssm-core", "dep:rustack-ssm-http"]
+events = ["dep:rustack-events-core", "dep:rustack-events-http"]
 ```
 
 ### 13.3 Gateway Registration Order
@@ -2125,7 +2125,7 @@ The server binary wires EventBridge's `TargetDelivery` trait to the SQS service:
 /// Server-level target delivery that routes to in-process services.
 pub struct LocalTargetDelivery {
     /// SQS provider for queue targets.
-    sqs: Arc<RustStackSqs>,
+    sqs: Arc<RustackSqs>,
 }
 
 #[async_trait]
@@ -2340,7 +2340,7 @@ The **event pattern template directory** contains **157 test cases** in JSON5 fo
 - Operator case sensitivity (case-sensitive operators)
 - Complex multi-key patterns
 
-Adaptation strategy: same approach as SQS -- run the Python test suite against RustStack's EventBridge endpoint, track pass/fail counts, progressively fix failures.
+Adaptation strategy: same approach as SQS -- run the Python test suite against Rustack's EventBridge endpoint, track pass/fail counts, progressively fix failures.
 
 ```makefile
 test-events-localstack-patterns:
@@ -2377,14 +2377,14 @@ Key test files to extract vectors from:
 - **Repository**: https://github.com/ljacobsson/evb-cli (also https://github.com/mhlabs/evb-cli)
 - **Language**: Node.js
 - **Coverage**: Pattern generation and debugging tool for EventBridge
-- **Usage**: Can be pointed at RustStack endpoint for manual testing and pattern debugging
+- **Usage**: Can be pointed at Rustack endpoint for manual testing and pattern debugging
 
 #### 14.3.5 sls-test-tools
 
 - **Repository**: https://github.com/aleios-cloud/sls-test-tools
 - **Language**: TypeScript/Jest
 - **Coverage**: Custom Jest assertions for Serverless integration testing, including EventBridge event verification via SQS targets
-- **Usage**: Run sls-test-tools test suites against RustStack to validate end-to-end event flow from PutEvents through pattern matching to SQS delivery
+- **Usage**: Run sls-test-tools test suites against Rustack to validate end-to-end event flow from PutEvents through pattern matching to SQS delivery
 
 #### 14.3.6 AWS CLI Smoke Tests
 
@@ -2437,13 +2437,13 @@ aws sqs delete-queue $ENDPOINT --queue-url "$QUEUE_URL"
 test-events: test-events-unit test-events-integration
 
 test-events-unit:
-	@cargo test -p ruststack-events-model -p ruststack-events-core -p ruststack-events-http
+	@cargo test -p rustack-events-model -p rustack-events-core -p rustack-events-http
 
 test-events-integration:
 	@cargo test -p integration-tests -- events --ignored
 
 test-events-patterns:
-	@cargo test -p ruststack-events-core -- pattern
+	@cargo test -p rustack-events-core -- pattern
 
 test-events-cli:
 	@./tests/events-cli-smoke.sh
@@ -2463,7 +2463,7 @@ test-events-localstack:
 
 #### Step 0.1: Codegen Extension
 - Download EventBridge Smithy model JSON from `aws/api-models-aws`
-- Generate `ruststack-events-model` crate (operations enum, input/output structs, error codes)
+- Generate `rustack-events-model` crate (operations enum, input/output structs, error codes)
 - Generate serde derives with appropriate field naming
 
 #### Step 0.2: Pattern Matching Engine
@@ -2528,7 +2528,7 @@ test-events-localstack:
 
 - `InputTransformer` -- template with variable substitution from InputPathsMap
 - `UpdateEventBus` -- update description and metadata
-- CloudWatch Logs target delivery (if implemented as a RustStack service)
+- CloudWatch Logs target delivery (if implemented as a Rustack service)
 - Dead-letter config on targets (store, do not enforce for unsupported targets)
 - Retry policy on targets (store configuration)
 
@@ -2574,7 +2574,7 @@ test-events-localstack:
 
 Our implementation will intentionally differ from LocalStack in some areas:
 
-| Behavior | LocalStack | RustStack | Justification |
+| Behavior | LocalStack | Rustack | Justification |
 |----------|------------|-----------|---------------|
 | Pattern matching backend | Java Event Ruler (via subprocess or in-process) | Native Rust engine | Same semantics, different implementation |
 | Event ID format | UUID v4 | UUID v4 | Match AWS behavior |

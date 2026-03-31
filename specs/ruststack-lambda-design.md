@@ -1,9 +1,9 @@
-# RustStack Lambda: Invoke-Focused Native Rust Implementation Design
+# Rustack Lambda: Invoke-Focused Native Rust Implementation Design
 
 **Date:** 2026-03-06
 **Status:** Draft / RFC
-**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-dynamodb-design.md](./ruststack-dynamodb-design.md), [ruststack-sqs-design.md](./ruststack-sqs-design.md)
-**Scope:** Add Lambda support to RustStack with Docker-based function execution, covering function CRUD, synchronous/asynchronous invocation, versions, aliases, and function URLs. No event source mappings, no layers management, no Lambda@Edge.
+**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-dynamodb-design.md](./rustack-dynamodb-design.md), [rustack-sqs-design.md](./rustack-sqs-design.md)
+**Scope:** Add Lambda support to Rustack with Docker-based function execution, covering function CRUD, synchronous/asynchronous invocation, versions, aliases, and function URLs. No event source mappings, no layers management, no Lambda@Edge.
 
 ---
 
@@ -30,10 +30,10 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding Lambda support to RustStack as a native Rust control plane with Docker-based function execution. Key design decisions:
+This spec proposes adding Lambda support to Rustack as a native Rust control plane with Docker-based function execution. Key design decisions:
 
 - **Invoke-focused scope** -- the primary goal is to let developers invoke Lambda functions locally via Docker containers. Function CRUD (create, update, delete, list) provides the management API; `Invoke` with `RequestResponse`, `Event`, and `DryRun` modes provides the execution API.
-- **Docker-based execution engine** -- function code runs inside Docker containers using AWS Lambda base images (`public.ecr.aws/lambda/*`) which include the Lambda Runtime Interface Emulator (RIE). RustStack manages container lifecycle: pull images, start containers, forward invocation payloads, collect responses, and optionally reuse warm containers.
+- **Docker-based execution engine** -- function code runs inside Docker containers using AWS Lambda base images (`public.ecr.aws/lambda/*`) which include the Lambda Runtime Interface Emulator (RIE). Rustack manages container lifecycle: pull images, start containers, forward invocation payloads, collect responses, and optionally reuse warm containers.
 - **restJson1 protocol** -- Lambda uses `restJson1`, which is fundamentally different from the `awsJson1.0`/`awsJson1.1` protocols used by DynamoDB, SQS, and SSM. Operations are dispatched by HTTP method + URL path (e.g., `POST /2015-03-31/functions/{FunctionName}/invocations`) rather than `X-Amz-Target` headers. This requires a new routing approach in the HTTP layer.
 - **Gateway routing by URL prefix** -- all Lambda API requests use URL paths starting with `/2015-03-31/functions` or `/2021-10-31/functions`. The gateway routes requests matching these prefixes to the Lambda service, before falling through to S3.
 - **Smithy codegen adaptation** -- the existing codegen must be extended to handle `restJson1` protocol traits (`@http`, `@httpLabel`, `@httpQuery`, `@httpPayload`, `@httpHeader`) in addition to the existing `awsJson` support.
@@ -63,7 +63,7 @@ Lambda is the centerpiece of AWS serverless architecture. Every serious AWS appl
 | **docker-lambda** (lambci) | Archived/unmaintained since 2023. Was a Docker image collection, not an API server. |
 | **LocalStack Lambda** | Python-based, requires the full LocalStack runtime (~1GB image). Not embeddable. |
 
-### 2.3 What RustStack Lambda Provides
+### 2.3 What Rustack Lambda Provides
 
 A lightweight, persistent Lambda API endpoint that:
 
@@ -159,14 +159,14 @@ With the target operations implemented, the following tools work:
          +------+------+------+        +---+----+
                 |                      | Docker  |
          +------+------+              | Engine  |
-         | ruststack-  |              +---+-----+
+         | rustack-  |              +---+-----+
          | core + auth |                  |
          +-------------+              containers
 ```
 
 ### 4.2 Gateway Routing
 
-Lambda uses `restJson1`, which routes by HTTP method and URL path. This is different from all other RustStack services that use `X-Amz-Target` or content-type-based dispatch.
+Lambda uses `restJson1`, which routes by HTTP method and URL path. This is different from all other Rustack services that use `X-Amz-Target` or content-type-based dispatch.
 
 | Signal | S3 | DynamoDB | SQS | SSM | Lambda |
 |--------|----|---------:|-----|-----|--------|
@@ -189,29 +189,29 @@ Lambda must be registered before S3 in the gateway because S3 is the catch-all. 
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app)
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-{model,core,http}
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-sqs-{model,core,http}
-+-- ruststack-ssm-{model,core,http}
-+-- ruststack-lambda-model      <-- NEW (auto-generated)
-+-- ruststack-lambda-core       <-- NEW
-+-- ruststack-lambda-http       <-- NEW
+rustack-server (app)
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-{model,core,http}
++-- rustack-dynamodb-{model,core,http}
++-- rustack-sqs-{model,core,http}
++-- rustack-ssm-{model,core,http}
++-- rustack-lambda-model      <-- NEW (auto-generated)
++-- rustack-lambda-core       <-- NEW
++-- rustack-lambda-http       <-- NEW
 
-ruststack-lambda-http
-+-- ruststack-lambda-model
-+-- ruststack-auth
+rustack-lambda-http
++-- rustack-lambda-model
++-- rustack-auth
 
-ruststack-lambda-core
-+-- ruststack-core
-+-- ruststack-lambda-model
+rustack-lambda-core
++-- rustack-core
++-- rustack-lambda-model
 +-- bollard (Docker API client)
 +-- tokio (channels, tasks, timers)
 +-- dashmap
 
-ruststack-lambda-model (auto-generated, standalone)
+rustack-lambda-model (auto-generated, standalone)
 ```
 
 ---
@@ -480,7 +480,7 @@ Total: roughly 3,000-4,000 lines of generated code.
 ```makefile
 codegen-lambda:
 	@cd codegen && cargo run -- --service lambda
-	@cargo +nightly fmt -p ruststack-lambda-model
+	@cargo +nightly fmt -p rustack-lambda-model
 
 codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-lambda
 ```
@@ -491,10 +491,10 @@ codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-lambda
 
 ### 7.1 New Crates
 
-#### `ruststack-lambda-model` (auto-generated)
+#### `rustack-lambda-model` (auto-generated)
 
 ```
-crates/ruststack-lambda-model/
+crates/rustack-lambda-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs                    # Module re-exports
@@ -523,10 +523,10 @@ crates/ruststack-lambda-model/
 
 **Dependencies**: `serde`, `serde_json`, `bytes`, `http`
 
-#### `ruststack-lambda-http`
+#### `rustack-lambda-http`
 
 ```
-crates/ruststack-lambda-http/
+crates/rustack-lambda-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -541,17 +541,17 @@ crates/ruststack-lambda-http/
     +-- body.rs                   # Response body type
 ```
 
-**Dependencies**: `ruststack-lambda-model`, `ruststack-auth`, `hyper`, `serde_json`, `bytes`, `http`
+**Dependencies**: `rustack-lambda-model`, `rustack-auth`, `hyper`, `serde_json`, `bytes`, `http`
 
-#### `ruststack-lambda-core`
+#### `rustack-lambda-core`
 
 ```
-crates/ruststack-lambda-core/
+crates/rustack-lambda-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs                 # LambdaConfig
-    +-- provider.rs               # RustStackLambda (main provider, all operation handlers)
+    +-- provider.rs               # RustackLambda (main provider, all operation handlers)
     +-- error.rs                  # LambdaServiceError
     +-- function/
     |   +-- mod.rs
@@ -583,16 +583,16 @@ crates/ruststack-lambda-core/
         +-- account.rs            # GetAccountSettings
 ```
 
-**Dependencies**: `ruststack-core`, `ruststack-lambda-model`, `bollard`, `tokio` (rt, sync, time, process, fs), `dashmap`, `uuid`, `sha2`, `base64`, `tracing`, `tempfile`
+**Dependencies**: `rustack-core`, `rustack-lambda-model`, `bollard`, `tokio` (rt, sync, time, process, fs), `dashmap`, `uuid`, `sha2`, `base64`, `tracing`, `tempfile`
 
 ### 7.2 Workspace Changes
 
 ```toml
 [workspace.dependencies]
 # ... existing deps ...
-ruststack-lambda-model = { path = "crates/ruststack-lambda-model" }
-ruststack-lambda-http = { path = "crates/ruststack-lambda-http" }
-ruststack-lambda-core = { path = "crates/ruststack-lambda-core" }
+rustack-lambda-model = { path = "crates/rustack-lambda-model" }
+rustack-lambda-http = { path = "crates/rustack-lambda-http" }
+rustack-lambda-core = { path = "crates/rustack-lambda-core" }
 bollard = "~0.18"
 tempfile = "~3.15"
 ```
@@ -902,7 +902,7 @@ pub struct ExecutionConfig {
     pub docker_socket: String,
     /// Network mode for containers (default: bridge).
     pub network_mode: String,
-    /// Host address that containers can use to reach the RustStack gateway.
+    /// Host address that containers can use to reach the Rustack gateway.
     /// Used for setting AWS_ENDPOINT_URL inside containers.
     pub host_gateway_address: String,
 }
@@ -1305,7 +1305,7 @@ The storage engine manages function metadata, code artifacts, versions, aliases,
 
 ```rust
 /// Top-level function store.
-/// Keyed by (account_id, region) via ruststack-core, then by function name.
+/// Keyed by (account_id, region) via rustack-core, then by function name.
 pub struct FunctionStore {
     /// All functions keyed by function name.
     functions: DashMap<String, FunctionRecord>,
@@ -1628,7 +1628,7 @@ fn alias_arn(
 
 ```rust
 /// Main Lambda provider. Owns function storage and the execution engine.
-pub struct RustStackLambda {
+pub struct RustackLambda {
     /// Function storage (metadata, code, versions, aliases).
     store: FunctionStore,
     /// Docker execution engine for invoking functions.
@@ -1730,7 +1730,7 @@ pub struct LambdaConfig {
 ### 11.3 CreateFunction Logic
 
 ```rust
-impl RustStackLambda {
+impl RustackLambda {
     pub async fn create_function(
         &self,
         input: CreateFunctionInput,
@@ -1883,7 +1883,7 @@ impl RustStackLambda {
 ### 11.4 Invoke Logic
 
 ```rust
-impl RustStackLambda {
+impl RustackLambda {
     pub async fn invoke(
         &self,
         function_ref: &str,
@@ -2000,7 +2000,7 @@ impl RustStackLambda {
 ### 11.5 PublishVersion Logic
 
 ```rust
-impl RustStackLambda {
+impl RustackLambda {
     fn publish_version_internal(
         &self,
         function: &mut FunctionRecord,
@@ -2041,7 +2041,7 @@ struct AsyncInvocation {
     payload: Bytes,
 }
 
-impl RustStackLambda {
+impl RustackLambda {
     /// Start the async invocation worker.
     pub fn start_async_worker(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
         let lambda = Arc::clone(self);
@@ -2250,14 +2250,14 @@ impl<H: LambdaHandler> ServiceRouter for LambdaServiceRouter<H> {
 ### 13.2 Feature Gate
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack-server/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs", "ssm", "lambda"]
-s3 = ["dep:ruststack-s3-core", "dep:ruststack-s3-http"]
-dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
-sqs = ["dep:ruststack-sqs-core", "dep:ruststack-sqs-http"]
-ssm = ["dep:ruststack-ssm-core", "dep:ruststack-ssm-http"]
-lambda = ["dep:ruststack-lambda-core", "dep:ruststack-lambda-http"]
+s3 = ["dep:rustack-s3-core", "dep:rustack-s3-http"]
+dynamodb = ["dep:rustack-dynamodb-core", "dep:rustack-dynamodb-http"]
+sqs = ["dep:rustack-sqs-core", "dep:rustack-sqs-http"]
+ssm = ["dep:rustack-ssm-core", "dep:rustack-ssm-http"]
+lambda = ["dep:rustack-lambda-core", "dep:rustack-lambda-http"]
 ```
 
 ### 13.3 Gateway Registration Order
@@ -2363,15 +2363,15 @@ GET /_localstack/health
 
 ### 13.7 Docker-in-Docker Consideration
 
-When RustStack itself runs in a Docker container, it needs access to the Docker daemon to create Lambda containers. Two approaches:
+When Rustack itself runs in a Docker container, it needs access to the Docker daemon to create Lambda containers. Two approaches:
 
-1. **Docker socket mount**: Mount the host Docker socket into the RustStack container: `-v /var/run/docker.sock:/var/run/docker.sock`. Lambda containers run as siblings on the host Docker daemon.
+1. **Docker socket mount**: Mount the host Docker socket into the Rustack container: `-v /var/run/docker.sock:/var/run/docker.sock`. Lambda containers run as siblings on the host Docker daemon.
 
-2. **Docker-in-Docker (DinD)**: Run Docker inside the RustStack container. Heavier but fully isolated.
+2. **Docker-in-Docker (DinD)**: Run Docker inside the Rustack container. Heavier but fully isolated.
 
 The socket mount approach is simpler and is the recommended default. The `DOCKER_SOCKET` environment variable allows customization.
 
-For code volume mounts, when RustStack runs in a container, the code path inside the RustStack container must be translated to the host path for the bind mount to work correctly in the sibling container. This requires the `LAMBDA_CODE_HOST_PATH` environment variable to map container-internal paths to host paths.
+For code volume mounts, when Rustack runs in a container, the code path inside the Rustack container must be translated to the host path for the bind mount to work correctly in the sibling container. This requires the `LAMBDA_CODE_HOST_PATH` environment variable to map container-internal paths to host paths.
 
 ---
 
@@ -2457,7 +2457,7 @@ async fn test_lambda_invoke_python() {
 
     let invoke = client.invoke()
         .function_name("echo-fn")
-        .payload(Blob::new(br#"{"name": "RustStack"}"#.to_vec()))
+        .payload(Blob::new(br#"{"name": "Rustack"}"#.to_vec()))
         .send().await.unwrap();
 
     assert_eq!(invoke.status_code(), 200);
@@ -2466,7 +2466,7 @@ async fn test_lambda_invoke_python() {
     let payload: serde_json::Value = serde_json::from_slice(
         invoke.payload().unwrap().as_ref()
     ).unwrap();
-    assert_eq!(payload["body"], "RustStack");
+    assert_eq!(payload["body"], "Rustack");
 }
 
 #[tokio::test]
@@ -2504,7 +2504,7 @@ Key test files:
 | `test_lambda_runtimes.py` | ~500 | Runtime-specific invocation tests (Python, Node.js, Java, etc.) |
 | `test_lambda_destinations.py` | ~400 | Invocation destinations (out of scope for MVP but useful later) |
 
-**Adaptation strategy**: Run the Python test suite against RustStack's Lambda endpoint. Focus on `test_lambda_api.py` first (pure API tests that do not require actual invocation), then progress to `test_lambda.py` (invocation tests requiring Docker).
+**Adaptation strategy**: Run the Python test suite against Rustack's Lambda endpoint. Focus on `test_lambda_api.py` first (pure API tests that do not require actual invocation), then progress to `test_lambda.py` (invocation tests requiring Docker).
 
 ```makefile
 test-lambda-localstack-api:
@@ -2529,7 +2529,7 @@ test-lambda-localstack:
 SAM CLI provides the most realistic Lambda testing workflow. The `sam local start-lambda` command starts a local Lambda endpoint that accepts `Invoke` calls:
 
 ```bash
-# Test that SAM CLI can invoke functions against RustStack
+# Test that SAM CLI can invoke functions against Rustack
 sam local invoke MyFunction \
     --endpoint-url http://localhost:4566 \
     --event event.json \
@@ -2583,7 +2583,7 @@ aws lambda delete-function $ENDPOINT --function-name test-fn
 test-lambda: test-lambda-unit test-lambda-integration
 
 test-lambda-unit:
-	@cargo test -p ruststack-lambda-model -p ruststack-lambda-core -p ruststack-lambda-http
+	@cargo test -p rustack-lambda-model -p rustack-lambda-core -p rustack-lambda-http
 
 test-lambda-integration:
 	@cargo test -p integration-tests -- lambda --ignored
@@ -2611,7 +2611,7 @@ test-lambda-localstack:
 - Implement field binding annotation generation (`@httpLabel`, `@httpQuery`, `@httpHeader`, `@httpPayload`)
 - Add `LambdaServiceConfig` to codegen services
 - Download Lambda Smithy model JSON
-- Generate `ruststack-lambda-model` crate with operations, types, route table
+- Generate `rustack-lambda-model` crate with operations, types, route table
 
 #### Step 0.2: HTTP Layer (restJson1 Router)
 
@@ -2695,7 +2695,7 @@ test-lambda-localstack:
 - Function URL routing: generate a local URL (e.g., `http://localhost:4566/lambda-url/{function-name}/`) that forwards HTTP requests as Lambda events
 - CORS support for function URLs
 - Weighted alias routing (route percentage of traffic to alternate version)
-- GitHub Action integration: add Lambda to `tyrchen/ruststack` action
+- GitHub Action integration: add Lambda to `tyrchen/rustack` action
 - Docker image update: mount Docker socket by default
 
 ---
@@ -2710,9 +2710,9 @@ test-lambda-localstack:
 | Container startup latency (cold starts) | High | Medium | Warm container pooling reduces cold starts for repeated invocations. Pre-pull images on CreateFunction. |
 | Docker-in-Docker complexity | High | Medium | Recommend socket mount approach. Document host path mapping for code volumes. Provide `LAMBDA_CODE_HOST_PATH` env var. |
 | RIE compatibility across runtimes | Medium | High | Test each runtime (Python, Node.js, Java) individually. The RIE is maintained by AWS and has consistent behavior. |
-| Code volume mount path mismatch | Medium | High | When RustStack runs in a container, code paths inside the container differ from host paths. Implement path translation or use Docker volumes instead of bind mounts. |
+| Code volume mount path mismatch | Medium | High | When Rustack runs in a container, code paths inside the container differ from host paths. Implement path translation or use Docker volumes instead of bind mounts. |
 | restJson1 codegen complexity | Medium | Medium | The codegen for `restJson1` is more complex than `awsJson` due to multi-location field bindings. Consider hand-writing the route table and deserialization for the initial implementation, then backfill codegen. |
-| Container cleanup on abnormal exit | Medium | Medium | Register shutdown hook that stops all managed containers. Label containers with `ruststack-lambda` for identification and cleanup. |
+| Container cleanup on abnormal exit | Medium | Medium | Register shutdown hook that stops all managed containers. Label containers with `rustack-lambda` for identification and cleanup. |
 | bollard (Docker client) API stability | Low | Low | bollard is well-maintained and widely used. Pin version with `~`. |
 | Memory usage with many warm containers | Medium | Medium | Default to 5 warm containers per function. Each container uses ~128MB minimum. Make configurable. |
 
@@ -2728,7 +2728,7 @@ test-lambda-localstack:
 
 ### 16.3 Behavioral Differences
 
-| Behavior | AWS Lambda | LocalStack | RustStack | Justification |
+| Behavior | AWS Lambda | LocalStack | Rustack | Justification |
 |----------|-----------|------------|-----------|---------------|
 | Function state transitions | Async: Pending -> Active | Immediate Active | Immediate Active | Simpler for local dev |
 | S3 code deployment | Supported | Supported (with S3) | Not supported | Avoid cross-service dependency for MVP |
@@ -2774,7 +2774,7 @@ Lambda's total effort is comparable to DynamoDB, but the complexity is distribut
 
 ## Appendix C: Lambda Constraints and Limits
 
-| Resource | AWS Limit | Enforced in RustStack? |
+| Resource | AWS Limit | Enforced in Rustack? |
 |----------|-----------|----------------------|
 | Function name length | 1-140 characters | Yes |
 | Handler length | Max 128 characters | Yes |
