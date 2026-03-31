@@ -3,7 +3,14 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [unreleased]
+## [rustack-v0.6.0](https://github.com/compare/v0.5.0..rustack-v0.6.0) - 2026-03-31
+
+### Features
+
+- rename ruststack → rustack, bump to v0.6.0 (#17) - ([46b7397](https://github.com/commit/46b7397c675a2d19902cc6aea31a3405c237c79d)) - Tyr Chen
+
+---
+## [0.5.0](https://github.com/compare/v0.4.3..v0.5.0) - 2026-03-26
 
 ### Bug Fixes
 
@@ -22,6 +29,7 @@ All notable changes to this project will be documented in this file. See [conven
 ### Other
 
 - add test-action workflow to validate GitHub Action with published GHCR image - ([34a73ef](https://github.com/commit/34a73ef43fba032c25b8878856b13de4c519b801)) - Tyr Chen
+- Update CHANGELOG.md - ([152de09](https://github.com/commit/152de0926fb4cbcd9107d729c52d1185131b2065)) - Tyr Chen
 
 ---
 ## [0.4.3](https://github.com/compare/v0.4.2..v0.4.3) - 2026-03-21
@@ -151,7 +159,7 @@ All notable changes to this project will be documented in this file. See [conven
 ### Documentation
 
 - **(specs)** Add SQS and SSM Parameter Store design specs with research - ([31d3196](https://github.com/commit/31d31965b6a0a21d3a618edc36e127ff8ab8f69f)) - Tyr Chen
-- Add comparison table between Rustack and LocalStack - ([ad0663b](https://github.com/commit/ad0663b69a5ff045daca13ccf32cde0d6b34b32c)) - Tyr Chen
+- Add comparison table between RustStack and LocalStack - ([ad0663b](https://github.com/commit/ad0663b69a5ff045daca13ccf32cde0d6b34b32c)) - Tyr Chen
 - Add DynamoDB API research and design spec - ([aee118c](https://github.com/commit/aee118cfa64bf1e8b8b57cae63642bb01007c001)) - Tyr Chen
 - Update README and action.yml with SSM Parameter Store support - ([3e1f793](https://github.com/commit/3e1f793d9f61f8d6cfc50296ebf4d1feffb1ea83)) - Tyr Chen
 
@@ -160,8 +168,8 @@ All notable changes to this project will be documented in this file. See [conven
 - **(ci)** Add DynamoDB CI testing and update action with auth/persistence inputs - ([422153f](https://github.com/commit/422153fdff8482f9b6e1ea6267a99a847e0c4281)) - Tyr Chen
 - **(ci)** Build from source in CI workflows and add SQS compat tests - ([b67cca6](https://github.com/commit/b67cca6ef1dfe3f93a8f59b82ff8fc211ef11860)) - Tyr Chen
 - **(dynamodb)** Add DynamoDB crate structure and model types - ([a00859a](https://github.com/commit/a00859af632237a8c2e0b886d598355e0b6b59a2)) - Tyr Chen
-- **(dynamodb)** Add rustack-dynamodb-http crate - ([d93bef7](https://github.com/commit/d93bef76b9a745af200e603fffdc6d4018be177d)) - Tyr Chen
-- **(dynamodb)** Add rustack-dynamodb-core crate with business logic - ([4931b9a](https://github.com/commit/4931b9a886348e24bea99c34d23b858f382633fb)) - Tyr Chen
+- **(dynamodb)** Add ruststack-dynamodb-http crate - ([d93bef7](https://github.com/commit/d93bef76b9a745af200e603fffdc6d4018be177d)) - Tyr Chen
+- **(dynamodb)** Add ruststack-dynamodb-core crate with business logic - ([4931b9a](https://github.com/commit/4931b9a886348e24bea99c34d23b858f382633fb)) - Tyr Chen
 - **(dynamodb)** Integrate DynamoDB into unified gateway server - ([4d1e0eb](https://github.com/commit/4d1e0eb53cb3ac7676cb79fffc56407afc5e4978)) - Tyr Chen
 - **(dynamodb)** Fix 181 Alternator compatibility test failures - ([855c12f](https://github.com/commit/855c12f2a4e3f0dd1344566f9eff8b167f8fad72)) - Tyr Chen
 - **(dynamodb)** Fix 245+ Alternator test failures with legacy API, expressions, and validation - ([d4cef2a](https://github.com/commit/d4cef2a308bf7ed8639cba508527f320c87560a7)) - Tyr Chen
@@ -201,7 +209,7 @@ All notable changes to this project will be documented in this file. See [conven
 
 ### Other
 
-- Add comprehensive S3 test workflow using Rustack GitHub Action - ([0abc2d4](https://github.com/commit/0abc2d4d026146fc827feed068f9993642bef263)) - Tyr Chen
+- Add comprehensive S3 test workflow using RustStack GitHub Action - ([0abc2d4](https://github.com/commit/0abc2d4d026146fc827feed068f9993642bef263)) - Tyr Chen
 - Add workflow_dispatch to release-docker for manual image builds - ([b3ab88b](https://github.com/commit/b3ab88b87516629c0b77082d8e9a6b53f1ff8dee)) - Tyr Chen
 
 ### Tests
@@ -233,12 +241,12 @@ All notable changes to this project will be documented in this file. See [conven
 - Phase 2 - S3 XML serialization, HTTP routing, and service layer - ([dd5c3bf](https://github.com/commit/dd5c3bf480c43096ed51c8fb1973ccc326121e4c)) - Tyr Chen
 - Phase 3 - Remove s3s dependency, use own S3 model types - ([3cc7582](https://github.com/commit/3cc758233ab47d843b07f706e5a29a3873c07f8d)) - Tyr Chen
 - Phase 4 - Fix XML serialization/deserialization and versioning bugs - ([2e1a970](https://github.com/commit/2e1a970589d08a0e41cba957546c94bfdbeb57b2)) - Tyr Chen
-- Add SigV2 auth, rename rustack-s3-auth to rustack-auth, fix Mint tests (7/15) - ([8192e01](https://github.com/commit/8192e016e31e5a8521e704e1851b8ba9a7ab1811)) - Tyr Chen
+- Add SigV2 auth, rename ruststack-s3-auth to ruststack-auth, fix Mint tests (7/15) - ([8192e01](https://github.com/commit/8192e016e31e5a8521e704e1851b8ba9a7ab1811)) - Tyr Chen
 - Add PostObject, BypassGovernanceRetention, fix SigV4 auth (8/15 Mint) - ([6c10853](https://github.com/commit/6c108535a0683141318375dc4dffe982d5607069)) - Tyr Chen
 
 ### Miscellaneous Chores
 
 - init project - ([2c4d76a](https://github.com/commit/2c4d76ab78785c71dcc19427ad516bc2b9f3f083)) - Tyr Chen
-- rename project from localstack-rs to rustack - ([eddbfb0](https://github.com/commit/eddbfb0b63542b14a47b2b1bb9f01d34d9edb48c)) - Tyr Chen
+- rename project from localstack-rs to ruststack - ([eddbfb0](https://github.com/commit/eddbfb0b63542b14a47b2b1bb9f01d34d9edb48c)) - Tyr Chen
 
 <!-- generated by git-cliff -->
