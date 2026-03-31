@@ -1,6 +1,6 @@
 //! KMS integration tests.
 //!
-//! These tests require a running RustStack server at `localhost:4566`.
+//! These tests require a running Rustack server at `localhost:4566`.
 
 #[cfg(test)]
 mod tests {
@@ -377,7 +377,7 @@ mod tests {
         let client = kms_client();
         let tag = aws_sdk_kms::types::Tag::builder()
             .tag_key("project")
-            .tag_value("ruststack")
+            .tag_value("rustack")
             .build()
             .unwrap();
         let resp = client.create_key().tags(tag).send().await.unwrap();

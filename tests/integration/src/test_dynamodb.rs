@@ -1,4 +1,4 @@
-//! DynamoDB integration tests against a running RustStack server.
+//! DynamoDB integration tests against a running Rustack server.
 
 #[cfg(test)]
 mod tests {

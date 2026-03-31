@@ -1,11 +1,11 @@
-//! Integration tests for `RustStack` server (S3 + DynamoDB + SQS + SNS).
+//! Integration tests for `Rustack` server (S3 + DynamoDB + SQS + SNS).
 //!
-//! These tests require a running `RustStack` server at `localhost:4566`.
+//! These tests require a running `Rustack` server at `localhost:4566`.
 //! They are marked `#[ignore]` so they don't run during normal `cargo test`.
 //!
 //! Run them with:
 //! ```text
-//! cargo test -p ruststack-integration -- --ignored
+//! cargo test -p rustack-integration -- --ignored
 //! ```
 
 use std::sync::Once;

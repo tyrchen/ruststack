@@ -20,14 +20,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build and start RustStack
-        id: ruststack
+      - name: Build and start Rustack
+        id: rustack
         run: |
-          cargo build --release -p ruststack-server
+          cargo build --release -p rustack
 
           GATEWAY_LISTEN=0.0.0.0:4566 \
           LOG_LEVEL=warn \
-          cargo run --release -p ruststack-server &
+          cargo run --release -p rustack &
 
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then
@@ -248,7 +248,7 @@ jobs:
       # ── Rust Integration Tests ─────────────────────────────────────
       - name: "Rust integration tests"
         run: |
-          cargo test -p ruststack-integration test_lambda -- --ignored
+          cargo test -p rustack-integration test_lambda -- --ignored
 
       # ── Cleanup ────────────────────────────────────────────────────
       - name: "Cleanup"

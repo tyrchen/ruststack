@@ -20,14 +20,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build and start RustStack
-        id: ruststack
+      - name: Build and start Rustack
+        id: rustack
         run: |
-          cargo build --release -p ruststack-server
+          cargo build --release -p rustack
 
           GATEWAY_LISTEN=0.0.0.0:4566 \
           LOG_LEVEL=warn \
-          cargo run --release -p ruststack-server > /tmp/ruststack.log 2>&1 &
+          cargo run --release -p rustack > /tmp/rustack.log 2>&1 &
 
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then
@@ -55,13 +55,13 @@ jobs:
 
           # Run the built-in health check multiple times
           for i in $(seq 1 5); do
-            ./target/release/ruststack-server --health-check
+            ./target/release/rustack --health-check
           done
 
           # Verify the server log has no "connection closed before message completed" errors
-          if grep -q "connection closed before message completed" /tmp/ruststack.log; then
+          if grep -q "connection closed before message completed" /tmp/rustack.log; then
             echo "::error::Server logged 'connection closed before message completed' — health check is broken"
-            cat /tmp/ruststack.log
+            cat /tmp/rustack.log
             exit 1
           fi
 
@@ -153,13 +153,13 @@ jobs:
             --content-type "application/json" \
             --cache-control "max-age=3600" \
             --content-disposition "attachment; filename=report.json" \
-            --metadata '{"project":"ruststack","env":"test"}'
+            --metadata '{"project":"rustack","env":"test"}'
 
           HEAD=$(aws s3api head-object --bucket test-bucket-ops --key meta/data.json)
           echo "$HEAD" | grep -q "application/json"
           echo "$HEAD" | grep -q "max-age=3600"
           echo "$HEAD" | grep -q "attachment"
-          echo "$HEAD" | grep -q "ruststack"
+          echo "$HEAD" | grep -q "rustack"
 
       # ── Larger Object Upload ─────────────────────────────────────────
       - name: "Larger Object: 1MB upload with integrity check"
@@ -265,12 +265,12 @@ jobs:
 
           # Put tagging
           aws s3api put-object-tagging --bucket test-bucket-ops --key tagged/file.txt \
-            --tagging '{"TagSet": [{"Key": "env", "Value": "test"}, {"Key": "project", "Value": "ruststack"}]}'
+            --tagging '{"TagSet": [{"Key": "env", "Value": "test"}, {"Key": "project", "Value": "rustack"}]}'
 
           # Get tagging
           TAGS=$(aws s3api get-object-tagging --bucket test-bucket-ops --key tagged/file.txt)
           echo "$TAGS" | grep -q "env"
-          echo "$TAGS" | grep -q "ruststack"
+          echo "$TAGS" | grep -q "rustack"
 
           # Delete tagging
           aws s3api delete-object-tagging --bucket test-bucket-ops --key tagged/file.txt
@@ -459,7 +459,7 @@ jobs:
       - name: "POST Object: browser-based multipart/form-data upload"
         run: |
           set -euo pipefail
-          ENDPOINT="${{ steps.ruststack.outputs.endpoint }}"
+          ENDPOINT="${{ steps.rustack.outputs.endpoint }}"
 
           aws s3api create-bucket --bucket test-post
 
@@ -499,7 +499,7 @@ jobs:
       # ── Server Logs (on failure) ────────────────────────────────────
       - name: "Dump server logs (last 500 lines)"
         if: failure()
-        run: tail -500 /tmp/ruststack.log || true
+        run: tail -500 /tmp/rustack.log || true
 
       # ── Cleanup ─────────────────────────────────────────────────────
       - name: "Cleanup: delete all test buckets"

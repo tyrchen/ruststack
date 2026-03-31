@@ -1,4 +1,4 @@
-//! SSM Parameter Store integration tests against a running `RustStack` server.
+//! SSM Parameter Store integration tests against a running `Rustack` server.
 //!
 //! These tests cover all 13 SSM Parameter Store operations: CRUD, path queries,
 //! version/label management, tags, describe, and history.

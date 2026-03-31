@@ -1,285 +1,144 @@
-# RustStack
+# Rustack
 
-A high-performance, LocalStack-compatible AWS service emulator written in Rust.
+A high-performance, LocalStack-compatible AWS service emulator written in Rust. **18 services, 600+ operations, <1s startup, ~8 MB Docker image.**
 
-Currently implements **S3** (70 operations), **DynamoDB** (12 core operations), **SQS** (20 operations with FIFO support), and **SSM Parameter Store** (13 operations with version/label management), providing a unified gateway on a single port.
+## Install
 
-## Features
+```bash
+# From crates.io
+cargo install rustack
 
-- **Full S3 protocol** — 70 operations covering buckets, objects, multipart uploads, versioning, and bucket configuration
-- **DynamoDB support** — 12 core operations: `CreateTable`, `DeleteTable`, `DescribeTable`, `ListTables`, `UpdateTable`, `PutItem`, `GetItem`, `DeleteItem`, `UpdateItem`, `Query`, `Scan`, `BatchWriteItem`
-- **SQS support** — 20 operations: standard and FIFO queues, message batching, dead-letter queues, long polling, visibility timeouts, tags, and content-based deduplication
-- **SSM Parameter Store** — 13 operations: `PutParameter`, `GetParameter`, `GetParameters`, `GetParametersByPath`, `DeleteParameter`, `DeleteParameters`, `DescribeParameters`, `GetParameterHistory`, `AddTagsToResource`, `RemoveTagsFromResource`, `ListTagsForResource`, `LabelParameterVersion`, `UnlabelParameterVersion`
-- **Unified gateway** — Single port (4566) routes S3, DynamoDB, SQS, and SSM via headers; extensible `ServiceRouter` trait for adding new services
-- **Selective services** — Enable only the services you need at compile time (Cargo features) or runtime (`SERVICES` env var)
-- **AWS SDK compatible** — Drop-in replacement for LocalStack; works with any AWS SDK or CLI
-- **SigV4 authentication** — Optional AWS Signature Version 4 request verification
-- **Virtual-hosted & path-style** addressing for S3 bucket routing
-- **In-memory storage** with automatic disk spillover for large S3 objects (configurable threshold)
-- **DynamoDB expressions** — Condition, filter, projection, and update expressions with full parser
-- **Smithy-driven codegen** — S3 types auto-generated from the official AWS Smithy model
-- **Tiny Docker image** — Static musl binary in a scratch container (~8 MB)
-- **Graceful shutdown** and health check endpoints for container orchestration
+# From source
+cargo install --git https://github.com/tyrchen/rustack
 
-## Why RustStack?
-
-If you need S3, DynamoDB, SQS, and SSM for local development or CI, RustStack gives you a **faster, leaner** alternative to LocalStack:
-
-| | RustStack | LocalStack |
-|---|---|---|
-| **Language** | Rust (static binary) | Python |
-| **Docker image** | ~8 MB (scratch) | ~475 MB compressed / ~1.88 GB on disk |
-| **Startup time** | < 1 second | 10-45 seconds (S3 only); up to 2 min (all services) |
-| **Memory (idle)** | ~10 MB | ~750 MB minimum |
-| **S3 operations** | 70 | ~92 |
-| **DynamoDB operations** | 12 | ~30+ |
-| **SQS operations** | 20 | ~23 |
-| **SSM operations** | 13 | ~146 |
-| **CI cold start** | Pull + ready in ~3s | Pull + ready in 30-90s |
-| **Auth support** | SigV4 + SigV2 + presigned URLs | SigV4 (Pro for IAM enforcement) |
-| **License** | MIT, fully open source | Shifting to registration-required; free tier limited |
-| **Multi-service** | S3 + DynamoDB + SQS | 80+ AWS services |
-
-**When to use RustStack:** You need fast, reliable S3, DynamoDB, SQS, and/or SSM in CI pipelines or local dev, and don't want to wait 30+ seconds for a 2 GB container to boot. Your tests start in seconds, not minutes.
-
-**When to use LocalStack:** You need services beyond S3, DynamoDB, SQS, and SSM (Lambda, SNS, etc.) and are willing to trade startup time and resource usage for broader AWS coverage.
+# Or use Docker
+docker run -p 4566:4566 ghcr.io/tyrchen/rustack:latest
+```
 
 ## Quick Start
 
 ```bash
-# Build and run
-cargo run -p ruststack-server
+# Start the server (all 18 services on port 4566)
+rustack
 
-# Or use the Makefile
-make run
+# Or start with specific services only
+SERVICES=s3,dynamodb,sqs rustack
+
+# Use with any AWS SDK or CLI
+export AWS_ENDPOINT_URL=http://localhost:4566
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+
+aws s3 mb s3://my-bucket
+aws s3 cp file.txt s3://my-bucket/
+aws dynamodb create-table --table-name users --key-schema AttributeName=id,KeyType=HASH --attribute-definitions AttributeName=id,AttributeType=S --billing-mode PAY_PER_REQUEST
+aws sqs create-queue --queue-name my-queue
 ```
 
-The server listens on `0.0.0.0:4566` by default. Point any AWS SDK or CLI at `http://localhost:4566`:
-
-```bash
-aws s3 --endpoint-url http://localhost:4566 mb s3://my-bucket
-aws s3 --endpoint-url http://localhost:4566 cp file.txt s3://my-bucket/
-aws s3 --endpoint-url http://localhost:4566 ls s3://my-bucket/
-```
-
-### Docker
-
-```bash
-docker build -t ruststack .
-docker run -p 4566:4566 ruststack
-
-# Run with only specific services
-docker run -p 4566:4566 -e SERVICES=dynamodb ruststack
-docker run -p 4566:4566 -e SERVICES=sqs ruststack
-docker run -p 4566:4566 -e SERVICES=ssm ruststack
-```
-
-Multi-arch images (amd64/arm64) are published to `ghcr.io/tyrchen/ruststack` on tagged releases.
-
-## GitHub Action
-
-Use RustStack as a drop-in S3 + DynamoDB + SQS + SSM service in your CI pipelines:
+### Docker Compose
 
 ```yaml
-steps:
-  - uses: actions/checkout@v4
-  - uses: tyrchen/ruststack@v0
-    id: ruststack
+services:
+  rustack:
+    image: ghcr.io/tyrchen/rustack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,dynamodb,sqs,lambda
+      - LOG_LEVEL=info
+
+  app:
+    build: .
+    depends_on:
+      - rustack
+    environment:
+      - AWS_ENDPOINT_URL=http://rustack:4566
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
 ```
 
-That's it. The action starts the server, waits for it to be healthy, and exports `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` into the environment. All subsequent `aws` CLI and AWS SDK calls will automatically use RustStack.
+## Why Rustack?
 
-### Usage Example
+| | Rustack | LocalStack |
+|---|---|---|
+| **Language** | Rust (static binary) | Python |
+| **Docker image** | ~8 MB (scratch) | ~475 MB / ~1.88 GB on disk |
+| **Startup time** | < 1 second | 10-45s (S3 only); up to 2 min (all) |
+| **Memory (idle)** | ~10 MB | ~750 MB minimum |
+| **Services** | 18 | 80+ |
+| **Operations** | 600+ | More per service, but behind paywall |
+| **CI cold start** | Pull + ready in ~3s | Pull + ready in 30-90s |
+| **Auth** | SigV4 + SigV2 + presigned URLs | SigV4 (Pro for IAM enforcement) |
+| **License** | MIT, fully open source | Registration-required; free tier limited |
 
-```yaml
-name: test
-on: [push]
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: tyrchen/ruststack@v0
+## Supported Services
 
-      - name: Run S3 tests
-        run: |
-          aws s3api create-bucket --bucket my-test-bucket
-          aws s3api put-object --bucket my-test-bucket --key hello.txt --body README.md
-          aws s3api get-object --bucket my-test-bucket --key hello.txt /tmp/out.txt
-```
-
-### Action Inputs
-
-| Input | Default | Description |
-|-------|---------|-------------|
-| `image-tag` | `latest` | Docker image tag (`latest`, `0.1.0`, etc.) |
-| `port` | `4566` | Host port to bind the service to |
-| `default-region` | `us-east-1` | Default AWS region |
-| `log-level` | `info` | Log level (`error`, `warn`, `info`, `debug`, `trace`) |
-| `wait-timeout` | `30` | Seconds to wait for the service to become healthy |
-| `ssm-skip-auth` | `true` | Skip SSM signature validation |
-| `services` | *(empty = all)* | Comma-separated list of services to enable (`s3`, `dynamodb`, `sqs`, `ssm`) |
-
-### Action Outputs
-
-| Output | Description |
-|--------|-------------|
-| `endpoint` | The service endpoint URL (e.g. `http://localhost:4566`) |
-| `container-id` | Docker container ID for advanced usage |
-
-### Environment Variables Set by the Action
-
-The action automatically exports these into `$GITHUB_ENV`, so all subsequent steps can use `aws` CLI and AWS SDKs without extra configuration:
-
-| Variable | Value |
-|----------|-------|
-| `AWS_ENDPOINT_URL` | `http://localhost:<port>` |
-| `AWS_ACCESS_KEY_ID` | `test` |
-| `AWS_SECRET_ACCESS_KEY` | `test` |
-| `AWS_DEFAULT_REGION` | Value of `default-region` input |
-
-### What You Can Test
-
-See the end-to-end test workflows for comprehensive examples:
-
-**S3** ([s3-test.yml](.github/workflows/s3-test.yml)): Bucket CRUD, object CRUD, copy, batch delete, presigned URLs, versioning, tagging, CORS, lifecycle, encryption, object lock, multipart uploads, listing with pagination, POST object, error handling.
-
-**DynamoDB** ([dynamodb-test.yml](.github/workflows/dynamodb-test.yml)): Table CRUD, item CRUD with projections and return values, condition expressions, query with key conditions/filters/pagination, scan, batch operations, update expressions (SET, REMOVE, ADD, DELETE), all data types, error handling.
-
-**SQS** ([sqs-test.yml](.github/workflows/sqs-test.yml)): Queue CRUD, send/receive/delete messages, message attributes, batch operations, FIFO queues with ordering and deduplication, tags, purge, error handling.
-
-**SSM** ([ssm-test.yml](.github/workflows/ssm-test.yml)): PutParameter (String, SecureString, StringList), GetParameter with version/label selectors, GetParameters batch, GetParametersByPath (recursive/non-recursive), DeleteParameter/DeleteParameters, DescribeParameters with filters, GetParameterHistory, tags, labels.
-
-## Configuration
-
-All settings are controlled via environment variables, matching LocalStack conventions:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GATEWAY_LISTEN` | `0.0.0.0:4566` | Bind address and port |
-| `SERVICES` | *(empty = all)* | Comma-separated list of services to enable (`s3`, `dynamodb`, `sqs`, `ssm`) |
-| `S3_SKIP_SIGNATURE_VALIDATION` | `true` | Skip S3 SigV4 request verification |
-| `DYNAMODB_SKIP_SIGNATURE_VALIDATION` | `true` | Skip DynamoDB SigV4 request verification |
-| `SQS_SKIP_SIGNATURE_VALIDATION` | `true` | Skip SQS SigV4 request verification |
-| `SSM_SKIP_SIGNATURE_VALIDATION` | `true` | Skip SSM SigV4 request verification |
-| `S3_VIRTUAL_HOSTING` | `true` | Enable virtual-hosted-style addressing |
-| `S3_DOMAIN` | `s3.localhost.localstack.cloud` | Virtual hosting domain |
-| `S3_MAX_MEMORY_OBJECT_SIZE` | `524288` | Max S3 object size (bytes) kept in memory before disk spillover |
-| `DEFAULT_REGION` | `us-east-1` | Default AWS region |
-| `LOG_LEVEL` | `info` | Log level (`error`, `warn`, `info`, `debug`, `trace`) |
-| `RUST_LOG` | | Fine-grained tracing filter (overrides `LOG_LEVEL`) |
-
-### Selective Service Enablement
-
-RustStack supports running a subset of services via two mechanisms:
-
-**Runtime selection** — Set the `SERVICES` environment variable to a comma-separated list:
-
-```bash
-# Only DynamoDB
-SERVICES=dynamodb cargo run -p ruststack-server
-
-# Only S3
-SERVICES=s3 cargo run -p ruststack-server
-
-# S3 + SQS
-SERVICES=s3,sqs cargo run -p ruststack-server
-
-# Only SSM
-SERVICES=ssm cargo run -p ruststack-server
-
-# All services (default when SERVICES is empty or unset)
-cargo run -p ruststack-server
-```
-
-**Compile-time selection** — Use Cargo feature flags to exclude services from the binary entirely, reducing binary size:
-
-```bash
-# S3-only binary
-cargo build -p ruststack-server --no-default-features --features s3
-
-# DynamoDB-only binary
-cargo build -p ruststack-server --no-default-features --features dynamodb
-
-# SQS-only binary
-cargo build -p ruststack-server --no-default-features --features sqs
-
-# SSM-only binary
-cargo build -p ruststack-server --no-default-features --features ssm
-```
-
-The health check endpoint dynamically reports only the services that are running:
-
-```json
-{"services":{"s3":"running","dynamodb":"running","sqs":"running","ssm":"running"}}
-```
-
-## Supported Operations
+| Service | Operations | Protocol |
+|---------|-----------|----------|
+| **S3** | 70 | REST XML |
+| **DynamoDB** | 22 | awsJson 1.0 |
+| **DynamoDB Streams** | 4 | awsJson 1.0 |
+| **SQS** | 23 | awsJson 1.0 |
+| **SSM Parameter Store** | 13 | awsJson 1.1 |
+| **SNS** | 39 | awsQuery |
+| **Lambda** | 45 | REST JSON |
+| **EventBridge** | 48 | awsJson 1.1 |
+| **CloudWatch Logs** | 42 | awsJson 1.1 |
+| **KMS** | 39 | awsJson 1.0 |
+| **Kinesis** | 28 | awsJson 1.1 / rpcv2Cbor |
+| **Secrets Manager** | 22 | awsJson 1.1 |
+| **SES** | 46 | awsQuery |
+| **API Gateway V2** | 55 | REST JSON |
+| **CloudWatch Metrics** | 32 | awsQuery |
+| **IAM** | 96 | awsQuery |
+| **STS** | 8 | awsQuery |
 
 <details>
-<summary><b>Bucket operations (43)</b></summary>
+<summary><b>S3 operations (70)</b></summary>
 
 | Category | Operations |
 |----------|-----------|
-| CRUD | CreateBucket, DeleteBucket, HeadBucket, ListBuckets, GetBucketLocation |
+| Bucket CRUD | CreateBucket, DeleteBucket, HeadBucket, ListBuckets, GetBucketLocation |
+| Objects | PutObject, GetObject, HeadObject, DeleteObject, DeleteObjects, CopyObject, PostObject |
+| Multipart | CreateMultipartUpload, UploadPart, UploadPartCopy, CompleteMultipartUpload, AbortMultipartUpload, ListParts, ListMultipartUploads |
+| Listing | ListObjects, ListObjectsV2, ListObjectVersions |
 | Versioning | GetBucketVersioning, PutBucketVersioning |
 | Encryption | GetBucketEncryption, PutBucketEncryption, DeleteBucketEncryption |
 | CORS | GetBucketCors, PutBucketCors, DeleteBucketCors |
 | Lifecycle | GetBucketLifecycleConfiguration, PutBucketLifecycleConfiguration, DeleteBucketLifecycle |
 | Policy | GetBucketPolicy, PutBucketPolicy, DeleteBucketPolicy, GetBucketPolicyStatus |
-| Tagging | GetBucketTagging, PutBucketTagging, DeleteBucketTagging |
+| Tagging | GetBucketTagging, PutBucketTagging, DeleteBucketTagging, GetObjectTagging, PutObjectTagging, DeleteObjectTagging |
 | Notifications | GetBucketNotificationConfiguration, PutBucketNotificationConfiguration |
 | Logging | GetBucketLogging, PutBucketLogging |
 | Public Access | GetPublicAccessBlock, PutPublicAccessBlock, DeletePublicAccessBlock |
 | Ownership | GetBucketOwnershipControls, PutBucketOwnershipControls, DeleteBucketOwnershipControls |
-| Object Lock | GetObjectLockConfiguration, PutObjectLockConfiguration |
+| Object Lock | GetObjectLockConfiguration, PutObjectLockConfiguration, GetObjectRetention, PutObjectRetention, GetObjectLegalHold, PutObjectLegalHold |
 | Accelerate | GetBucketAccelerateConfiguration, PutBucketAccelerateConfiguration |
 | Payment | GetBucketRequestPayment, PutBucketRequestPayment |
 | Website | GetBucketWebsite, PutBucketWebsite, DeleteBucketWebsite |
-| ACL | GetBucketAcl, PutBucketAcl |
-
-</details>
-
-<details>
-<summary><b>Object operations (18)</b></summary>
-
-| Category | Operations |
-|----------|-----------|
-| CRUD | PutObject, GetObject, HeadObject, DeleteObject, DeleteObjects, CopyObject |
-| Tagging | GetObjectTagging, PutObjectTagging, DeleteObjectTagging |
-| ACL | GetObjectAcl, PutObjectAcl |
-| Retention | GetObjectRetention, PutObjectRetention |
-| Legal Hold | GetObjectLegalHold, PutObjectLegalHold |
+| ACL | GetBucketAcl, PutBucketAcl, GetObjectAcl, PutObjectAcl |
 | Attributes | GetObjectAttributes |
 
 </details>
 
 <details>
-<summary><b>Multipart upload operations (7)</b></summary>
-
-CreateMultipartUpload, UploadPart, UploadPartCopy, CompleteMultipartUpload, AbortMultipartUpload, ListParts, ListMultipartUploads
-
-</details>
-
-<details>
-<summary><b>List operations (3)</b></summary>
-
-ListObjects, ListObjectsV2, ListObjectVersions
-
-</details>
-
-## Supported DynamoDB Operations
+<summary><b>DynamoDB operations (22)</b></summary>
 
 | Category | Operations |
 |----------|-----------|
 | Table management | CreateTable, DeleteTable, DescribeTable, ListTables, UpdateTable |
 | Item CRUD | PutItem, GetItem, DeleteItem, UpdateItem |
 | Query & scan | Query, Scan |
-| Batch | BatchWriteItem |
+| Batch | BatchWriteItem, BatchGetItem |
+| Transactions | TransactGetItems, TransactWriteItems |
 
-DynamoDB features include: condition expressions, filter expressions, projection expressions, update expressions (SET, REMOVE, ADD, DELETE), key conditions with sort key operators (=, <, <=, >, >=, BETWEEN, begins_with), and consistent/eventually-consistent reads.
+Features: condition expressions, filter expressions, projection expressions, update expressions (SET, REMOVE, ADD, DELETE), key conditions with sort key operators, consistent/eventually-consistent reads.
 
-## Supported SQS Operations
+</details>
+
+<details>
+<summary><b>SQS operations (23)</b></summary>
 
 | Category | Operations |
 |----------|-----------|
@@ -290,9 +149,12 @@ DynamoDB features include: condition expressions, filter expressions, projection
 | Permissions | AddPermission, RemovePermission |
 | Dead-letter queues | ListDeadLetterSourceQueues |
 
-SQS features include: standard and FIFO queues, content-based and explicit message deduplication, message groups with ordering guarantees, dead-letter queue redrive policies, long polling, per-message and per-queue visibility timeouts, message delay, message attributes, and queue tagging.
+Features: standard and FIFO queues, content-based deduplication, message groups, dead-letter queue redrive, long polling, visibility timeouts, message delay.
 
-## Supported SSM Parameter Store Operations
+</details>
+
+<details>
+<summary><b>SSM Parameter Store operations (13)</b></summary>
 
 | Category | Operations |
 |----------|-----------|
@@ -302,69 +164,157 @@ SQS features include: standard and FIFO queues, content-based and explicit messa
 | Tags | AddTagsToResource, RemoveTagsFromResource, ListTagsForResource |
 | Labels | LabelParameterVersion, UnlabelParameterVersion |
 
-SSM features include: String, StringList, and SecureString parameter types, hierarchical path-based parameters, 100-version history with automatic oldest-unlabeled-version cleanup, version selectors (`name:3`) and label selectors (`name:release`), parameter filtering and pagination, tag management, and AllowedPattern regex validation.
+Features: String, StringList, SecureString types, hierarchical paths, 100-version history, version/label selectors, AllowedPattern validation.
+
+</details>
+
+<details>
+<summary><b>SNS operations (39)</b></summary>
+
+CreateTopic, DeleteTopic, GetTopicAttributes, SetTopicAttributes, ListTopics, Publish, Subscribe, Unsubscribe, GetSubscriptionAttributes, SetSubscriptionAttributes, ListSubscriptions, ListSubscriptionsByTopic, ConfirmSubscription, TagResource, UntagResource, ListTagsForResource, CreatePlatformApplication, DeletePlatformApplication, GetPlatformApplicationAttributes, SetPlatformApplicationAttributes, ListPlatformApplications, CreatePlatformEndpoint, DeleteEndpoint, GetEndpointAttributes, SetEndpointAttributes, ListEndpointsByPlatformApplication, AddPermission, RemovePermission, CheckIfPhoneNumberIsOptedOut, GetSMSAttributes, SetSMSAttributes, ListPhoneNumbersOptedOut, OptInPhoneNumber, ListOriginationNumbers, ListSMSSandboxPhoneNumbers, CreateSMSSandboxPhoneNumber, DeleteSMSSandboxPhoneNumber, VerifySMSSandboxPhoneNumber, GetSMSSandboxAccountStatus
+
+</details>
+
+<details>
+<summary><b>Lambda operations (45)</b></summary>
+
+CreateFunction, DeleteFunction, GetFunction, GetFunctionConfiguration, UpdateFunctionCode, UpdateFunctionConfiguration, ListFunctions, Invoke, PublishVersion, ListVersionsByFunction, CreateAlias, DeleteAlias, GetAlias, UpdateAlias, ListAliases, CreateEventSourceMapping, DeleteEventSourceMapping, GetEventSourceMapping, UpdateEventSourceMapping, ListEventSourceMappings, TagResource, UntagResource, ListTags, AddPermission, RemovePermission, GetPolicy, PutFunctionConcurrency, DeleteFunctionConcurrency, GetFunctionConcurrency, PutFunctionEventInvokeConfig, GetFunctionEventInvokeConfig, UpdateFunctionEventInvokeConfig, DeleteFunctionEventInvokeConfig, ListFunctionEventInvokeConfigs, GetAccountSettings, CreateFunctionUrlConfig, GetFunctionUrlConfig, UpdateFunctionUrlConfig, DeleteFunctionUrlConfig, ListFunctionUrlConfigs, PutRuntimeManagementConfig, GetRuntimeManagementConfig, ListLayers, ListLayerVersions, GetLayerVersion
+
+</details>
+
+<details>
+<summary><b>EventBridge operations (48)</b></summary>
+
+PutEvents, PutRule, DeleteRule, DescribeRule, EnableRule, DisableRule, ListRules, ListRuleNamesByTarget, PutTargets, RemoveTargets, ListTargetsByRule, TestEventPattern, CreateEventBus, DeleteEventBus, DescribeEventBus, ListEventBuses, UpdateEventBus, TagResource, UntagResource, ListTagsForResource, PutPartnerEvents, CreatePartnerEventSource, DeletePartnerEventSource, DescribePartnerEventSource, ListPartnerEventSources, ListPartnerEventSourceAccounts, ActivateEventSource, DeactivateEventSource, DescribeEventSource, ListEventSources, CreateArchive, DeleteArchive, DescribeArchive, UpdateArchive, ListArchives, StartReplay, CancelReplay, DescribeReplay, ListReplays, CreateConnection, DeleteConnection, DescribeConnection, UpdateConnection, ListConnections, CreateApiDestination, DeleteApiDestination, DescribeApiDestination, UpdateApiDestination
+
+</details>
+
+<details>
+<summary><b>CloudWatch Logs operations (42)</b></summary>
+
+CreateLogGroup, DeleteLogGroup, DescribeLogGroups, CreateLogStream, DeleteLogStream, DescribeLogStreams, PutLogEvents, GetLogEvents, FilterLogEvents, PutRetentionPolicy, DeleteRetentionPolicy, TagResource, UntagResource, ListTagsForResource, PutSubscriptionFilter, DeleteSubscriptionFilter, DescribeSubscriptionFilters, PutMetricFilter, DeleteMetricFilter, DescribeMetricFilters, PutDestination, DeleteDestination, DescribeDestinations, PutDestinationPolicy, DeleteDestinationPolicy, PutQueryDefinition, DeleteQueryDefinition, DescribeQueryDefinitions, StartQuery, StopQuery, GetQueryResults, DescribeQueries, CreateExportTask, DescribeExportTasks, PutResourcePolicy, DeleteResourcePolicy, DescribeResourcePolicies, AssociateKmsKey, DisassociateKmsKey, PutDataProtectionPolicy, GetDataProtectionPolicy, DeleteDataProtectionPolicy
+
+</details>
+
+<details>
+<summary><b>KMS operations (39)</b></summary>
+
+CreateKey, DescribeKey, ListKeys, EnableKey, DisableKey, ScheduleKeyDeletion, CancelKeyDeletion, CreateAlias, DeleteAlias, ListAliases, UpdateAlias, Encrypt, Decrypt, ReEncrypt, GenerateDataKey, GenerateDataKeyWithoutPlaintext, GenerateDataKeyPair, GenerateDataKeyPairWithoutPlaintext, GenerateRandom, Sign, Verify, GetPublicKey, CreateGrant, RetireGrant, RevokeGrant, ListGrants, ListRetirableGrants, EnableKeyRotation, DisableKeyRotation, GetKeyRotationStatus, GetKeyPolicy, PutKeyPolicy, ListKeyPolicies, TagResource, UntagResource, ListResourceTags, UpdateKeyDescription, ReplicateKey, UpdatePrimaryRegion
+
+</details>
+
+<details>
+<summary><b>Kinesis operations (28)</b></summary>
+
+CreateStream, DeleteStream, DescribeStream, DescribeStreamSummary, ListStreams, PutRecord, PutRecords, GetRecords, GetShardIterator, ListShards, MergeShards, SplitShard, AddTagsToStream, RemoveTagsFromStream, ListTagsForStream, IncreaseStreamRetentionPeriod, DecreaseStreamRetentionPeriod, UpdateShardCount, EnableEnhancedMonitoring, DisableEnhancedMonitoring, StartStreamEncryption, StopStreamEncryption, RegisterStreamConsumer, DeregisterStreamConsumer, DescribeStreamConsumer, ListStreamConsumers, UpdateStreamMode, DescribeLimits
+
+</details>
+
+<details>
+<summary><b>Secrets Manager operations (22)</b></summary>
+
+CreateSecret, GetSecretValue, PutSecretValue, UpdateSecret, DeleteSecret, DescribeSecret, ListSecrets, RestoreSecret, RotateSecret, CancelRotateSecret, GetRandomPassword, TagResource, UntagResource, ValidateResourcePolicy, ReplicateSecretToRegions, RemoveRegionsFromReplication, StopReplicationToReplica, PutResourcePolicy, GetResourcePolicy, DeleteResourcePolicy, ListSecretVersionIds, BatchGetSecretValue
+
+</details>
+
+<details>
+<summary><b>SES operations (46)</b></summary>
+
+SendEmail, SendRawEmail, SendTemplatedEmail, SendBulkTemplatedEmail, VerifyEmailIdentity, VerifyEmailAddress, DeleteVerifiedEmailAddress, VerifyDomainIdentity, VerifyDomainDkim, ListIdentities, GetIdentityVerificationAttributes, GetIdentityDkimAttributes, GetIdentityNotificationAttributes, SetIdentityNotificationTopic, SetIdentityFeedbackForwardingEnabled, SetIdentityHeadersInNotificationsEnabled, GetIdentityMailFromDomainAttributes, SetIdentityMailFromDomain, DeleteIdentity, ListVerifiedEmailAddresses, GetSendQuota, GetSendStatistics, GetAccountSendingEnabled, UpdateAccountSendingEnabled, CreateTemplate, UpdateTemplate, DeleteTemplate, GetTemplate, ListTemplates, TestRenderTemplate, CreateConfigurationSet, DeleteConfigurationSet, DescribeConfigurationSet, ListConfigurationSets, CreateConfigurationSetEventDestination, DeleteConfigurationSetEventDestination, UpdateConfigurationSetEventDestination, CreateReceiptRule, DeleteReceiptRule, DescribeReceiptRule, UpdateReceiptRule, CreateReceiptRuleSet, DeleteReceiptRuleSet, DescribeActiveReceiptRuleSet, ListReceiptRuleSets, SetActiveReceiptRuleSet
+
+</details>
+
+<details>
+<summary><b>API Gateway V2 operations (55)</b></summary>
+
+CreateApi, GetApi, GetApis, UpdateApi, DeleteApi, CreateRoute, GetRoute, GetRoutes, UpdateRoute, DeleteRoute, CreateIntegration, GetIntegration, GetIntegrations, UpdateIntegration, DeleteIntegration, CreateIntegrationResponse, GetIntegrationResponse, GetIntegrationResponses, UpdateIntegrationResponse, DeleteIntegrationResponse, CreateStage, GetStage, GetStages, UpdateStage, DeleteStage, CreateDeployment, GetDeployment, GetDeployments, UpdateDeployment, DeleteDeployment, CreateAuthorizer, GetAuthorizer, GetAuthorizers, UpdateAuthorizer, DeleteAuthorizer, CreateRouteResponse, GetRouteResponse, GetRouteResponses, UpdateRouteResponse, DeleteRouteResponse, CreateModel, GetModel, GetModels, UpdateModel, DeleteModel, CreateDomainName, GetDomainName, GetDomainNames, UpdateDomainName, DeleteDomainName, CreateApiMapping, GetApiMapping, GetApiMappings, UpdateApiMapping, DeleteApiMapping
+
+</details>
+
+<details>
+<summary><b>CloudWatch Metrics operations (32)</b></summary>
+
+PutMetricData, GetMetricData, GetMetricStatistics, ListMetrics, PutMetricAlarm, DescribeAlarms, DeleteAlarms, DescribeAlarmsForMetric, SetAlarmState, EnableAlarmActions, DisableAlarmActions, DescribeAlarmHistory, PutCompositeAlarm, PutDashboard, GetDashboard, ListDashboards, DeleteDashboards, TagResource, UntagResource, ListTagsForResource, PutAnomalyDetector, DeleteAnomalyDetector, DescribeAnomalyDetectors, PutInsightRule, DeleteInsightRules, DescribeInsightRules, EnableInsightRules, DisableInsightRules, GetInsightRuleReport, GetMetricWidgetImage, ListManagedInsightRules, PutManagedInsightRules
+
+</details>
+
+<details>
+<summary><b>IAM operations (96)</b></summary>
+
+CreateUser, GetUser, UpdateUser, DeleteUser, ListUsers, CreateGroup, GetGroup, UpdateGroup, DeleteGroup, ListGroups, AddUserToGroup, RemoveUserFromGroup, ListGroupsForUser, CreateRole, GetRole, UpdateRole, DeleteRole, ListRoles, UpdateRoleDescription, UpdateAssumeRolePolicy, CreatePolicy, GetPolicy, DeletePolicy, ListPolicies, CreatePolicyVersion, GetPolicyVersion, DeletePolicyVersion, ListPolicyVersions, SetDefaultPolicyVersion, AttachUserPolicy, DetachUserPolicy, ListAttachedUserPolicies, AttachGroupPolicy, DetachGroupPolicy, ListAttachedGroupPolicies, AttachRolePolicy, DetachRolePolicy, ListAttachedRolePolicies, PutUserPolicy, GetUserPolicy, DeleteUserPolicy, ListUserPolicies, PutGroupPolicy, GetGroupPolicy, DeleteGroupPolicy, ListGroupPolicies, PutRolePolicy, GetRolePolicy, DeleteRolePolicy, ListRolePolicies, CreateInstanceProfile, GetInstanceProfile, DeleteInstanceProfile, ListInstanceProfiles, AddRoleToInstanceProfile, RemoveRoleFromInstanceProfile, ListInstanceProfilesForRole, CreateAccessKey, UpdateAccessKey, DeleteAccessKey, ListAccessKeys, GetAccessKeyLastUsed, CreateLoginProfile, GetLoginProfile, UpdateLoginProfile, DeleteLoginProfile, ChangePassword, UpdateAccountPasswordPolicy, GetAccountPasswordPolicy, DeleteAccountPasswordPolicy, CreateServiceLinkedRole, DeleteServiceLinkedRole, GetServiceLinkedRoleDeletionStatus, TagUser, UntagUser, TagRole, UntagRole, TagPolicy, UntagPolicy, ListUserTags, ListRoleTags, ListPolicyTags, CreateOpenIDConnectProvider, GetOpenIDConnectProvider, DeleteOpenIDConnectProvider, ListOpenIDConnectProviders, AddClientIDToOpenIDConnectProvider, RemoveClientIDFromOpenIDConnectProvider, UpdateOpenIDConnectProviderThumbprint, CreateSAMLProvider, GetSAMLProvider, UpdateSAMLProvider, DeleteSAMLProvider, ListSAMLProviders, GetAccountSummary, GetAccountAuthorizationDetails, ListEntitiesForPolicy, GenerateCredentialReport
+
+</details>
+
+<details>
+<summary><b>STS operations (8)</b></summary>
+
+GetCallerIdentity, AssumeRole, GetSessionToken, AssumeRoleWithWebIdentity, GetAccessKeyInfo, DecodeAuthorizationMessage, GetFederationToken, AssumeRoleWithSAML
+
+</details>
+
+<details>
+<summary><b>DynamoDB Streams operations (4)</b></summary>
+
+DescribeStream, GetShardIterator, GetRecords, ListStreams
+
+</details>
+
+## Configuration
+
+All settings are controlled via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GATEWAY_LISTEN` | `0.0.0.0:4566` | Bind address and port |
+| `SERVICES` | *(empty = all)* | Comma-separated list of services to enable |
+| `LOG_LEVEL` | `info` | Log level (`error`, `warn`, `info`, `debug`, `trace`) |
+| `RUST_LOG` | | Fine-grained tracing filter (overrides `LOG_LEVEL`) |
+| `DEFAULT_REGION` | `us-east-1` | Default AWS region |
+| `S3_VIRTUAL_HOSTING` | `true` | Enable virtual-hosted-style addressing |
+| `S3_DOMAIN` | `s3.localhost.localstack.cloud` | Virtual hosting domain |
+| `S3_MAX_MEMORY_OBJECT_SIZE` | `524288` | Max S3 object size (bytes) before disk spillover |
+| `<SERVICE>_SKIP_SIGNATURE_VALIDATION` | `true` | Skip SigV4 verification per service |
+
+### Selective Service Enablement
+
+**Runtime** — choose which services to start:
+
+```bash
+SERVICES=s3,dynamodb,sqs rustack
+```
+
+**Compile-time** — exclude services from the binary entirely:
+
+```bash
+cargo build -p rustack --no-default-features --features s3,dynamodb
+```
+
+Available features: `s3`, `dynamodb`, `dynamodbstreams`, `sqs`, `ssm`, `sns`, `lambda`, `events`, `logs`, `kms`, `kinesis`, `secretsmanager`, `ses`, `apigatewayv2`, `cloudwatch`, `iam`, `sts`
+
+## GitHub Action
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+  - uses: tyrchen/rustack@v0
+```
+
+The action starts the server, waits for healthy, and exports `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`. All subsequent AWS CLI/SDK calls use Rustack automatically.
+
+See [action.yml](action.yml) for all inputs and outputs.
 
 ## Architecture
 
 ```
-ruststack-core              — Shared types, config, multi-account/region state
-ruststack-auth              — AWS SigV4/SigV2 authentication
+rustack-core              — Shared types, config, multi-account/region state
+rustack-auth              — AWS SigV4/SigV2 authentication
 
-ruststack-s3-model          — S3 types auto-generated from AWS Smithy model (codegen/)
-ruststack-s3-xml            — XML serialization/deserialization (quick-xml)
-ruststack-s3-http           — S3 HTTP routing, request/response conversion, hyper service
-ruststack-s3-core           — S3 business logic, in-memory state, storage engine
-
-ruststack-dynamodb-model    — DynamoDB types (operations, errors, I/O structs)
-ruststack-dynamodb-http     — DynamoDB HTTP dispatch, awsJson1.0 protocol
-ruststack-dynamodb-core     — DynamoDB business logic, B-tree storage, expression engine
-
-ruststack-sqs-model         — SQS types (operations, errors, I/O structs)
-ruststack-sqs-http          — SQS HTTP dispatch, awsJson1.0 protocol
-ruststack-sqs-core          — SQS business logic, actor-per-queue model, FIFO engine
-
-ruststack-ssm-model         — SSM types (operations, errors, I/O structs)
-ruststack-ssm-http          — SSM HTTP dispatch, awsJson1.1 protocol
-ruststack-ssm-core          — SSM business logic, in-memory versioned parameter store
-
-ruststack-server            — Unified server binary with gateway routing
+rustack-{service}-model   — Types auto-generated from AWS Smithy models
+rustack-{service}-http    — HTTP routing, protocol handling, request/response conversion
+rustack-{service}-core    — Business logic, in-memory state, storage engine
 ```
 
-### Request Pipeline
-
-```
-HTTP Request
-  → Gateway health check interception
-  → ServiceRouter dispatch (first match wins)
-  ├─ DynamoDBServiceRouter (X-Amz-Target: DynamoDB_*)
-  │   → Body collection → JSON deserialization
-  │   → SigV4 authentication (optional)
-  │   → Operation dispatch (DynamoDBHandler trait)
-  │   → Business logic (RustStackDynamoDB provider)
-  │   → JSON response serialization
-  ├─ SQSServiceRouter (X-Amz-Target: AmazonSQS.*)
-  │   → Body collection → JSON deserialization
-  │   → SigV4 authentication (optional)
-  │   → Operation dispatch (SqsHandler trait)
-  │   → Business logic (RustStackSqs provider, actor-per-queue)
-  │   → JSON response serialization
-  ├─ SSMServiceRouter (X-Amz-Target: AmazonSSM.*)
-  │   → Body collection → JSON deserialization
-  │   → SigV4 authentication (optional)
-  │   → Operation dispatch (SsmHandler trait)
-  │   → Business logic (RustStackSsm provider)
-  │   → JSON response serialization
-  └─ S3ServiceRouter (catch-all)
-      → S3Router (path-style / virtual-hosted-style)
-      → Body collection
-      → SigV4 authentication (optional)
-      → Operation dispatch (S3Handler trait)
-      → Business logic (RustStackS3 provider)
-      → XML/JSON response serialization
-  → HTTP Response
-```
-
-Adding a new AWS service requires implementing the `ServiceRouter` trait and registering it in `main.rs` — no changes to `gateway.rs`.
+Each service follows the same three-crate pattern. The unified server binary (`rustack`) routes requests via a `ServiceRouter` trait based on request headers.
 
 ## Development
 
@@ -372,46 +322,24 @@ Adding a new AWS service requires implementing the `ServiceRouter` trait and reg
 
 ```bash
 make build      # Compile all crates
-make check      # cargo check --all-targets --all-features
 make test       # Run unit tests (cargo nextest)
 make fmt        # Format with cargo +nightly fmt
 make clippy     # Lint with -D warnings
-make audit      # Security vulnerability check
-make deny       # License policy enforcement
-make codegen    # Regenerate S3 model types from Smithy
+make run        # Start the server locally
 ```
 
 ### Integration Tests
-
-Integration tests use the official AWS SDK for Rust against a running server:
 
 ```bash
 # Terminal 1: start the server
 make run
 
 # Terminal 2: run integration tests
-cargo test -p ruststack-integration -- --ignored
+cargo test -p rustack-integration -- --ignored
 ```
-
-Tests cover S3 (buckets, objects, multipart uploads, versioning, CORS), DynamoDB (tables, items, queries, expressions), SQS (queues, messages, FIFO, batching, DLQ), and SSM (parameters, versions, labels, tags, paths).
-
-### CI/CD
-
-| Workflow | Trigger | What it does |
-|----------|---------|-------------|
-| `build.yml` | Push / PR | Format, lint, test, coverage |
-| `integration.yml` | Push / PR | AWS SDK integration tests, MinIO Mint (S3), Alternator (DynamoDB), boto3 (SQS) compatibility |
-| `s3-test.yml` | Push / PR | End-to-end S3 tests via AWS CLI |
-| `dynamodb-test.yml` | Push / PR | End-to-end DynamoDB tests via AWS CLI |
-| `sqs-test.yml` | Push / PR | End-to-end SQS tests via AWS CLI |
-| `ssm-test.yml` | Push / PR | End-to-end SSM Parameter Store tests via AWS CLI |
-| `nightly.yml` | Daily 06:00 UTC | Ceph s3-tests compatibility suite |
-| `release-docker.yml` | Version tags / manual | Multi-arch Docker image to GHCR |
 
 ## License
 
-This project is distributed under the terms of MIT.
-
-See [LICENSE](LICENSE.md) for details.
+MIT. See [LICENSE](LICENSE.md) for details.
 
 Copyright 2025 Tyr Chen

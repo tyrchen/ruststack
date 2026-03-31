@@ -13,7 +13,7 @@ mod tests {
         let client = s3_client();
         let bucket = create_test_bucket(&client, "putget").await;
 
-        let body = b"hello, ruststack!";
+        let body = b"hello, rustack!";
         client
             .put_object()
             .bucket(&bucket)
@@ -37,7 +37,10 @@ mod tests {
             Some("text/plain"),
             "content_type should match"
         );
-        assert_eq!(resp.content_length(), Some(17));
+        assert_eq!(
+            resp.content_length(),
+            Some(i64::try_from(body.len()).unwrap())
+        );
 
         let data = resp
             .body

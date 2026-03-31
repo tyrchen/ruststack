@@ -20,7 +20,7 @@ deny:
 	@cargo deny check
 
 run:
-	@cargo run -p ruststack-server
+	@cargo run -p rustack
 
 release:
 	@cargo release tag --execute
@@ -30,72 +30,72 @@ release:
 	@cargo release push --execute
 
 codegen-s3:
-	@cd codegen && cargo run -- --config services/s3.toml --model smithy-model/s3.json --output ../crates/ruststack-s3-model/src
-	@cargo +nightly fmt -p ruststack-s3-model
+	@cd codegen && cargo run -- --config services/s3.toml --model smithy-model/s3.json --output ../crates/rustack-s3-model/src
+	@cargo +nightly fmt -p rustack-s3-model
 
 codegen-ssm:
-	@cd codegen && cargo run -- --config services/ssm.toml --model smithy-model/ssm.json --output ../crates/ruststack-ssm-model/src
-	@cargo +nightly fmt -p ruststack-ssm-model
+	@cd codegen && cargo run -- --config services/ssm.toml --model smithy-model/ssm.json --output ../crates/rustack-ssm-model/src
+	@cargo +nightly fmt -p rustack-ssm-model
 
 codegen-events:
-	@cd codegen && cargo run -- --config services/events.toml --model smithy-model/events.json --output ../crates/ruststack-events-model/src
-	@cargo +nightly fmt -p ruststack-events-model
+	@cd codegen && cargo run -- --config services/events.toml --model smithy-model/events.json --output ../crates/rustack-events-model/src
+	@cargo +nightly fmt -p rustack-events-model
 
 codegen-dynamodb:
-	@cd codegen && cargo run -- --config services/dynamodb.toml --model smithy-model/dynamodb.json --output ../crates/ruststack-dynamodb-model/src
-	@cargo +nightly fmt -p ruststack-dynamodb-model
+	@cd codegen && cargo run -- --config services/dynamodb.toml --model smithy-model/dynamodb.json --output ../crates/rustack-dynamodb-model/src
+	@cargo +nightly fmt -p rustack-dynamodb-model
 
 codegen-sqs:
-	@cd codegen && cargo run -- --config services/sqs.toml --model smithy-model/sqs.json --output ../crates/ruststack-sqs-model/src
-	@cargo +nightly fmt -p ruststack-sqs-model
+	@cd codegen && cargo run -- --config services/sqs.toml --model smithy-model/sqs.json --output ../crates/rustack-sqs-model/src
+	@cargo +nightly fmt -p rustack-sqs-model
 
 codegen-sns:
-	@cd codegen && cargo run -- --config services/sns.toml --model smithy-model/sns.json --output ../crates/ruststack-sns-model/src
-	@cargo +nightly fmt -p ruststack-sns-model
+	@cd codegen && cargo run -- --config services/sns.toml --model smithy-model/sns.json --output ../crates/rustack-sns-model/src
+	@cargo +nightly fmt -p rustack-sns-model
 
 codegen-lambda:
-	@cd codegen && cargo run -- --config services/lambda.toml --model smithy-model/lambda.json --output ../crates/ruststack-lambda-model/src
-	@cargo +nightly fmt -p ruststack-lambda-model
+	@cd codegen && cargo run -- --config services/lambda.toml --model smithy-model/lambda.json --output ../crates/rustack-lambda-model/src
+	@cargo +nightly fmt -p rustack-lambda-model
 
 codegen-kms:
-	@cd codegen && cargo run -- --config services/kms.toml --model smithy-model/kms.json --output ../crates/ruststack-kms-model/src
-	@cargo +nightly fmt -p ruststack-kms-model
+	@cd codegen && cargo run -- --config services/kms.toml --model smithy-model/kms.json --output ../crates/rustack-kms-model/src
+	@cargo +nightly fmt -p rustack-kms-model
 
 codegen-kinesis:
-	@cd codegen && cargo run -- --config services/kinesis.toml --model smithy-model/kinesis.json --output ../crates/ruststack-kinesis-model/src
-	@cargo +nightly fmt -p ruststack-kinesis-model
+	@cd codegen && cargo run -- --config services/kinesis.toml --model smithy-model/kinesis.json --output ../crates/rustack-kinesis-model/src
+	@cargo +nightly fmt -p rustack-kinesis-model
 
 codegen-logs:
-	@cd codegen && cargo run -- --config services/logs.toml --model smithy-model/logs.json --output ../crates/ruststack-logs-model/src
-	@cargo +nightly fmt -p ruststack-logs-model
+	@cd codegen && cargo run -- --config services/logs.toml --model smithy-model/logs.json --output ../crates/rustack-logs-model/src
+	@cargo +nightly fmt -p rustack-logs-model
 
 codegen-secretsmanager:
-	@cd codegen && cargo run -- --config services/secretsmanager.toml --model smithy-model/secretsmanager.json --output ../crates/ruststack-secretsmanager-model/src
-	@cargo +nightly fmt -p ruststack-secretsmanager-model
+	@cd codegen && cargo run -- --config services/secretsmanager.toml --model smithy-model/secretsmanager.json --output ../crates/rustack-secretsmanager-model/src
+	@cargo +nightly fmt -p rustack-secretsmanager-model
 
 codegen-ses:
-	@cd codegen && cargo run -- --config services/ses.toml --model smithy-model/ses.json --output ../crates/ruststack-ses-model/src
-	@cargo +nightly fmt -p ruststack-ses-model
+	@cd codegen && cargo run -- --config services/ses.toml --model smithy-model/ses.json --output ../crates/rustack-ses-model/src
+	@cargo +nightly fmt -p rustack-ses-model
 
 codegen-apigatewayv2:
-	@cd codegen && cargo run -- --config services/apigatewayv2.toml --model smithy-model/apigatewayv2.json --output ../crates/ruststack-apigatewayv2-model/src
-	@cargo +nightly fmt -p ruststack-apigatewayv2-model
+	@cd codegen && cargo run -- --config services/apigatewayv2.toml --model smithy-model/apigatewayv2.json --output ../crates/rustack-apigatewayv2-model/src
+	@cargo +nightly fmt -p rustack-apigatewayv2-model
 
 codegen-cloudwatch:
-	@cd codegen && cargo run -- --config services/cloudwatch.toml --model smithy-model/cloudwatch.json --output ../crates/ruststack-cloudwatch-model/src
-	@cargo +nightly fmt -p ruststack-cloudwatch-model
+	@cd codegen && cargo run -- --config services/cloudwatch.toml --model smithy-model/cloudwatch.json --output ../crates/rustack-cloudwatch-model/src
+	@cargo +nightly fmt -p rustack-cloudwatch-model
 
 codegen-dynamodbstreams:
-	@cd codegen && cargo run -- --config services/dynamodbstreams.toml --model smithy-model/dynamodbstreams.json --output ../crates/ruststack-dynamodbstreams-model/src
-	@cargo +nightly fmt -p ruststack-dynamodbstreams-model
+	@cd codegen && cargo run -- --config services/dynamodbstreams.toml --model smithy-model/dynamodbstreams.json --output ../crates/rustack-dynamodbstreams-model/src
+	@cargo +nightly fmt -p rustack-dynamodbstreams-model
 
 codegen-iam:
-	@cd codegen && cargo run -- --config services/iam.toml --model smithy-model/iam.json --output ../crates/ruststack-iam-model/src
-	@cargo +nightly fmt -p ruststack-iam-model
+	@cd codegen && cargo run -- --config services/iam.toml --model smithy-model/iam.json --output ../crates/rustack-iam-model/src
+	@cargo +nightly fmt -p rustack-iam-model
 
 codegen-sts:
-	@cd codegen && cargo run -- --config services/sts.toml --model smithy-model/sts.json --output ../crates/ruststack-sts-model/src
-	@cargo +nightly fmt -p ruststack-sts-model
+	@cd codegen && cargo run -- --config services/sts.toml --model smithy-model/sts.json --output ../crates/rustack-sts-model/src
+	@cargo +nightly fmt -p rustack-sts-model
 
 codegen: codegen-s3
 
@@ -121,21 +121,21 @@ codegen-download:
 	@echo "Done."
 
 integration:
-	@cargo test -p ruststack-integration -- --ignored
+	@cargo test -p rustack-integration -- --ignored
 
 mint: mint-start mint-run
 
 mint-build:
-	@cargo build --release -p ruststack-server
+	@cargo build --release -p rustack
 
 mint-start: mint-build
-	@echo "Starting RustStack server..."
+	@echo "Starting Rustack server..."
 	@ACCESS_KEY=minioadmin SECRET_KEY=minioadmin \
 		S3_SKIP_SIGNATURE_VALIDATION=false \
 		DYNAMODB_SKIP_SIGNATURE_VALIDATION=false \
 		GATEWAY_LISTEN=0.0.0.0:4566 \
 		LOG_LEVEL=warn \
-		cargo run --release -p ruststack-server &
+		cargo run --release -p rustack &
 	@for i in $$(seq 1 30); do \
 		if curl -sf http://127.0.0.1:4566/_localstack/health > /dev/null 2>&1; then \
 			echo "Server is ready"; \
@@ -167,7 +167,7 @@ mint-run:
 		echo "Mint results: $$PASS_COUNT passed, $$FAIL_COUNT failed"
 
 mint-stop:
-	@pkill -f "ruststack-server" 2>/dev/null || true
+	@pkill -f "rustack" 2>/dev/null || true
 	@echo "Server stopped"
 
 alternator: alternator-setup alternator-run
@@ -200,7 +200,7 @@ alternator-run:
 		echo "Alternator results: $$PASSED, $$FAILED, $$ERRORS, $$SKIPPED"
 
 alternator-stop:
-	@pkill -f "ruststack-server" 2>/dev/null || true
+	@pkill -f "rustack" 2>/dev/null || true
 	@echo "Server stopped"
 
 sqs-compat: sqs-compat-setup sqs-compat-run
@@ -223,34 +223,34 @@ sqs-compat-run:
 		echo "SQS compat results: $$PASSED, $$FAILED, $$ERRORS"
 
 test-events-unit:
-	@cargo test -p ruststack-events-model -p ruststack-events-core -p ruststack-events-http
+	@cargo test -p rustack-events-model -p rustack-events-core -p rustack-events-http
 
 test-events-patterns:
-	@cargo test -p ruststack-events-core -- pattern
+	@cargo test -p rustack-events-core -- pattern
 
 test-events-integration:
-	@cargo test -p ruststack-integration -- events --ignored
+	@cargo test -p rustack-integration -- events --ignored
 
 test-apigatewayv2-unit:
-	@cargo test -p ruststack-apigatewayv2-model -p ruststack-apigatewayv2-core -p ruststack-apigatewayv2-http
+	@cargo test -p rustack-apigatewayv2-model -p rustack-apigatewayv2-core -p rustack-apigatewayv2-http
 
 test-apigatewayv2-integration:
-	@cargo test -p ruststack-integration -- apigatewayv2 --ignored
+	@cargo test -p rustack-integration -- apigatewayv2 --ignored
 
 update-submodule:
 	@git submodule update --init --recursive --remote
 
 test-cloudwatch-unit:
-	@cargo test -p ruststack-cloudwatch-model -p ruststack-cloudwatch-core -p ruststack-cloudwatch-http
+	@cargo test -p rustack-cloudwatch-model -p rustack-cloudwatch-core -p rustack-cloudwatch-http
 
 test-cloudwatch-integration:
-	@cargo test -p ruststack-integration -- cloudwatch --ignored
+	@cargo test -p rustack-integration -- cloudwatch --ignored
 
 test-iam-unit:
-	@cargo test -p ruststack-iam-model -p ruststack-iam-core -p ruststack-iam-http
+	@cargo test -p rustack-iam-model -p rustack-iam-core -p rustack-iam-http
 
 test-iam-integration:
-	@cargo test -p ruststack-integration -- iam --ignored
+	@cargo test -p rustack-integration -- iam --ignored
 
 .PHONY: build check test fmt clippy audit deny run release update-submodule integration \
 	codegen codegen-s3 codegen-ssm codegen-events codegen-dynamodb codegen-dynamodbstreams codegen-sqs codegen-sns codegen-lambda \

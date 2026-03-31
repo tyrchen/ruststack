@@ -1,0 +1,145 @@
+[package]
+name = "rustack"
+description = "A high-performance, LocalStack-compatible AWS service emulator written in Rust — 18 services, <1s startup, ~8 MB Docker image"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "rustack"
+path = "src/main.rs"
+
+[features]
+default = ["s3", "dynamodb", "dynamodbstreams", "sqs", "ssm", "sns", "lambda", "events", "logs", "kms", "kinesis", "secretsmanager", "ses", "apigatewayv2", "cloudwatch", "iam", "sts"]
+s3 = ["dep:rustack-s3-core", "dep:rustack-s3-http", "dep:rustack-s3-model"]
+dynamodb = ["dep:rustack-dynamodb-core", "dep:rustack-dynamodb-http"]
+dynamodbstreams = ["dynamodb", "dep:rustack-dynamodbstreams-core", "dep:rustack-dynamodbstreams-http"]
+sqs = ["dep:rustack-sqs-core", "dep:rustack-sqs-http"]
+ssm = ["dep:rustack-ssm-core", "dep:rustack-ssm-http"]
+sns = ["dep:rustack-sns-core", "dep:rustack-sns-http", "dep:rustack-sqs-model", "sqs"]
+lambda = ["dep:rustack-lambda-core", "dep:rustack-lambda-http"]
+events = ["dep:rustack-events-core", "dep:rustack-events-http", "dep:rustack-sqs-model", "sqs"]
+logs = ["dep:rustack-logs-core", "dep:rustack-logs-http"]
+kms = ["dep:rustack-kms-core", "dep:rustack-kms-http"]
+kinesis = ["dep:rustack-kinesis-core", "dep:rustack-kinesis-http"]
+secretsmanager = ["dep:rustack-secretsmanager-core", "dep:rustack-secretsmanager-http"]
+ses = ["dep:rustack-ses-core", "dep:rustack-ses-http"]
+apigatewayv2 = ["dep:rustack-apigatewayv2-core", "dep:rustack-apigatewayv2-http"]
+cloudwatch = ["dep:rustack-cloudwatch-core", "dep:rustack-cloudwatch-http"]
+iam = ["dep:rustack-iam-core", "dep:rustack-iam-http"]
+sts = ["dep:rustack-sts-core", "dep:rustack-sts-http"]
+
+[dependencies]
+# Internal crates - shared
+rustack-core = { workspace = true }
+rustack-auth = { workspace = true }
+
+# Internal crates - S3 (optional, gated by "s3" feature)
+rustack-s3-core = { workspace = true, optional = true }
+rustack-s3-http = { workspace = true, optional = true }
+rustack-s3-model = { workspace = true, optional = true }
+
+# Internal crates - DynamoDB (optional, gated by "dynamodb" feature)
+rustack-dynamodb-core = { workspace = true, optional = true }
+rustack-dynamodb-http = { workspace = true, optional = true }
+
+# Internal crates - SQS (optional, gated by "sqs" feature)
+rustack-sqs-core = { workspace = true, optional = true }
+rustack-sqs-http = { workspace = true, optional = true }
+
+# Internal crates - SSM (optional, gated by "ssm" feature)
+rustack-ssm-core = { workspace = true, optional = true }
+rustack-ssm-http = { workspace = true, optional = true }
+
+# Internal crates - SNS (optional, gated by "sns" feature)
+rustack-sns-core = { workspace = true, optional = true }
+rustack-sns-http = { workspace = true, optional = true }
+rustack-sqs-model = { workspace = true, optional = true }
+
+# Internal crates - Lambda (optional, gated by "lambda" feature)
+rustack-lambda-core = { workspace = true, optional = true }
+rustack-lambda-http = { workspace = true, optional = true }
+
+# Internal crates - EventBridge (optional, gated by "events" feature)
+rustack-events-core = { workspace = true, optional = true }
+rustack-events-http = { workspace = true, optional = true }
+
+# Internal crates - CloudWatch Logs (optional, gated by "logs" feature)
+rustack-logs-core = { workspace = true, optional = true }
+rustack-logs-http = { workspace = true, optional = true }
+
+# Internal crates - KMS (optional, gated by "kms" feature)
+rustack-kms-core = { workspace = true, optional = true }
+rustack-kms-http = { workspace = true, optional = true }
+
+# Internal crates - Kinesis (optional, gated by "kinesis" feature)
+rustack-kinesis-core = { workspace = true, optional = true }
+rustack-kinesis-http = { workspace = true, optional = true }
+
+# Internal crates - Secrets Manager (optional, gated by "secretsmanager" feature)
+rustack-secretsmanager-core = { workspace = true, optional = true }
+rustack-secretsmanager-http = { workspace = true, optional = true }
+
+# Internal crates - SES (optional, gated by "ses" feature)
+rustack-ses-core = { workspace = true, optional = true }
+rustack-ses-http = { workspace = true, optional = true }
+
+# Internal crates - API Gateway v2 (optional, gated by "apigatewayv2" feature)
+rustack-apigatewayv2-core = { workspace = true, optional = true }
+rustack-apigatewayv2-http = { workspace = true, optional = true }
+
+# Internal crates - DynamoDB Streams (optional, gated by "dynamodbstreams" feature)
+rustack-dynamodbstreams-core = { workspace = true, optional = true }
+rustack-dynamodbstreams-http = { workspace = true, optional = true }
+
+# Internal crates - CloudWatch Metrics (optional, gated by "cloudwatch" feature)
+rustack-cloudwatch-core = { workspace = true, optional = true }
+rustack-cloudwatch-http = { workspace = true, optional = true }
+
+# Internal crates - IAM (optional, gated by "iam" feature)
+rustack-iam-core = { workspace = true, optional = true }
+rustack-iam-http = { workspace = true, optional = true }
+
+# Internal crates - STS (optional, gated by "sts" feature)
+rustack-sts-core = { workspace = true, optional = true }
+rustack-sts-http = { workspace = true, optional = true }
+
+# Async
+tokio = { workspace = true }
+
+# HTTP
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Async utilities
+async-trait = { workspace = true }
+
+# Utilities
+bytes = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+aws-config = { workspace = true }
+aws-sdk-s3 = { workspace = true }
+aws-sdk-dynamodb = { workspace = true }
+aws-sdk-sqs = { workspace = true }
+aws-credential-types = { workspace = true }
+aws-smithy-runtime-api = { workspace = true }

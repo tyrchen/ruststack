@@ -1,9 +1,9 @@
-# RustStack DynamoDB: Native Rust Implementation Design
+# Rustack DynamoDB: Native Rust Implementation Design
 
 **Date:** 2026-02-28
 **Status:** Draft / RFC
 **Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [DynamoDB API Research](../docs/research/dynamodb-api-research.md)
-**Scope:** Add native DynamoDB support to RustStack using the same Smithy-based codegen approach as S3, with a fully Rust-native storage engine (no DynamoDB Local Java dependency).
+**Scope:** Add native DynamoDB support to Rustack using the same Smithy-based codegen approach as S3, with a fully Rust-native storage engine (no DynamoDB Local Java dependency).
 
 ---
 
@@ -31,13 +31,13 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding DynamoDB support to RustStack as a fully native Rust implementation, following the same architectural patterns established by the S3 implementation. Key design decisions:
+This spec proposes adding DynamoDB support to Rustack as a fully native Rust implementation, following the same architectural patterns established by the S3 implementation. Key design decisions:
 
 - **Native Rust storage engine** -- unlike LocalStack which wraps AWS's DynamoDB Local (a 600MB Java application), we build a purpose-built in-memory storage engine with B-Tree indexing. This yields a ~10MB Docker image with millisecond startup.
-- **Smithy codegen reuse** -- extend the existing `codegen/` system to generate DynamoDB model types from the official AWS DynamoDB Smithy JSON AST, producing a `ruststack-dynamodb-model` crate.
+- **Smithy codegen reuse** -- extend the existing `codegen/` system to generate DynamoDB model types from the official AWS DynamoDB Smithy JSON AST, producing a `rustack-dynamodb-model` crate.
 - **JSON protocol** -- DynamoDB uses `awsJson1_0` (HTTP POST with `X-Amz-Target` header dispatch), which is dramatically simpler than S3's REST+XML protocol. No XML crate needed; serde_json handles all serialization.
-- **Shared infrastructure** -- reuse `ruststack-core` (multi-account/region state) and `ruststack-auth` (SigV4 verification) unchanged.
-- **Expression parser** -- the most complex component. DynamoDB's expression language (KeyCondition, Filter, Condition, Update, Projection) requires a proper parser and evaluator, implemented as a separate module within `ruststack-dynamodb-core`.
+- **Shared infrastructure** -- reuse `rustack-core` (multi-account/region state) and `rustack-auth` (SigV4 verification) unchanged.
+- **Expression parser** -- the most complex component. DynamoDB's expression language (KeyCondition, Filter, Condition, Update, Projection) requires a proper parser and evaluator, implemented as a separate module within `rustack-dynamodb-core`.
 - **Phased delivery** -- 4 phases from MVP (12 operations covering 90%+ of local dev use cases) to full feature parity.
 
 ---
@@ -86,7 +86,7 @@ A native Rust implementation provides:
 | LocalStack DDB | Python+Java | DynamoDB Local | ~1GB | Wraps DynamoDB Local, adds multi-account |
 | Dynalite | Node.js/LevelDB | LevelDB | ~200MB | Abandoned, incomplete API |
 | ScyllaDB Alternator | C++ | ScyllaDB | ~500MB | Full DB engine, overkill for local dev |
-| **RustStack DDB** | **Rust** | **In-memory** | **~10MB** | **This proposal** |
+| **Rustack DDB** | **Rust** | **In-memory** | **~10MB** | **This proposal** |
 
 No existing Rust-based DynamoDB emulator exists. This would be the first.
 
@@ -100,9 +100,9 @@ No existing Rust-based DynamoDB emulator exists. This would be the first.
 2. **Cover 90%+ of local development use cases** -- table CRUD, item CRUD, Query, Scan, Batch, Transactions
 3. **Correct expression evaluation** -- parse and evaluate KeyConditionExpression, FilterExpression, ConditionExpression, UpdateExpression, and ProjectionExpression
 4. **Smithy-generated types** -- all DynamoDB API types generated from official AWS Smithy model
-5. **Shared infrastructure** -- reuse `ruststack-core` and `ruststack-auth` without modification
+5. **Shared infrastructure** -- reuse `rustack-core` and `rustack-auth` without modification
 6. **Same Docker image** -- single binary serves both S3 and DynamoDB on the same port (4566)
-7. **GitHub Action compatibility** -- extend the existing `tyrchen/ruststack` GitHub Action
+7. **GitHub Action compatibility** -- extend the existing `tyrchen/rustack` GitHub Action
 8. **Pass AWS SDK integration tests** -- validate against `aws-sdk-rust`, `aws-cli`, and `boto3`
 
 ### 3.2 Non-Goals
@@ -153,8 +153,8 @@ No existing Rust-based DynamoDB emulator exists. This would be the first.
           └─────────┬─────────────────┘
                     ▼
           ┌─────────────────┐
-          │  ruststack-core │  ← Shared: multi-account/region state
-          │  ruststack-auth │  ← Shared: SigV4 authentication
+          │  rustack-core │  ← Shared: multi-account/region state
+          │  rustack-auth │  ← Shared: SigV4 authentication
           └─────────────────┘
 ```
 
@@ -175,26 +175,26 @@ DynamoDB and S3 are distinguishable by their request signatures:
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app) ← unified binary
-├── ruststack-core
-├── ruststack-auth
-├── ruststack-s3-core
-├── ruststack-s3-http
-├── ruststack-s3-model
-├── ruststack-dynamodb-core     ← NEW
-├── ruststack-dynamodb-http     ← NEW
-└── ruststack-dynamodb-model    ← NEW (auto-generated)
+rustack (app) ← unified binary
+├── rustack-core
+├── rustack-auth
+├── rustack-s3-core
+├── rustack-s3-http
+├── rustack-s3-model
+├── rustack-dynamodb-core     ← NEW
+├── rustack-dynamodb-http     ← NEW
+└── rustack-dynamodb-model    ← NEW (auto-generated)
 
-ruststack-dynamodb-http
-├── ruststack-dynamodb-model
-└── ruststack-auth
+rustack-dynamodb-http
+├── rustack-dynamodb-model
+└── rustack-auth
 
-ruststack-dynamodb-core
-├── ruststack-core
-├── ruststack-dynamodb-model
-└── ruststack-auth
+rustack-dynamodb-core
+├── rustack-core
+├── rustack-dynamodb-model
+└── rustack-auth
 
-ruststack-dynamodb-model (auto-generated, standalone)
+rustack-dynamodb-model (auto-generated, standalone)
 ```
 
 ---
@@ -222,23 +222,23 @@ Understanding protocol differences is critical for reusing vs building new infra
 
 | Component | Reusable? | Notes |
 |-----------|-----------|-------|
-| `ruststack-core` | Yes | Multi-account/region state management |
-| `ruststack-auth` (SigV4) | Yes | SigV4 verification is service-agnostic |
-| `ruststack-auth` (SigV2) | No | DynamoDB doesn't use SigV2 |
-| `ruststack-auth` (presigned) | No | DynamoDB doesn't use presigned URLs |
+| `rustack-core` | Yes | Multi-account/region state management |
+| `rustack-auth` (SigV4) | Yes | SigV4 verification is service-agnostic |
+| `rustack-auth` (SigV2) | No | DynamoDB doesn't use SigV2 |
+| `rustack-auth` (presigned) | No | DynamoDB doesn't use presigned URLs |
 | Codegen model parser | Partially | Smithy AST parsing reusable; shape resolution needs DynamoDB namespace |
 | Codegen code generator | Partially | Struct/enum generation reusable; HTTP bindings differ, error format differs |
-| `ruststack-s3-xml` | No | DynamoDB uses JSON, not XML |
-| `ruststack-s3-http` router | No | Completely different routing model |
-| `ruststack-s3-core` | No | Different domain logic entirely |
+| `rustack-s3-xml` | No | DynamoDB uses JSON, not XML |
+| `rustack-s3-http` router | No | Completely different routing model |
+| `rustack-s3-core` | No | Different domain logic entirely |
 
 ### 5.3 What We Build New
 
 | Component | Complexity | Notes |
 |-----------|-----------|-------|
-| `ruststack-dynamodb-model` | Low | Auto-generated from Smithy; JSON serde is trivial |
-| `ruststack-dynamodb-http` | Low | POST-only routing via `X-Amz-Target` is much simpler than S3 REST |
-| `ruststack-dynamodb-core` | **High** | Storage engine + expression parser + business logic |
+| `rustack-dynamodb-model` | Low | Auto-generated from Smithy; JSON serde is trivial |
+| `rustack-dynamodb-http` | Low | POST-only routing via `X-Amz-Target` is much simpler than S3 REST |
+| `rustack-dynamodb-core` | **High** | Storage engine + expression parser + business logic |
 | Expression parser | **High** | Full grammar: comparisons, functions, logical ops, update clauses |
 | Storage engine | Medium | B-Tree indexed tables with partition/sort key support |
 | Gateway router | Low | Simple header-based service dispatch |
@@ -392,7 +392,7 @@ pub enum AttributeValue {
 }
 ```
 
-This type is too complex for auto-generation and should be hand-written in `ruststack-dynamodb-model` as a non-generated file alongside the generated code.
+This type is too complex for auto-generation and should be hand-written in `rustack-dynamodb-model` as a non-generated file alongside the generated code.
 
 ### 6.3 Smithy Model Acquisition
 
@@ -456,11 +456,11 @@ const P2_OPERATIONS: &[&str] = &[
 ```makefile
 codegen-s3:
     @cd codegen && cargo run -- --service s3
-    @cargo +nightly fmt -p ruststack-s3-model
+    @cargo +nightly fmt -p rustack-s3-model
 
 codegen-dynamodb:
     @cd codegen && cargo run -- --service dynamodb
-    @cargo +nightly fmt -p ruststack-dynamodb-model
+    @cargo +nightly fmt -p rustack-dynamodb-model
 
 codegen: codegen-s3 codegen-dynamodb
 ```
@@ -471,10 +471,10 @@ codegen: codegen-s3 codegen-dynamodb
 
 ### 7.1 New Crates
 
-#### `ruststack-dynamodb-model` (auto-generated)
+#### `rustack-dynamodb-model` (auto-generated)
 
 ```
-crates/ruststack-dynamodb-model/
+crates/rustack-dynamodb-model/
 ├── Cargo.toml
 └── src/
     ├── lib.rs                    # Module re-exports
@@ -503,10 +503,10 @@ crates/ruststack-dynamodb-model/
 
 **Dependencies**: `serde`, `serde_json`, `bytes`, `chrono`, `http`
 
-#### `ruststack-dynamodb-http`
+#### `rustack-dynamodb-http`
 
 ```
-crates/ruststack-dynamodb-http/
+crates/rustack-dynamodb-http/
 ├── Cargo.toml
 └── src/
     ├── lib.rs
@@ -519,17 +519,17 @@ crates/ruststack-dynamodb-http/
     └── body.rs                   # Response body type
 ```
 
-**Dependencies**: `ruststack-dynamodb-model`, `ruststack-auth`, `hyper`, `serde_json`, `bytes`
+**Dependencies**: `rustack-dynamodb-model`, `rustack-auth`, `hyper`, `serde_json`, `bytes`
 
-#### `ruststack-dynamodb-core`
+#### `rustack-dynamodb-core`
 
 ```
-crates/ruststack-dynamodb-core/
+crates/rustack-dynamodb-core/
 ├── Cargo.toml
 └── src/
     ├── lib.rs
     ├── config.rs                 # DynamoDBConfig
-    ├── provider.rs               # RustStackDynamoDB (main provider)
+    ├── provider.rs               # RustackDynamoDB (main provider)
     ├── error.rs                  # DynamoDBServiceError
     ├── state/
     │   ├── mod.rs
@@ -562,7 +562,7 @@ crates/ruststack-dynamodb-core/
         └── config.rs             # TTL, tags, limits
 ```
 
-**Dependencies**: `ruststack-core`, `ruststack-dynamodb-model`, `ruststack-auth`, `dashmap`, `parking_lot`, `serde_json`, `bytes`, `chrono`, `uuid`, `tracing`
+**Dependencies**: `rustack-core`, `rustack-dynamodb-model`, `rustack-auth`, `dashmap`, `parking_lot`, `serde_json`, `bytes`, `chrono`, `uuid`, `tracing`
 
 ### 7.2 Workspace Changes
 
@@ -578,20 +578,20 @@ members = [
 # New workspace dependencies
 [workspace.dependencies]
 # ... existing deps unchanged ...
-ruststack-dynamodb-model = { path = "crates/ruststack-dynamodb-model" }
-ruststack-dynamodb-http = { path = "crates/ruststack-dynamodb-http" }
-ruststack-dynamodb-core = { path = "crates/ruststack-dynamodb-core" }
+rustack-dynamodb-model = { path = "crates/rustack-dynamodb-model" }
+rustack-dynamodb-http = { path = "crates/rustack-dynamodb-http" }
+rustack-dynamodb-core = { path = "crates/rustack-dynamodb-core" }
 ```
 
 ### 7.3 Server Binary Changes
 
-The server binary (`apps/ruststack-s3-server/`) should be renamed or extended to serve both S3 and DynamoDB. Two approaches:
+The server binary (`apps/rustack-s3-server/`) should be renamed or extended to serve both S3 and DynamoDB. Two approaches:
 
 **Option A: Unified Binary** (recommended)
-Rename to `apps/ruststack-server/`. Single binary, single port (4566), gateway router dispatches by protocol.
+Rename to `apps/rustack/`. Single binary, single port (4566), gateway router dispatches by protocol.
 
 **Option B: Separate Binaries**
-Keep `apps/ruststack-s3-server/` and add `apps/ruststack-dynamodb-server/`. Simpler but requires running two processes.
+Keep `apps/rustack-s3-server/` and add `apps/rustack-dynamodb-server/`. Simpler but requires running two processes.
 
 We recommend **Option A** for Docker simplicity and LocalStack API compatibility (LocalStack serves all services on port 4566).
 
@@ -1269,14 +1269,14 @@ fn resolve_name<'a>(
 
 ```rust
 /// Main DynamoDB provider implementing all operations.
-pub struct RustStackDynamoDB {
+pub struct RustackDynamoDB {
     /// Table registry and metadata.
     pub(crate) state: Arc<DynamoDBServiceState>,
     /// Configuration.
     pub(crate) config: Arc<DynamoDBConfig>,
 }
 
-impl RustStackDynamoDB {
+impl RustackDynamoDB {
     pub fn new(config: DynamoDBConfig) -> Self;
     pub fn state(&self) -> &DynamoDBServiceState;
     pub fn config(&self) -> &DynamoDBConfig;
@@ -1329,7 +1329,7 @@ pub struct DynamoDBTable {
 Each operation handler follows the same pattern as S3:
 
 ```rust
-impl RustStackDynamoDB {
+impl RustackDynamoDB {
     /// Handle CreateTable.
     pub fn handle_create_table(
         &self,
@@ -1415,7 +1415,7 @@ Transactions require atomicity:
 - Must validate all conditions before applying any writes
 
 ```rust
-impl RustStackDynamoDB {
+impl RustackDynamoDB {
     pub fn handle_transact_write_items(
         &self,
         input: TransactWriteItemsInput,
@@ -1488,7 +1488,7 @@ DynamoDB errors use JSON with `__type` field containing the fully-qualified erro
 The `__type` prefix varies:
 - Most errors: `com.amazonaws.dynamodb.v20120810#ErrorName`
 - Some errors: `com.amazon.coral.validate#ValidationException`
-- Auth errors: handled by `ruststack-auth` before reaching DynamoDB handler
+- Auth errors: handled by `rustack-auth` before reaching DynamoDB handler
 
 ### 12.3 Service Error Enum
 
@@ -1671,7 +1671,7 @@ fn test_condition_expression_parsing(#[case] expr: &str, #[case] should_parse: b
 - Extract `ServiceConfig` trait
 - Implement `DynamoDBServiceConfig`
 - Download DynamoDB Smithy model JSON
-- Generate `ruststack-dynamodb-model` crate
+- Generate `rustack-dynamodb-model` crate
 - Hand-write `AttributeValue` with serde
 
 #### Step 0.2: HTTP Layer
@@ -1704,7 +1704,7 @@ fn test_condition_expression_parsing(#[case] expr: &str, #[case] should_parse: b
 
 #### Step 0.6: Server Integration
 - Implement `GatewayService` for S3+DynamoDB routing
-- Rename server binary to `ruststack-server`
+- Rename server binary to `rustack`
 - Update Docker image, GitHub Action
 
 #### Step 0.7: Testing
@@ -1758,7 +1758,7 @@ Deferred until user demand materializes. These features are rarely needed for lo
 
 Our implementation will intentionally differ from DynamoDB Local in some areas:
 
-| Behavior | DynamoDB Local | RustStack | Justification |
+| Behavior | DynamoDB Local | Rustack | Justification |
 |----------|---------------|-----------|---------------|
 | Table name case | Case-insensitive | Case-sensitive (correct) | AWS DynamoDB is case-sensitive |
 | Parallel scan | Ignored (returns all) | Implemented properly | Correct behavior |
@@ -1791,9 +1791,9 @@ PartiQL (SQL-compatible query language) is used by some newer SDKs. How much eff
 
 ### 17.4 Unified vs Separate Server Binary
 
-Should we rename `ruststack-s3-server` to `ruststack-server` now, or keep separate binaries?
+Should we rename `rustack-s3-server` to `rustack` now, or keep separate binaries?
 
-**Recommendation**: Rename to `ruststack-server` with a gateway router. This matches LocalStack's single-port architecture and simplifies Docker/CI configuration.
+**Recommendation**: Rename to `rustack` with a gateway router. This matches LocalStack's single-port architecture and simplifies Docker/CI configuration.
 
 ### 17.5 DynamoDB Streams
 

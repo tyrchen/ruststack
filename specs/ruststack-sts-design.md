@@ -1,9 +1,9 @@
-# RustStack STS: Native Rust Implementation Design
+# Rustack STS: Native Rust Implementation Design
 
 **Date:** 2026-03-19
 **Status:** Draft / RFC
-**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-sns-design.md](./ruststack-sns-design.md)
-**Scope:** Add AWS Security Token Service (STS) support to RustStack -- 8 operations covering the core STS API surface, using the same Smithy-based codegen and gateway routing patterns established by existing services.
+**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-sns-design.md](./rustack-sns-design.md)
+**Scope:** Add AWS Security Token Service (STS) support to Rustack -- 8 operations covering the core STS API surface, using the same Smithy-based codegen and gateway routing patterns established by existing services.
 
 ---
 
@@ -29,14 +29,14 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding AWS Security Token Service (STS) support to RustStack. Key points:
+This spec proposes adding AWS Security Token Service (STS) support to Rustack. Key points:
 
 - **Small scope, critical importance** -- STS has only ~8 operations total, making it one of the smallest AWS services by API surface. However, STS is arguably the most critical AWS service for SDK bootstrapping: every AWS SDK calls `GetCallerIdentity` on startup to verify credentials and determine account context. `AssumeRole` is fundamental to cross-account access patterns, CI/CD role chaining, and any application that uses IAM roles.
-- **SDK bootstrapping dependency** -- without a local STS, any AWS SDK client configured against RustStack must either skip credential verification or fail on the initial `GetCallerIdentity` call. Adding STS eliminates this friction and enables transparent SDK usage against RustStack.
+- **SDK bootstrapping dependency** -- without a local STS, any AWS SDK client configured against Rustack must either skip credential verification or fail on the initial `GetCallerIdentity` call. Adding STS eliminates this friction and enables transparent SDK usage against Rustack.
 - **awsQuery protocol** -- STS uses the `awsQuery` protocol: `POST /` with `application/x-www-form-urlencoded` body containing `Action=OperationName`. Responses are XML. This is the same protocol family as SNS. The key routing challenge is distinguishing STS from SNS at the gateway level, which is solved by inspecting the SigV4 credential scope service name (`sts` vs `sns`).
 - **Session credential management** -- STS introduces the concept of temporary security credentials (access key starting with `ASIA`, secret key, and session token). The core complexity is the credential store that maps temporary access keys back to their originating identity, and the session store that tracks assumed-role sessions with tags and transitive tag propagation for chained `AssumeRole` calls.
 - **Relationship with IAM** -- STS depends on IAM conceptually (AssumeRole validates role ARNs), but must work standalone when IAM is not enabled. The design uses an optional IAM role validation interface.
-- **Smithy codegen reuse** -- generate a `ruststack-sts-model` crate from the official Smithy model using the same codegen infrastructure as all other services.
+- **Smithy codegen reuse** -- generate a `rustack-sts-model` crate from the official Smithy model using the same codegen infrastructure as all other services.
 - **Estimated effort** -- 2-3 days for Phase 0 (4 core operations), 4-5 days for full implementation (8 operations).
 
 ---
@@ -53,7 +53,7 @@ AWS STS is the identity foundation of the AWS ecosystem. It is called implicitly
 - **Kubernetes IRSA** -- EKS pods use `AssumeRoleWithWebIdentity` to get AWS credentials. Local development with kind/minikube needs a local STS to test this flow.
 - **CI/CD** -- GitHub Actions, GitLab CI, and CircleCI use OIDC federation (`AssumeRoleWithWebIdentity`) to obtain AWS credentials without storing long-lived secrets.
 
-Without a local STS, developers working against RustStack must configure their SDKs to skip credential validation, which diverges from production behavior and masks configuration errors.
+Without a local STS, developers working against Rustack must configure their SDKs to skip credential validation, which diverges from production behavior and masks configuration errors.
 
 ### 2.2 Complexity Assessment
 
@@ -104,7 +104,7 @@ With all 8 operations implemented, the following tools work out of the box:
 6. **Account ID encoding** -- encode the account ID in the access key format so `GetAccessKeyInfo` can extract it without a store lookup
 7. **Standalone operation** -- STS works independently when IAM is not enabled; role ARN format is validated but role existence is not required
 8. **Smithy-generated types** -- all types generated from official AWS Smithy model
-9. **Shared infrastructure** -- reuse `ruststack-core`, `ruststack-auth`, and the awsQuery protocol layer from SNS
+9. **Shared infrastructure** -- reuse `rustack-core`, `rustack-auth`, and the awsQuery protocol layer from SNS
 10. **Same Docker image** -- single binary serves all services on port 4566
 
 ### 3.2 Non-Goals
@@ -118,7 +118,7 @@ With all 8 operations implemented, the following tools work out of the box:
 7. **Federation token policy enforcement** -- `GetFederationToken` accepts and stores policy but does not enforce it
 8. **Multi-region STS endpoints** -- single global store, no regional endpoint differentiation
 9. **Rate limiting** -- no request throttling
-10. **Data persistence across restarts** -- in-memory only, matching all other RustStack services
+10. **Data persistence across restarts** -- in-memory only, matching all other Rustack services
 
 ---
 
@@ -151,7 +151,7 @@ With all 8 operations implemented, the following tools work out of the box:
     +------+-------+-------+-------+-------+
                        |
                 +------+------+
-                | ruststack-  |
+                | rustack-  |
                 | core + auth |
                 +-------------+
 ```
@@ -195,28 +195,28 @@ Alternatively, SNS can be updated to also check `service=sns` in the credential 
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app)
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-{model,core,http}
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-sqs-{model,core,http}
-+-- ruststack-ssm-{model,core,http}
-+-- ruststack-sns-{model,core,http}
-+-- ruststack-sts-model                    <-- NEW (auto-generated)
-+-- ruststack-sts-core                     <-- NEW
-+-- ruststack-sts-http                     <-- NEW
+rustack (app)
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-{model,core,http}
++-- rustack-dynamodb-{model,core,http}
++-- rustack-sqs-{model,core,http}
++-- rustack-ssm-{model,core,http}
++-- rustack-sns-{model,core,http}
++-- rustack-sts-model                    <-- NEW (auto-generated)
++-- rustack-sts-core                     <-- NEW
++-- rustack-sts-http                     <-- NEW
 +-- ...other services...
 
-ruststack-sts-http
-+-- ruststack-sts-model
-+-- ruststack-auth                         (for parsing SigV4 Authorization header)
+rustack-sts-http
++-- rustack-sts-model
++-- rustack-auth                         (for parsing SigV4 Authorization header)
 
-ruststack-sts-core
-+-- ruststack-core
-+-- ruststack-sts-model
+rustack-sts-core
++-- rustack-core
++-- rustack-sts-model
 
-ruststack-sts-model (auto-generated, standalone)
+rustack-sts-model (auto-generated, standalone)
 ```
 
 ---
@@ -251,10 +251,10 @@ The SNS implementation provides the core awsQuery infrastructure that STS can re
 | XML response formatting (`XmlWriter`) | Yes | Same XML builder, different namespace |
 | XML error formatting | Yes | Same `<ErrorResponse>` structure |
 | `xml_escape` utility | Yes | Identical |
-| SigV4 auth | Yes | `ruststack-auth` is service-agnostic |
+| SigV4 auth | Yes | `rustack-auth` is service-agnostic |
 | `Action=` parameter routing | Yes | Same pattern |
 
-The shared XML infrastructure should be extracted into a common crate or module if not already shared. Since both SNS and STS use the same `XmlWriter` pattern, the STS HTTP crate can either depend on `ruststack-sns-http` for the utilities or duplicate the small amount of code. **Preferred approach:** extract the `XmlWriter`, `xml_escape`, and awsQuery error formatting into `ruststack-core` or a new `ruststack-query-protocol` utility module, then both SNS and STS depend on it. For the initial implementation, STS can duplicate the ~100 lines of XML utilities to avoid a cross-service dependency.
+The shared XML infrastructure should be extracted into a common crate or module if not already shared. Since both SNS and STS use the same `XmlWriter` pattern, the STS HTTP crate can either depend on `rustack-sns-http` for the utilities or duplicate the small amount of code. **Preferred approach:** extract the `XmlWriter`, `xml_escape`, and awsQuery error formatting into `rustack-core` or a new `rustack-query-protocol` utility module, then both SNS and STS depend on it. For the initial implementation, STS can duplicate the ~100 lines of XML utilities to avoid a cross-service dependency.
 
 ### 5.3 Wire Format Examples
 
@@ -338,7 +338,7 @@ Action=AssumeRole&Version=2011-06-15&RoleArn=arn%3Aaws%3Aiam%3A%3A123456789012%3
 
 ### 6.1 Universal Codegen
 
-The `ruststack-sts-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The STS Smithy model must first be downloaded and placed at `codegen/smithy-model/sts.json`.
+The `rustack-sts-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The STS Smithy model must first be downloaded and placed at `codegen/smithy-model/sts.json`.
 
 **Smithy model:** `codegen/smithy-model/sts.json` (namespace `com.amazonaws.sts`, 8 operations)
 **Service config:** `codegen/services/sts.toml`
@@ -378,7 +378,7 @@ file_layout = "flat"
 
 ### 6.3 Generated Output
 
-The codegen produces 6 files in `crates/ruststack-sts-model/src/`:
+The codegen produces 6 files in `crates/rustack-sts-model/src/`:
 
 | File | Contents |
 |------|----------|
@@ -405,10 +405,10 @@ See [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design
 
 ## 7. Crate Structure
 
-### 7.1 `ruststack-sts-model` (auto-generated)
+### 7.1 `rustack-sts-model` (auto-generated)
 
 ```
-crates/ruststack-sts-model/
+crates/rustack-sts-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs              # Module re-exports
@@ -421,16 +421,16 @@ crates/ruststack-sts-model/
 
 **Dependencies:** `serde`, `serde_json`
 
-### 7.2 `ruststack-sts-core`
+### 7.2 `rustack-sts-core`
 
 ```
-crates/ruststack-sts-core/
+crates/rustack-sts-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs           # StsConfig
     +-- handler.rs          # StsHandler trait (all 8 operation dispatch)
-    +-- provider.rs         # RustStackSts (main provider, all operation handlers)
+    +-- provider.rs         # RustackSts (main provider, all operation handlers)
     +-- credential.rs       # CredentialStore: maps access key IDs to identity info
     +-- session.rs          # SessionStore: tracks assumed-role sessions with tags
     +-- identity.rs         # CallerIdentity resolution from access key
@@ -438,12 +438,12 @@ crates/ruststack-sts-core/
     +-- validation.rs       # Role ARN, session name, tag validation
 ```
 
-**Dependencies:** `ruststack-core`, `ruststack-sts-model`, `dashmap`, `tracing`, `rand`, `uuid`, `base64`, `chrono`
+**Dependencies:** `rustack-core`, `rustack-sts-model`, `dashmap`, `tracing`, `rand`, `uuid`, `base64`, `chrono`
 
-### 7.3 `ruststack-sts-http`
+### 7.3 `rustack-sts-http`
 
 ```
-crates/ruststack-sts-http/
+crates/rustack-sts-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -455,17 +455,17 @@ crates/ruststack-sts-http/
     +-- request.rs          # Form parameter parsing (reuse or duplicate from SNS)
 ```
 
-**Dependencies:** `ruststack-sts-model`, `ruststack-auth`, `hyper`, `http`, `bytes`, `uuid`
+**Dependencies:** `rustack-sts-model`, `rustack-auth`, `hyper`, `http`, `bytes`, `uuid`
 
-This crate is structurally identical to `ruststack-sns-http`. The router parses `Action=<Op>` from form parameters.
+This crate is structurally identical to `rustack-sns-http`. The router parses `Action=<Op>` from form parameters.
 
 ### 7.4 Workspace Changes
 
 ```toml
 [workspace.dependencies]
-ruststack-sts-model = { path = "crates/ruststack-sts-model" }
-ruststack-sts-http = { path = "crates/ruststack-sts-http" }
-ruststack-sts-core = { path = "crates/ruststack-sts-core" }
+rustack-sts-model = { path = "crates/rustack-sts-model" }
+rustack-sts-http = { path = "crates/rustack-sts-http" }
+rustack-sts-core = { path = "crates/rustack-sts-core" }
 ```
 
 ---
@@ -637,9 +637,9 @@ async fn process_request<H: StsHandler>(
     // 6. Authenticate (if enabled).
     if !config.skip_signature_validation {
         if let Some(ref cred_provider) = config.credential_provider {
-            let body_hash = ruststack_auth::hash_payload(&body);
+            let body_hash = rustack_auth::hash_payload(&body);
             if let Err(auth_err) =
-                ruststack_auth::verify_sigv4(&parts, &body_hash, cred_provider.as_ref())
+                rustack_auth::verify_sigv4(&parts, &body_hash, cred_provider.as_ref())
             {
                 let err = StsError::invalid_client_token_id(auth_err.to_string());
                 return error_to_response(&err, request_id);
@@ -1139,7 +1139,7 @@ impl StsState {
 
 ### 9.6 Concurrency Model
 
-Like other RustStack services, STS uses `DashMap` for concurrent access. The workload is entirely request/response with no background processing, streaming, or real-time constraints.
+Like other Rustack services, STS uses `DashMap` for concurrent access. The workload is entirely request/response with no background processing, streaming, or real-time constraints.
 
 - **Reads** (GetCallerIdentity, GetAccessKeyInfo): lock-free concurrent reads via DashMap
 - **Writes** (AssumeRole, GetSessionToken): per-entry write locks via DashMap
@@ -1154,12 +1154,12 @@ No background processing is needed since temporary credentials do not actually e
 
 ```rust
 /// Main STS provider implementing all operations.
-pub struct RustStackSts {
+pub struct RustackSts {
     pub(crate) state: Arc<StsState>,
     pub(crate) config: Arc<StsConfig>,
 }
 
-impl RustStackSts {
+impl RustackSts {
     /// Create a new STS provider.
     pub fn new(config: StsConfig) -> Self {
         let state = StsState::new(&config);
@@ -1750,10 +1750,10 @@ pub fn error_to_response(error: &StsError, request_id: &str) -> http::Response<S
 STS support is gated behind a cargo feature:
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs", "ssm", "sns", "lambda", "events", "logs", "kms", "kinesis", "secretsmanager", "sts"]
-sts = ["dep:ruststack-sts-core", "dep:ruststack-sts-http"]
+sts = ["dep:rustack-sts-core", "dep:rustack-sts-http"]
 ```
 
 ### 12.2 Gateway Registration
@@ -1859,13 +1859,13 @@ impl StsConfig {
 | `AWS_ACCESS_KEY_ID` | `test` | Default access key mapped to root |
 | `AWS_SECRET_ACCESS_KEY` | `test` | Default secret key for root |
 
-### 12.6 Integration with ruststack-auth
+### 12.6 Integration with rustack-auth
 
-The STS service has a bidirectional relationship with `ruststack-auth`:
+The STS service has a bidirectional relationship with `rustack-auth`:
 
-1. **Auth validates STS requests** -- like all other services, STS requests are authenticated via SigV4 using `ruststack-auth`. The credential provider resolves access keys to secret keys.
+1. **Auth validates STS requests** -- like all other services, STS requests are authenticated via SigV4 using `rustack-auth`. The credential provider resolves access keys to secret keys.
 
-2. **STS provides credentials to auth** -- when STS generates temporary credentials (via AssumeRole/GetSessionToken), those credentials need to be available to `ruststack-auth` for validating subsequent requests signed with those temporary credentials.
+2. **STS provides credentials to auth** -- when STS generates temporary credentials (via AssumeRole/GetSessionToken), those credentials need to be available to `rustack-auth` for validating subsequent requests signed with those temporary credentials.
 
 For the initial implementation, this is handled through the shared `StaticCredentialProvider` or a new `DynamicCredentialProvider` that STS can register new credentials with:
 
@@ -2114,7 +2114,7 @@ aws sts assume-role \
 **What it validates:** Terraform calls `GetCallerIdentity` during `terraform init` and uses `AssumeRole` for provider configuration with `assume_role` blocks. This is the most common STS integration point.
 
 ```bash
-# Verify Terraform works with RustStack STS
+# Verify Terraform works with Rustack STS
 export AWS_ENDPOINT_URL=http://localhost:4566
 terraform init    # Calls GetCallerIdentity
 terraform plan    # Uses configured role if assume_role block is present
@@ -2155,9 +2155,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -p ruststack-sts-model
-      - run: cargo test -p ruststack-sts-core
-      - run: cargo test -p ruststack-sts-http
+      - run: cargo test -p rustack-sts-model
+      - run: cargo test -p rustack-sts-core
+      - run: cargo test -p rustack-sts-http
 
   integration:
     runs-on: ubuntu-latest
@@ -2165,7 +2165,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release
-      - run: ./target/release/ruststack-server &
+      - run: ./target/release/rustack &
       - run: sleep 2
       - run: |
           # AWS CLI smoke tests
@@ -2186,13 +2186,13 @@ jobs:
 
 ### Phase 0: Core Operations (2-3 days)
 
-**Goal:** `GetCallerIdentity` and `AssumeRole` work. Every AWS SDK can bootstrap against RustStack.
+**Goal:** `GetCallerIdentity` and `AssumeRole` work. Every AWS SDK can bootstrap against Rustack.
 
 1. **Day 1: Model + Scaffolding + GetCallerIdentity**
    - Download STS Smithy model to `codegen/smithy-model/sts.json`
    - Create `codegen/services/sts.toml`
-   - Generate `ruststack-sts-model` crate
-   - Create `ruststack-sts-core` and `ruststack-sts-http` crate scaffolding
+   - Generate `rustack-sts-model` crate
+   - Create `rustack-sts-core` and `rustack-sts-http` crate scaffolding
    - Implement `StsOperation` enum and form-parameter router
    - Implement credential store and identity resolution
    - Implement `GetCallerIdentity` (root credentials)
@@ -2213,7 +2213,7 @@ jobs:
    - Implement transitive tag propagation for chained AssumeRole
    - Fix edge cases from testing
 
-**Deliverable:** AWS CLI, all AWS SDKs, Terraform init, CDK bootstrap all work against RustStack.
+**Deliverable:** AWS CLI, all AWS SDKs, Terraform init, CDK bootstrap all work against Rustack.
 
 ### Phase 1: Federation and Advanced (1-2 days)
 
@@ -2243,7 +2243,7 @@ jobs:
 |------|-----------|--------|------------|
 | Gateway routing conflict between STS and SNS | High | High | Parse SigV4 credential scope `service` field to disambiguate. Both are awsQuery with form-urlencoded. Without SigV4 parsing, requests would be misrouted. Test extensively with both STS and SNS enabled simultaneously. |
 | SigV4 Authorization header absent or malformed | Medium | High | Some tools may send unsigned requests (especially in local dev). If Authorization header is missing, fall back to checking if the form body contains STS-specific Action names (GetCallerIdentity, AssumeRole, etc.) as a secondary routing heuristic. |
-| Account ID encoding in access keys is incompatible | Low | Medium | The base-36 encoding is a local convention. `GetAccessKeyInfo` must handle both RustStack-generated keys (decodable) and external keys (default account fallback). Real AWS keys use a different encoding. |
+| Account ID encoding in access keys is incompatible | Low | Medium | The base-36 encoding is a local convention. `GetAccessKeyInfo` must handle both Rustack-generated keys (decodable) and external keys (default account fallback). Real AWS keys use a different encoding. |
 | Temporary credentials not available to other services for auth | Medium | Medium | When signature validation is enabled, AssumeRole-generated credentials must be registered with the auth credential provider. Implement `DynamicCredentialProvider`. Not needed when validation is disabled (default). |
 | Session token format breaks SDK expectations | Low | Low | AWS SDKs treat session tokens as opaque strings. No format validation is performed client-side. Our random tokens are safe. |
 | Tag propagation semantics differ from real AWS | Medium | Medium | Transitive tag propagation has subtle rules around override priority and inheritance depth. Study LocalStack's implementation and AWS documentation carefully. Write extensive unit tests for chained assume-role scenarios. |
@@ -2252,8 +2252,8 @@ jobs:
 
 ### 15.2 Dependencies
 
-- `ruststack-core` -- no changes needed
-- `ruststack-auth` -- may need `DynamicCredentialProvider` trait for signature validation mode; no changes needed when validation is disabled
+- `rustack-core` -- no changes needed
+- `rustack-auth` -- may need `DynamicCredentialProvider` trait for signature validation mode; no changes needed when validation is disabled
 - `dashmap` -- already in workspace
 - `uuid` -- for request IDs (already in workspace)
 - `rand` -- for credential generation (already in workspace)

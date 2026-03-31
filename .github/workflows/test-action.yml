@@ -20,29 +20,65 @@ permissions:
   contents: read
   packages: read
 
+env:
+  IMAGE: ghcr.io/tyrchen/rustack:latest
+
 jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # Build the Docker image from source and share it across test jobs
+  # ─────────────────────────────────────────────────────────────────────
+  build-image:
+    name: "Build Docker image"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save image as artifact
+        run: docker save "$IMAGE" | gzip > /tmp/rustack-image.tar.gz
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustack-image
+          path: /tmp/rustack-image.tar.gz
+          retention-days: 1
+
   # ─────────────────────────────────────────────────────────────────────
   # Job 1: Default configuration — verify action basics and all services
   # ─────────────────────────────────────────────────────────────────────
   default-config:
     name: "Action: default config + all-service smoke tests"
+    needs: build-image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack via action (defaults)
-        id: ruststack
+      - name: Load Docker image
+        uses: ./.github/actions/load-image
+
+      - name: Start Rustack via action (defaults)
+        id: rustack
         uses: ./
-        with:
-          image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
 
       # ── Verify outputs ────────────────────────────────────────────────
       - name: "Verify: action outputs are set"
         run: |
           set -euo pipefail
 
-          ENDPOINT="${{ steps.ruststack.outputs.endpoint }}"
-          CONTAINER_ID="${{ steps.ruststack.outputs.container-id }}"
+          ENDPOINT="${{ steps.rustack.outputs.endpoint }}"
+          CONTAINER_ID="${{ steps.rustack.outputs.container-id }}"
 
           echo "endpoint=$ENDPOINT"
           echo "container-id=$CONTAINER_ID"
@@ -412,33 +448,36 @@ jobs:
       # ── Cleanup ───────────────────────────────────────────────────────
       - name: "Dump container logs (on failure)"
         if: failure()
-        run: docker logs ruststack 2>&1 | tail -500
+        run: docker logs rustack 2>&1 | tail -500
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 2: Custom port
   # ─────────────────────────────────────────────────────────────────────
   custom-port:
     name: "Action: custom port (5566)"
+    needs: build-image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack on port 5566
-        id: ruststack
+      - name: Load Docker image
+        uses: ./.github/actions/load-image
+
+      - name: Start Rustack on port 5566
+        id: rustack
         uses: ./
         with:
-          image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
           port: "5566"
 
       - name: "Verify: endpoint uses custom port"
         run: |
           set -euo pipefail
 
-          [ "${{ steps.ruststack.outputs.endpoint }}" = "http://localhost:5566" ]
+          [ "${{ steps.rustack.outputs.endpoint }}" = "http://localhost:5566" ]
           [ "$AWS_ENDPOINT_URL" = "http://localhost:5566" ]
           [ "$LOCALSTACK_ENDPOINT" = "http://localhost:5566" ]
 
@@ -465,22 +504,25 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 3: Custom region
   # ─────────────────────────────────────────────────────────────────────
   custom-region:
     name: "Action: custom region (eu-west-1)"
+    needs: build-image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack with eu-west-1
-        id: ruststack
+      - name: Load Docker image
+        uses: ./.github/actions/load-image
+
+      - name: Start Rustack with eu-west-1
+        id: rustack
         uses: ./
         with:
-          image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
           default-region: "eu-west-1"
 
       - name: "Verify: region is eu-west-1"
@@ -505,22 +547,25 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 4: Custom credentials
   # ─────────────────────────────────────────────────────────────────────
   custom-credentials:
     name: "Action: custom credentials"
+    needs: build-image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack with custom credentials
-        id: ruststack
+      - name: Load Docker image
+        uses: ./.github/actions/load-image
+
+      - name: Start Rustack with custom credentials
+        id: rustack
         uses: ./
         with:
-          image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
           access-key: "MYACCESSKEY123"
           secret-key: "MYSECRETKEY456"
 
@@ -541,22 +586,25 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 5: Services filter — only enable a subset
   # ─────────────────────────────────────────────────────────────────────
   services-filter:
     name: "Action: services filter (s3,sqs,sts)"
+    needs: build-image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack with limited services
-        id: ruststack
+      - name: Load Docker image
+        uses: ./.github/actions/load-image
+
+      - name: Start Rustack with limited services
+        id: rustack
         uses: ./
         with:
-          image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
           services: "s3,sqs,sts"
 
       - name: "Verify: only requested services are running"
@@ -613,22 +661,25 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 6: Log level configuration
   # ─────────────────────────────────────────────────────────────────────
   log-level:
     name: "Action: log level (debug)"
+    needs: build-image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack with debug logging
-        id: ruststack
+      - name: Load Docker image
+        uses: ./.github/actions/load-image
+
+      - name: Start Rustack with debug logging
+        id: rustack
         uses: ./
         with:
-          image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
           log-level: "debug"
 
       - name: "Verify: debug logs appear"
@@ -641,7 +692,7 @@ jobs:
           aws s3api delete-bucket --bucket log-test
 
           # Check container logs contain DEBUG-level entries
-          LOGS=$(docker logs ruststack 2>&1)
+          LOGS=$(docker logs rustack 2>&1)
           if echo "$LOGS" | grep -qi "DEBUG\|debug"; then
             echo "Debug logging confirmed"
           else
@@ -651,22 +702,25 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 7: Wait timeout — verify fast startup
   # ─────────────────────────────────────────────────────────────────────
   wait-timeout:
     name: "Action: wait timeout"
+    needs: build-image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack with short timeout (succeeds)
-        id: ruststack
+      - name: Load Docker image
+        uses: ./.github/actions/load-image
+
+      - name: Start Rustack with short timeout (succeeds)
+        id: rustack
         uses: ./
         with:
-          image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
           wait-timeout: "60"
 
       - name: "Verify: service is healthy"
@@ -677,22 +731,24 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Job 8: Cross-service integration (SNS → SQS fan-out)
   # ─────────────────────────────────────────────────────────────────────
   cross-service:
     name: "Action: cross-service integration"
+    needs: build-image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start RustStack
-        id: ruststack
+      - name: Load Docker image
+        uses: ./.github/actions/load-image
+
+      - name: Start Rustack
+        id: rustack
         uses: ./
-        with:
-          image-tag: ${{ github.event.inputs.image-tag || 'latest' }}
 
       - name: "SNS→SQS fan-out: publish to topic, receive from queue"
         run: |
@@ -769,8 +825,8 @@ jobs:
 
       - name: "Dump container logs (on failure)"
         if: failure()
-        run: docker logs ruststack 2>&1 | tail -500
+        run: docker logs rustack 2>&1 | tail -500
 
       - name: Cleanup
         if: always()
-        run: docker rm -f ruststack 2>/dev/null || true
+        run: docker rm -f rustack 2>/dev/null || true

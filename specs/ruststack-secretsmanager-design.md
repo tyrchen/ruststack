@@ -1,9 +1,9 @@
-# RustStack Secrets Manager: Native Rust Implementation Design
+# Rustack Secrets Manager: Native Rust Implementation Design
 
 **Date:** 2026-03-06
 **Status:** Draft / RFC
-**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-ssm-design.md](./ruststack-ssm-design.md)
-**Scope:** Add AWS Secrets Manager support to RustStack -- 23 operations covering the full Secrets Manager API surface, using the same Smithy-based codegen and gateway routing patterns established by DynamoDB and SSM.
+**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-ssm-design.md](./rustack-ssm-design.md)
+**Scope:** Add AWS Secrets Manager support to Rustack -- 23 operations covering the full Secrets Manager API surface, using the same Smithy-based codegen and gateway routing patterns established by DynamoDB and SSM.
 
 ---
 
@@ -29,13 +29,13 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding AWS Secrets Manager support to RustStack. Key points:
+This spec proposes adding AWS Secrets Manager support to Rustack. Key points:
 
 - **Moderate scope** -- 23 operations total, comparable in complexity to SSM Parameter Store (13 operations) but with richer versioning semantics. Secrets Manager introduces version staging labels (AWSCURRENT, AWSPREVIOUS, AWSPENDING), secret rotation lifecycle, and scheduled deletion -- concepts absent from Parameter Store.
 - **High value** -- Secrets Manager is the primary secrets management service in AWS. Tools like Terraform, CDK, external-secrets-operator (Kubernetes), Spring Cloud AWS, Chamber, and virtually every AWS SDK-based application depend on it. Adding it unlocks local development and CI testing for any application that reads secrets from Secrets Manager.
 - **Near-zero protocol work** -- Secrets Manager uses `awsJson1.1`, identical to SSM. The `X-Amz-Target` prefix is `secretsmanager.` and Content-Type is `application/x-amz-json-1.1`. The entire JSON serialization, routing, and error formatting infrastructure from SSM can be reused.
 - **Version staging labels are the core complexity** -- unlike SSM Parameter Store's simple auto-incrementing version numbers, Secrets Manager tracks versions by UUID and assigns staging labels (AWSCURRENT, AWSPREVIOUS, AWSPENDING, plus custom labels) that can be moved between versions. This requires a more sophisticated version management model.
-- **Smithy codegen reuse** -- generate a `ruststack-secretsmanager-model` crate from the official Smithy model (`secretsmanager-2017-10-17.json`) using the same codegen infrastructure as DynamoDB and SSM.
+- **Smithy codegen reuse** -- generate a `rustack-secretsmanager-model` crate from the official Smithy model (`secretsmanager-2017-10-17.json`) using the same codegen infrastructure as DynamoDB and SSM.
 - **Estimated effort** -- 3-4 days for Phase 0 (10 core operations), 5-7 days for full implementation (20 operations), plus 1 day for CI integration.
 
 ---
@@ -107,7 +107,7 @@ With all 20 MVP operations implemented (excluding replication), the following to
 9. **GetRandomPassword** -- generate cryptographically random passwords with configurable constraints
 10. **BatchGetSecretValue** -- bulk retrieval by secret ID list or filter
 11. **Smithy-generated types** -- all types generated from official AWS Smithy model
-12. **Shared infrastructure** -- reuse `ruststack-core`, `ruststack-auth`, and the awsJson1.1 protocol layer
+12. **Shared infrastructure** -- reuse `rustack-core`, `rustack-auth`, and the awsJson1.1 protocol layer
 13. **Same Docker image** -- single binary serves S3 + DynamoDB + SQS + SSM + Secrets Manager on port 4566
 14. **Pass LocalStack and moto test suites** -- validate against the most comprehensive Secrets Manager mock test suites
 
@@ -120,7 +120,7 @@ With all 20 MVP operations implemented (excluding replication), the following to
 5. **Automatic rotation scheduling** -- `RotationRules` stored but no background scheduler; rotation triggered only by explicit `RotateSecret` calls
 6. **CloudWatch metrics/events** -- no EventBridge integration for secret changes
 7. **Cross-account access** -- no AWS RAM or cross-account policy evaluation
-8. **Data persistence across restarts** -- in-memory only, matching all other RustStack services
+8. **Data persistence across restarts** -- in-memory only, matching all other Rustack services
 9. **ValidateResourcePolicy enforcement** -- accept the call but always return valid (no actual policy validation engine)
 10. **Real deletion scheduling** -- `ForceDeleteWithoutRecovery` always available; scheduled deletion window honored by marking the secret but deletion occurs immediately on the internal timer (simplified)
 
@@ -155,7 +155,7 @@ With all 20 MVP operations implemented (excluding replication), the following to
        +--------+--------+-------+---------+
                          |
                   +------+------+
-                  | ruststack-  |
+                  | rustack-  |
                   | core + auth |
                   +-------------+
 ```
@@ -177,26 +177,26 @@ Routing logic: check `X-Amz-Target` header. If prefix is `secretsmanager.`, rout
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app)
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-{model,core,http}
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-sqs-{model,core,http}
-+-- ruststack-ssm-{model,core,http}
-+-- ruststack-secretsmanager-model        <-- NEW (auto-generated)
-+-- ruststack-secretsmanager-core         <-- NEW
-+-- ruststack-secretsmanager-http         <-- NEW
+rustack (app)
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-{model,core,http}
++-- rustack-dynamodb-{model,core,http}
++-- rustack-sqs-{model,core,http}
++-- rustack-ssm-{model,core,http}
++-- rustack-secretsmanager-model        <-- NEW (auto-generated)
++-- rustack-secretsmanager-core         <-- NEW
++-- rustack-secretsmanager-http         <-- NEW
 
-ruststack-secretsmanager-http
-+-- ruststack-secretsmanager-model
-+-- ruststack-auth
+rustack-secretsmanager-http
++-- rustack-secretsmanager-model
++-- rustack-auth
 
-ruststack-secretsmanager-core
-+-- ruststack-core
-+-- ruststack-secretsmanager-model
+rustack-secretsmanager-core
++-- rustack-core
++-- rustack-secretsmanager-model
 
-ruststack-secretsmanager-model (auto-generated, standalone)
+rustack-secretsmanager-model (auto-generated, standalone)
 ```
 
 ---
@@ -231,8 +231,8 @@ The SSM implementation provides all the infrastructure Secrets Manager needs:
 | JSON response serialization | Yes | `serde_json::to_vec` with `Serialize` derives |
 | `X-Amz-Target` header parsing | Yes | Same pattern, different prefix |
 | JSON error formatting | Yes | Same `{"__type": "...", "message": "..."}` format |
-| SigV4 auth | Yes | `ruststack-auth` is service-agnostic |
-| Multi-account/region state | Yes | `ruststack-core` unchanged |
+| SigV4 auth | Yes | `rustack-auth` is service-agnostic |
+| Multi-account/region state | Yes | `rustack-core` unchanged |
 
 ### 5.3 Wire Format Examples
 
@@ -285,7 +285,7 @@ Content-Type: application/x-amz-json-1.1
 
 ### 6.1 Universal Codegen
 
-The `ruststack-secretsmanager-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
+The `rustack-secretsmanager-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
 
 **Smithy model:** `codegen/smithy-model/secretsmanager.json` (269KB, namespace `com.amazonaws.secretsmanager`, 23 operations)
 **Service config:** `codegen/services/secretsmanager.toml`
@@ -293,7 +293,7 @@ The `ruststack-secretsmanager-model` crate is generated from the official AWS Sm
 
 ### 6.2 Generated Output
 
-The codegen produces 6 files in `crates/ruststack-secretsmanager-model/src/`:
+The codegen produces 6 files in `crates/rustack-secretsmanager-model/src/`:
 
 | File | Contents |
 |------|----------|
@@ -314,10 +314,10 @@ See [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design
 
 ## 7. Crate Structure
 
-### 7.1 `ruststack-secretsmanager-model` (auto-generated)
+### 7.1 `rustack-secretsmanager-model` (auto-generated)
 
 ```
-crates/ruststack-secretsmanager-model/
+crates/rustack-secretsmanager-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs              # Module re-exports
@@ -332,16 +332,16 @@ crates/ruststack-secretsmanager-model/
 
 No hand-written types needed. Secrets Manager uses straightforward JSON types that serde handles natively.
 
-### 7.2 `ruststack-secretsmanager-core`
+### 7.2 `rustack-secretsmanager-core`
 
 ```
-crates/ruststack-secretsmanager-core/
+crates/rustack-secretsmanager-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs           # SecretsManagerConfig
     +-- handler.rs          # SecretsManagerHandler trait (all 23 operation dispatch)
-    +-- provider.rs         # RustStackSecretsManager (main provider, all operation handlers)
+    +-- provider.rs         # RustackSecretsManager (main provider, all operation handlers)
     +-- storage.rs          # SecretStore (DashMap<String, SecretRecord>), SecretRecord, SecretVersion
     +-- version.rs          # Version staging label management (AWSCURRENT/AWSPREVIOUS/AWSPENDING)
     +-- rotation.rs         # Rotation lifecycle state machine
@@ -351,12 +351,12 @@ crates/ruststack-secretsmanager-core/
     +-- validation.rs       # Secret name, ARN, version ID, tag validation
 ```
 
-**Dependencies:** `ruststack-core`, `ruststack-secretsmanager-model`, `dashmap`, `serde_json`, `tracing`, `rand`, `uuid`, `base64`
+**Dependencies:** `rustack-core`, `rustack-secretsmanager-model`, `dashmap`, `serde_json`, `tracing`, `rand`, `uuid`, `base64`
 
-### 7.3 `ruststack-secretsmanager-http`
+### 7.3 `rustack-secretsmanager-http`
 
 ```
-crates/ruststack-secretsmanager-http/
+crates/rustack-secretsmanager-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -367,17 +367,17 @@ crates/ruststack-secretsmanager-http/
     +-- response.rs         # HTTP response construction
 ```
 
-**Dependencies:** `ruststack-secretsmanager-model`, `ruststack-auth`, `hyper`, `http`, `serde_json`, `bytes`
+**Dependencies:** `rustack-secretsmanager-model`, `rustack-auth`, `hyper`, `http`, `serde_json`, `bytes`
 
-This crate is structurally identical to `ruststack-ssm-http`. The router parses `secretsmanager.<Op>` instead of `AmazonSSM.<Op>`.
+This crate is structurally identical to `rustack-ssm-http`. The router parses `secretsmanager.<Op>` instead of `AmazonSSM.<Op>`.
 
 ### 7.4 Workspace Changes
 
 ```toml
 [workspace.dependencies]
-ruststack-secretsmanager-model = { path = "crates/ruststack-secretsmanager-model" }
-ruststack-secretsmanager-http = { path = "crates/ruststack-secretsmanager-http" }
-ruststack-secretsmanager-core = { path = "crates/ruststack-secretsmanager-core" }
+rustack-secretsmanager-model = { path = "crates/rustack-secretsmanager-model" }
+rustack-secretsmanager-http = { path = "crates/rustack-secretsmanager-http" }
+rustack-secretsmanager-core = { path = "crates/rustack-secretsmanager-core" }
 ```
 
 ---
@@ -409,7 +409,7 @@ impl SecretsManagerRouter {
 ```rust
 /// Secrets Manager service router for the gateway.
 pub struct SecretsManagerServiceRouter {
-    handler: Arc<RustStackSecretsManager>,
+    handler: Arc<RustackSecretsManager>,
     config: SecretsManagerHttpConfig,
 }
 
@@ -457,7 +457,7 @@ The storage model is a hashmap of secrets, each containing a map of versions ide
 
 ```rust
 /// Top-level secret store.
-/// Keyed by (account_id, region) via ruststack-core, then by secret name.
+/// Keyed by (account_id, region) via rustack-core, then by secret name.
 pub struct SecretStore {
     /// All secrets keyed by name.
     secrets: DashMap<String, SecretRecord>,
@@ -943,12 +943,12 @@ The only background processing needed is expired deletion cleanup, which can be 
 
 ```rust
 /// Main Secrets Manager provider implementing all operations.
-pub struct RustStackSecretsManager {
+pub struct RustackSecretsManager {
     pub(crate) state: Arc<SecretStore>,
     pub(crate) config: Arc<SecretsManagerConfig>,
 }
 
-impl RustStackSecretsManager {
+impl RustackSecretsManager {
     pub fn new(config: SecretsManagerConfig) -> Self;
 }
 ```
@@ -1247,14 +1247,14 @@ Note: Secrets Manager uses `"Message"` (capital M) in error responses, unlike SS
 Secrets Manager support is gated behind a cargo feature:
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs", "ssm", "secretsmanager"]
-s3 = ["dep:ruststack-s3-core", "dep:ruststack-s3-http"]
-dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
-sqs = ["dep:ruststack-sqs-core", "dep:ruststack-sqs-http"]
-ssm = ["dep:ruststack-ssm-core", "dep:ruststack-ssm-http"]
-secretsmanager = ["dep:ruststack-secretsmanager-core", "dep:ruststack-secretsmanager-http"]
+s3 = ["dep:rustack-s3-core", "dep:rustack-s3-http"]
+dynamodb = ["dep:rustack-dynamodb-core", "dep:rustack-dynamodb-http"]
+sqs = ["dep:rustack-sqs-core", "dep:rustack-sqs-http"]
+ssm = ["dep:rustack-ssm-core", "dep:rustack-ssm-http"]
+secretsmanager = ["dep:rustack-secretsmanager-core", "dep:rustack-secretsmanager-http"]
 ```
 
 ### 12.2 Gateway Registration
@@ -1333,7 +1333,7 @@ impl SecretsManagerConfig {
 
 ### 12.6 Docker Image / GitHub Action
 
-The existing Docker image and GitHub Action gain Secrets Manager support automatically when the feature is enabled. The same `ruststack-server` binary serves all services. The GitHub Action `action.yml` should be updated to list `secretsmanager` as a supported service.
+The existing Docker image and GitHub Action gain Secrets Manager support automatically when the feature is enabled. The same `rustack` binary serves all services. The GitHub Action `action.yml` should be updated to list `secretsmanager` as a supported service.
 
 ---
 
@@ -1451,7 +1451,7 @@ aws secretsmanager get-random-password --password-length 32 --endpoint-url http:
 - BatchGetSecretValue
 - HTTP-level JSON protocol tests (X-Amz-Target headers)
 
-**How to run:** The LocalStack test suite is Python-based using pytest. We can adapt the non-Lambda-dependent tests to run against RustStack.
+**How to run:** The LocalStack test suite is Python-based using pytest. We can adapt the non-Lambda-dependent tests to run against Rustack.
 
 ```makefile
 test-secretsmanager-localstack:
@@ -1474,7 +1474,7 @@ test-secretsmanager-localstack:
 - Pagination
 - Error handling
 
-**How to run:** Moto tests are designed for the moto mock library but the `test_server.py` file tests against a standalone moto server. These tests can be adapted to run against RustStack by pointing the endpoint URL.
+**How to run:** Moto tests are designed for the moto mock library but the `test_server.py` file tests against a standalone moto server. These tests can be adapted to run against Rustack by pointing the endpoint URL.
 
 ```makefile
 test-secretsmanager-moto:
@@ -1486,7 +1486,7 @@ test-secretsmanager-moto:
 
 **Source:** https://github.com/hashicorp/terraform-provider-aws (tests/resource_aws_secretsmanager_*.go)
 **Coverage:** Tests `aws_secretsmanager_secret`, `aws_secretsmanager_secret_version`, `aws_secretsmanager_secret_policy`, `aws_secretsmanager_secret_rotation` resources.
-**How to run:** Terraform acceptance tests require a running AWS-compatible endpoint. Use `tflocal` to point Terraform at RustStack:
+**How to run:** Terraform acceptance tests require a running AWS-compatible endpoint. Use `tflocal` to point Terraform at Rustack:
 ```bash
 pip install terraform-local
 tflocal init
@@ -1498,7 +1498,7 @@ tflocal apply
 
 **Source:** https://github.com/external-secrets/external-secrets
 **Coverage:** Tests `GetSecretValue`, `DescribeSecret`, `BatchGetSecretValue` via the AWS Secrets Manager provider.
-**How to run:** Requires a Kubernetes cluster. Can test with kind + external-secrets Helm chart pointed at RustStack.
+**How to run:** Requires a Kubernetes cluster. Can test with kind + external-secrets Helm chart pointed at Rustack.
 **What this validates:** Kubernetes-native secrets sync workflow, which is one of the primary use cases for Secrets Manager.
 
 #### 13.4.5 Chamber (Segment)
@@ -1525,7 +1525,7 @@ AWS_ENDPOINT_URL=http://localhost:4566 chamber -b secretsmanager list myservice
 **Source:** https://github.com/aws/aws-secretsmanager-agent
 **Coverage:** The agent is a Rust-based sidecar that caches secrets locally. Tests `GetSecretValue` with caching, token-based auth, and version stage selection.
 **How to run:** Build the agent and configure `SECRETS_MANAGER_ENDPOINT=http://localhost:4566`.
-**What this validates:** The official AWS sidecar agent works correctly against RustStack.
+**What this validates:** The official AWS sidecar agent works correctly against Rustack.
 
 ### 13.5 CI Integration
 
@@ -1539,9 +1539,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -p ruststack-secretsmanager-model
-      - run: cargo test -p ruststack-secretsmanager-core
-      - run: cargo test -p ruststack-secretsmanager-http
+      - run: cargo test -p rustack-secretsmanager-model
+      - run: cargo test -p rustack-secretsmanager-core
+      - run: cargo test -p rustack-secretsmanager-http
 
   integration:
     runs-on: ubuntu-latest
@@ -1549,7 +1549,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release
-      - run: ./target/release/ruststack-server &
+      - run: ./target/release/rustack &
       - run: sleep 2
       - run: |
           # AWS CLI smoke tests
@@ -1573,8 +1573,8 @@ jobs:
 
 1. **Day 1: Model + Scaffolding**
    - Add Secrets Manager Smithy model to codegen
-   - Generate `ruststack-secretsmanager-model` crate
-   - Create `ruststack-secretsmanager-core` and `ruststack-secretsmanager-http` crate scaffolding
+   - Generate `rustack-secretsmanager-model` crate
+   - Create `rustack-secretsmanager-core` and `rustack-secretsmanager-http` crate scaffolding
    - Implement `SecretsManagerOperation` enum and router
 
 2. **Day 2: Storage Engine + Core Operations**
@@ -1654,8 +1654,8 @@ jobs:
 
 ### 15.2 Dependencies
 
-- `ruststack-core` -- no changes needed
-- `ruststack-auth` -- no changes needed (SigV4 with service=`secretsmanager`)
+- `rustack-core` -- no changes needed
+- `rustack-auth` -- no changes needed (SigV4 with service=`secretsmanager`)
 - `dashmap` -- already in workspace
 - `uuid` -- for version ID generation (already in workspace for SQS)
 - `rand` -- for random password generation and ARN suffixes (already in workspace)

@@ -1,9 +1,9 @@
-# RustStack Universal Smithy Codegen: Design Spec
+# Rustack Universal Smithy Codegen: Design Spec
 
 **Date:** 2026-03-18
 **Status:** Draft / RFC
 **Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md)
-**Scope:** Extend the existing Smithy-to-Rust code generator from S3-only to all RustStack services (DynamoDB, SQS, SSM, SNS, Lambda, EventBridge, and future services). Produce a single configurable tool that reads AWS Smithy JSON AST models and generates model crates with protocol-aware serde attributes.
+**Scope:** Extend the existing Smithy-to-Rust code generator from S3-only to all Rustack services (DynamoDB, SQS, SSM, SNS, Lambda, EventBridge, and future services). Produce a single configurable tool that reads AWS Smithy JSON AST models and generates model crates with protocol-aware serde attributes.
 
 ---
 
@@ -30,9 +30,9 @@
 
 ## 1. Executive Summary
 
-The RustStack codegen tool currently generates Rust types from the AWS S3 Smithy JSON AST. All other services (DynamoDB, SQS, SSM, SNS, Lambda, EventBridge) use hand-written model crates. This creates maintenance burden, risks drift from AWS API changes, and produces inconsistent patterns across services.
+The Rustack codegen tool currently generates Rust types from the AWS S3 Smithy JSON AST. All other services (DynamoDB, SQS, SSM, SNS, Lambda, EventBridge) use hand-written model crates. This creates maintenance burden, risks drift from AWS API changes, and produces inconsistent patterns across services.
 
-This spec proposes extending the codegen tool to be **service-agnostic**: a single binary that reads any AWS Smithy model and a service configuration file, producing a complete `ruststack-{service}-model` crate. The key challenge is handling **four distinct AWS protocols** with different serialization requirements.
+This spec proposes extending the codegen tool to be **service-agnostic**: a single binary that reads any AWS Smithy model and a service configuration file, producing a complete `rustack-{service}-model` crate. The key challenge is handling **four distinct AWS protocols** with different serialization requirements.
 
 **Key design decisions:**
 - **TOML-based service configuration** -- each service declares its operations, protocol, namespace, error codes, and customizations in a `.toml` file, replacing the hardcoded S3 operation list
@@ -131,7 +131,7 @@ codegen/
 All 6 hand-written model crates follow this structure:
 
 ```
-crates/ruststack-{service}-model/src/
+crates/rustack-{service}-model/src/
 ├── lib.rs         # Module re-exports
 ├── error.rs       # {Service}ErrorCode enum + {Service}Error struct + macro
 ├── operations.rs  # {Service}Operation enum with as_str(), from_name()
@@ -222,7 +222,7 @@ The codegen must emit the correct serde attributes per protocol.
                              │
               ┌──────────────▼──────────────┐
               │    Generated Model Crate     │
-              │  crates/ruststack-{svc}-model│
+              │  crates/rustack-{svc}-model│
               │  ├── lib.rs                  │
               │  ├── types.rs (serde derives)│
               │  ├── operations.rs           │
@@ -274,7 +274,7 @@ Each service is described by a TOML file:
 # codegen/services/events.toml
 
 [service]
-name = "events"                         # Crate suffix: ruststack-events-model
+name = "events"                         # Crate suffix: rustack-events-model
 display_name = "EventBridge"            # Human-readable name for doc comments
 rust_prefix = "Events"                  # Rust type prefix: EventsOperation, EventsError
 namespace = "com.amazonaws.cloudwatchevents"  # Smithy namespace (before #)
@@ -317,7 +317,7 @@ InvalidAction = { status = 400, message = "Operation is not supported" }
 
 [output]
 # Output customizations
-dir = "../crates/ruststack-events-model/src"  # Where to write generated files
+dir = "../crates/rustack-events-model/src"  # Where to write generated files
 
 # Fields that should always be serialized (never skip_serializing_if)
 always_serialize_arrays = true           # Never skip empty Vec fields in outputs
@@ -739,7 +739,7 @@ Some services need hand-written types that are too complex for generic codegen:
 
 **DynamoDB's AttributeValue:**
 ```
-crates/ruststack-dynamodb-model/src/
+crates/rustack-dynamodb-model/src/
 ├── types.rs              # GENERATED: standard types (Tag, etc.)
 ├── types_custom.rs       # HAND-WRITTEN: AttributeValue enum
 └── lib.rs                # GENERATED: includes both modules
@@ -768,8 +768,8 @@ codegen-%:
 	@cd codegen && cargo run -- --service $* \
 		--model smithy-model/$*.json \
 		--config services/$*.toml \
-		--output ../crates/ruststack-$*-model/src
-	@cargo +nightly fmt -p ruststack-$*-model
+		--output ../crates/rustack-$*-model/src
+	@cargo +nightly fmt -p rustack-$*-model
 
 # Generate all service models
 codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-sns \

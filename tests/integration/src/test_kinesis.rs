@@ -566,7 +566,7 @@ mod tests {
             .add_tags_to_stream()
             .stream_name(&name)
             .tags("env", "test")
-            .tags("project", "ruststack")
+            .tags("project", "rustack")
             .send()
             .await
             .unwrap();

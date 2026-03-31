@@ -1,9 +1,9 @@
-# RustStack API Gateway v2: HTTP APIs Native Rust Implementation Design
+# Rustack API Gateway v2: HTTP APIs Native Rust Implementation Design
 
 **Date:** 2026-03-19
 **Status:** Draft / RFC
-**Depends on:** [ruststack-lambda-design.md](./ruststack-lambda-design.md), [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md)
-**Scope:** Add API Gateway v2 (HTTP APIs) support to RustStack -- management API for APIs, routes, integrations, stages, deployments, authorizers, models, domain names, VPC links, and API mappings, plus an execution engine for routing HTTP requests through configured API Gateway resources. ~47 operations across 5 phases, using the same Smithy-based codegen and gateway routing patterns established by Lambda.
+**Depends on:** [rustack-lambda-design.md](./rustack-lambda-design.md), [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md)
+**Scope:** Add API Gateway v2 (HTTP APIs) support to Rustack -- management API for APIs, routes, integrations, stages, deployments, authorizers, models, domain names, VPC links, and API mappings, plus an execution engine for routing HTTP requests through configured API Gateway resources. ~47 operations across 5 phases, using the same Smithy-based codegen and gateway routing patterns established by Lambda.
 
 ---
 
@@ -29,12 +29,12 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding API Gateway v2 (HTTP APIs) support to RustStack. Key design decisions:
+This spec proposes adding API Gateway v2 (HTTP APIs) support to Rustack. Key design decisions:
 
 - **Two-component architecture** -- the service consists of a **management API** (CRUD for APIs, routes, integrations, stages, deployments, authorizers, models, domain names, VPC links) and an **execution engine** (actually routing HTTP requests through configured API Gateway resources to backend integrations). These are fundamentally different subsystems sharing a common storage layer.
 - **restJson1 protocol** -- API Gateway v2 uses `restJson1`, the same protocol as Lambda. Operations are dispatched by HTTP method + URL path (e.g., `POST /v2/apis` for `CreateApi`, `GET /v2/apis/{apiId}/routes` for `GetRoutes`). The existing restJson1 codegen infrastructure from Lambda is fully reused.
-- **Execution engine via `/_aws/execute-api/{apiId}/{stage}/{proxy+}`** -- incoming API execution requests are routed through a dedicated path prefix, matching LocalStack's pattern. The execution engine matches requests against configured routes, resolves the target integration (Lambda proxy, HTTP proxy, or mock), and dispatches accordingly. Lambda proxy integration invokes functions via the existing `ruststack-lambda-core` crate.
-- **Cross-service dependency on Lambda** -- Lambda proxy integration (`AWS_PROXY` with a Lambda ARN) creates a compile-time dependency on `ruststack-lambda-core`. This is gated behind a cargo feature to keep the dependency optional.
+- **Execution engine via `/_aws/execute-api/{apiId}/{stage}/{proxy+}`** -- incoming API execution requests are routed through a dedicated path prefix, matching LocalStack's pattern. The execution engine matches requests against configured routes, resolves the target integration (Lambda proxy, HTTP proxy, or mock), and dispatches accordingly. Lambda proxy integration invokes functions via the existing `rustack-lambda-core` crate.
+- **Cross-service dependency on Lambda** -- Lambda proxy integration (`AWS_PROXY` with a Lambda ARN) creates a compile-time dependency on `rustack-lambda-core`. This is gated behind a cargo feature to keep the dependency optional.
 - **Gateway routing by `/v2/` URL prefix** -- all API Gateway v2 management API requests use URL paths starting with `/v2/apis`, `/v2/domainnames`, or `/v2/vpclinks`. The gateway routes these prefixes to the API Gateway v2 service before falling through to S3.
 - **Phased delivery** -- 5 phases from core API management (APIs, routes, integrations) through the execution engine, with the execution engine as Phase 4 after the full management API is in place.
 
@@ -70,7 +70,7 @@ API Gateway v2 (HTTP APIs) is the modern, simplified version of API Gateway. It 
 | SAM/CDK default | `Api` (legacy) | `HttpApi` (preferred) |
 | Service name | `apigateway` (v1) | `apigatewayv2` (v2) |
 
-API Gateway v2 is the recommended choice for new projects and is the default in modern tooling. RustStack implements v2 first because it covers the dominant use case and has a simpler API surface.
+API Gateway v2 is the recommended choice for new projects and is the default in modern tooling. Rustack implements v2 first because it covers the dominant use case and has a simpler API surface.
 
 ### 2.3 Complexity Assessment
 
@@ -107,7 +107,7 @@ With the target operations implemented, the following tools work:
 
 1. **HTTP API management** -- full CRUD for APIs, routes, integrations, stages, deployments, route responses, authorizers, models, domain names, VPC links, API mappings, and tags (~47 operations)
 2. **HTTP API execution** -- route incoming HTTP requests through configured API Gateway resources to backend integrations (Lambda proxy, HTTP proxy, mock)
-3. **Lambda proxy integration** -- `AWS_PROXY` integration type invokes Lambda functions via `ruststack-lambda-core`, passing the request as an API Gateway v2 event payload and mapping the Lambda response back to HTTP
+3. **Lambda proxy integration** -- `AWS_PROXY` integration type invokes Lambda functions via `rustack-lambda-core`, passing the request as an API Gateway v2 event payload and mapping the Lambda response back to HTTP
 4. **HTTP proxy integration** -- `HTTP_PROXY` integration type forwards requests to backend HTTP URLs
 5. **Mock integration** -- `MOCK` integration type returns configured static responses
 6. **Route matching** -- path template matching with parameters (e.g., `/items/{id}` matches `/items/123`), greedy path parameters (`{proxy+}`), and the `$default` catch-all route
@@ -206,30 +206,30 @@ The `/v2/` prefix is unambiguous and cannot conflict with S3 bucket names or oth
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app)
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-apigatewayv2-model      <-- NEW (auto-generated)
-+-- ruststack-apigatewayv2-http       <-- NEW
-+-- ruststack-apigatewayv2-core       <-- NEW
-+-- ruststack-lambda-{model,core,http}
-+-- ruststack-s3-{model,core,http}
+rustack (app)
++-- rustack-core
++-- rustack-auth
++-- rustack-apigatewayv2-model      <-- NEW (auto-generated)
++-- rustack-apigatewayv2-http       <-- NEW
++-- rustack-apigatewayv2-core       <-- NEW
++-- rustack-lambda-{model,core,http}
++-- rustack-s3-{model,core,http}
 +-- ... (other services)
 
-ruststack-apigatewayv2-http
-+-- ruststack-apigatewayv2-model
-+-- ruststack-auth
+rustack-apigatewayv2-http
++-- rustack-apigatewayv2-model
++-- rustack-auth
 
-ruststack-apigatewayv2-core
-+-- ruststack-core
-+-- ruststack-apigatewayv2-model
-+-- ruststack-lambda-core (optional, for Lambda proxy integration)
+rustack-apigatewayv2-core
++-- rustack-core
++-- rustack-apigatewayv2-model
++-- rustack-lambda-core (optional, for Lambda proxy integration)
 +-- reqwest (for HTTP proxy integration)
 +-- dashmap
 +-- tokio
 ```
 
-The dependency on `ruststack-lambda-core` is gated behind a `lambda-integration` feature flag. When disabled, Lambda proxy integrations return an error indicating that Lambda support is not available.
+The dependency on `rustack-lambda-core` is gated behind a `lambda-integration` feature flag. When disabled, Lambda proxy integrations return an error indicating that Lambda support is not available.
 
 ---
 
@@ -522,7 +522,7 @@ The API Gateway v2 Smithy model is available from:
 ```makefile
 codegen-apigatewayv2:
 	@cd codegen && cargo run -- --service apigatewayv2
-	@cargo +nightly fmt -p ruststack-apigatewayv2-model
+	@cargo +nightly fmt -p rustack-apigatewayv2-model
 
 codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-lambda codegen-apigatewayv2
 ```
@@ -533,10 +533,10 @@ codegen: codegen-s3 codegen-dynamodb codegen-sqs codegen-ssm codegen-lambda code
 
 ### 7.1 New Crates
 
-#### `ruststack-apigatewayv2-model` (auto-generated)
+#### `rustack-apigatewayv2-model` (auto-generated)
 
 ```
-crates/ruststack-apigatewayv2-model/
+crates/rustack-apigatewayv2-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs                    # Module re-exports
@@ -575,10 +575,10 @@ crates/ruststack-apigatewayv2-model/
 
 **Dependencies**: `serde`, `serde_json`, `http`
 
-#### `ruststack-apigatewayv2-http`
+#### `rustack-apigatewayv2-http`
 
 ```
-crates/ruststack-apigatewayv2-http/
+crates/rustack-apigatewayv2-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -591,17 +591,17 @@ crates/ruststack-apigatewayv2-http/
     +-- body.rs                   # Response body type
 ```
 
-**Dependencies**: `ruststack-apigatewayv2-model`, `ruststack-auth`, `hyper`, `serde_json`, `bytes`, `http`
+**Dependencies**: `rustack-apigatewayv2-model`, `rustack-auth`, `hyper`, `serde_json`, `bytes`, `http`
 
-#### `ruststack-apigatewayv2-core`
+#### `rustack-apigatewayv2-core`
 
 ```
-crates/ruststack-apigatewayv2-core/
+crates/rustack-apigatewayv2-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs                 # ApiGatewayV2Config
-    +-- provider.rs               # RustStackApiGatewayV2 (main provider)
+    +-- provider.rs               # RustackApiGatewayV2 (main provider)
     +-- handler.rs                # Handler bridging HTTP to provider
     +-- error.rs                  # ApiGatewayV2ServiceError
     +-- storage.rs                # All DashMap-based storage (ApiStore)
@@ -630,16 +630,16 @@ crates/ruststack-apigatewayv2-core/
         +-- api_mapping.rs        # API mapping CRUD
 ```
 
-**Dependencies**: `ruststack-core`, `ruststack-apigatewayv2-model`, `ruststack-lambda-core` (optional), `reqwest` (for HTTP proxy), `dashmap`, `tokio`, `uuid`, `chrono`, `tracing`, `regex`
+**Dependencies**: `rustack-core`, `rustack-apigatewayv2-model`, `rustack-lambda-core` (optional), `reqwest` (for HTTP proxy), `dashmap`, `tokio`, `uuid`, `chrono`, `tracing`, `regex`
 
 ### 7.2 Workspace Changes
 
 ```toml
 [workspace.dependencies]
 # ... existing deps ...
-ruststack-apigatewayv2-model = { path = "crates/ruststack-apigatewayv2-model" }
-ruststack-apigatewayv2-http = { path = "crates/ruststack-apigatewayv2-http" }
-ruststack-apigatewayv2-core = { path = "crates/ruststack-apigatewayv2-core" }
+rustack-apigatewayv2-model = { path = "crates/rustack-apigatewayv2-model" }
+rustack-apigatewayv2-http = { path = "crates/rustack-apigatewayv2-http" }
+rustack-apigatewayv2-core = { path = "crates/rustack-apigatewayv2-core" }
 ```
 
 ---
@@ -1299,14 +1299,14 @@ Note: API Gateway ARNs do not include the account ID in the resource path (they 
 
 ```rust
 /// Main API Gateway v2 provider. Owns resource storage and the execution engine.
-pub struct RustStackApiGatewayV2 {
+pub struct RustackApiGatewayV2 {
     /// Resource storage (APIs, routes, integrations, stages, etc.).
     store: ApiStore,
     /// Configuration.
     config: Arc<ApiGatewayV2Config>,
     /// Lambda provider for Lambda proxy integrations (optional).
     #[cfg(feature = "lambda-integration")]
-    lambda: Option<Arc<RustStackLambda>>,
+    lambda: Option<Arc<RustackLambda>>,
     /// HTTP client for HTTP proxy integrations.
     http_client: reqwest::Client,
 }
@@ -1415,7 +1415,7 @@ impl ApiGatewayV2Config {
 | Component | Complexity | Notes |
 |-----------|------------|-------|
 | Route matching | High | Parse route keys, match incoming requests against configured routes with path parameters, greedy parameters, and `$default` fallback |
-| Lambda proxy integration | High | Build API Gateway v2 event payload, invoke Lambda via `ruststack-lambda-core`, parse Lambda response |
+| Lambda proxy integration | High | Build API Gateway v2 event payload, invoke Lambda via `rustack-lambda-core`, parse Lambda response |
 | HTTP proxy integration | Medium | Forward request to backend URL, return response |
 | Mock integration | Low | Return static configured response |
 | CORS handling | Medium | Generate preflight responses, add CORS headers to responses |
@@ -1424,7 +1424,7 @@ impl ApiGatewayV2Config {
 ### 10.3 CreateApi Logic
 
 ```rust
-impl RustStackApiGatewayV2 {
+impl RustackApiGatewayV2 {
     pub fn create_api(
         &self,
         input: CreateApiInput,
@@ -1492,7 +1492,7 @@ impl RustStackApiGatewayV2 {
 ### 10.4 CreateRoute Logic
 
 ```rust
-impl RustStackApiGatewayV2 {
+impl RustackApiGatewayV2 {
     pub fn create_route(
         &self,
         api_id: &str,
@@ -1580,7 +1580,7 @@ impl RustStackApiGatewayV2 {
 ### 10.5 CreateIntegration Logic
 
 ```rust
-impl RustStackApiGatewayV2 {
+impl RustackApiGatewayV2 {
     pub fn create_integration(
         &self,
         api_id: &str,
@@ -1685,7 +1685,7 @@ impl RustStackApiGatewayV2 {
 ### 10.6 Auto-Deploy Logic
 
 ```rust
-impl RustStackApiGatewayV2 {
+impl RustackApiGatewayV2 {
     /// Check if any stage has auto_deploy enabled and create a deployment if so.
     fn maybe_auto_deploy(&self, api: &mut ApiRecord) {
         let auto_deploy_stages: Vec<String> = api
@@ -2372,10 +2372,10 @@ Note: API Gateway v2 uses lowercase `message` in error responses (not `Message` 
 ### 12.1 Feature Gate
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs", "ssm", "sns", "lambda", "events", "logs", "kms", "kinesis", "secretsmanager", "apigatewayv2"]
-apigatewayv2 = ["dep:ruststack-apigatewayv2-core", "dep:ruststack-apigatewayv2-http"]
+apigatewayv2 = ["dep:rustack-apigatewayv2-core", "dep:rustack-apigatewayv2-http"]
 ```
 
 ### 12.2 TWO ServiceRouter Registrations
@@ -2525,22 +2525,22 @@ GET /_localstack/health
 The API Gateway v2 execution engine needs to invoke Lambda functions for `AWS_PROXY` integrations. This creates a cross-service dependency:
 
 ```rust
-// In ruststack-apigatewayv2-core/Cargo.toml
+// In rustack-apigatewayv2-core/Cargo.toml
 [features]
 default = ["lambda-integration"]
-lambda-integration = ["dep:ruststack-lambda-core"]
+lambda-integration = ["dep:rustack-lambda-core"]
 
 [dependencies]
-ruststack-lambda-core = { workspace = true, optional = true }
+rustack-lambda-core = { workspace = true, optional = true }
 ```
 
 At server initialization, the Lambda provider is shared with the API Gateway v2 provider:
 
 ```rust
-// In apps/ruststack-server/src/main.rs
+// In apps/rustack/src/main.rs
 #[cfg(all(feature = "apigatewayv2", feature = "lambda"))]
 {
-    let apigwv2_provider = RustStackApiGatewayV2::new(
+    let apigwv2_provider = RustackApiGatewayV2::new(
         apigwv2_config,
         Some(Arc::clone(&lambda_provider)), // Share Lambda provider
         http_client,
@@ -2712,7 +2712,7 @@ The LocalStack test suite for API Gateway v2 is located at `vendors/localstack/t
 | `test_apigateway_http.py` | HTTP API management + execution |
 | `test_apigateway_common.py` | Shared test utilities |
 
-**Adaptation strategy**: Run the Python test suite against RustStack's API Gateway v2 endpoint. Focus on HTTP API tests (not REST API or WebSocket).
+**Adaptation strategy**: Run the Python test suite against Rustack's API Gateway v2 endpoint. Focus on HTTP API tests (not REST API or WebSocket).
 
 ```makefile
 test-apigatewayv2-localstack:
@@ -2767,7 +2767,7 @@ aws apigatewayv2 delete-api $ENDPOINT --api-id $API_ID
 test-apigatewayv2: test-apigatewayv2-unit test-apigatewayv2-integration
 
 test-apigatewayv2-unit:
-	@cargo test -p ruststack-apigatewayv2-model -p ruststack-apigatewayv2-core -p ruststack-apigatewayv2-http
+	@cargo test -p rustack-apigatewayv2-model -p rustack-apigatewayv2-core -p rustack-apigatewayv2-http
 
 test-apigatewayv2-integration:
 	@cargo test -p integration-tests -- apigatewayv2 --ignored
@@ -2789,7 +2789,7 @@ test-apigatewayv2-cli:
 
 - Add `apigatewayv2.toml` to `codegen/services/`
 - Download API Gateway v2 Smithy model JSON from `aws-models`
-- Generate `ruststack-apigatewayv2-model` crate
+- Generate `rustack-apigatewayv2-model` crate
 - Verify generated types compile and serde works correctly
 
 #### Step 0.2: HTTP Layer
@@ -2874,7 +2874,7 @@ test-apigatewayv2-cli:
 #### Step 4.3: Lambda Proxy Integration
 
 - Build API Gateway v2 payload format 2.0 event
-- Invoke Lambda function via `ruststack-lambda-core`
+- Invoke Lambda function via `rustack-lambda-core`
 - Parse Lambda response (format 2.0, simple string)
 - Handle Lambda errors (function error, timeout)
 
@@ -2934,7 +2934,7 @@ test-apigatewayv2-cli:
 
 ### 15.3 Behavioral Differences
 
-| Behavior | AWS API Gateway v2 | LocalStack | RustStack | Justification |
+| Behavior | AWS API Gateway v2 | LocalStack | Rustack | Justification |
 |----------|-------------------|------------|-----------|---------------|
 | API endpoint format | `https://{apiId}.execute-api.{region}.amazonaws.com` | `http://localhost:4566/_aws/execute-api/{apiId}` | `http://localhost:4566/_aws/execute-api/{apiId}` | Follow LocalStack convention |
 | Default stage | Auto-created `$default` stage | Configurable | Explicit creation required | Simpler, more predictable |

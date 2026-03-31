@@ -1,4 +1,4 @@
-//! SES integration tests against a running `RustStack` server.
+//! SES integration tests against a running `Rustack` server.
 //!
 //! These tests cover identity management, sending emails, templates,
 //! configuration sets, receipt rules, notifications, DKIM, and identity policies.

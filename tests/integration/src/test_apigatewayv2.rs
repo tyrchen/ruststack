@@ -1,4 +1,4 @@
-//! API Gateway v2 integration tests against a running `RustStack` server.
+//! API Gateway v2 integration tests against a running `Rustack` server.
 //!
 //! These tests cover the full lifecycle of API Gateway v2 resources:
 //! APIs, Routes, Integrations, Stages, Deployments, Route Responses,
@@ -747,7 +747,7 @@ mod tests {
             .tag_resource()
             .resource_arn(&arn)
             .tags("env", "test")
-            .tags("team", "ruststack")
+            .tags("team", "rustack")
             .send()
             .await
             .expect("tag_resource should succeed");
@@ -762,7 +762,7 @@ mod tests {
 
         let tags = tags_resp.tags().expect("tags should be present");
         assert_eq!(tags.get("env"), Some(&"test".to_owned()));
-        assert_eq!(tags.get("team"), Some(&"ruststack".to_owned()));
+        assert_eq!(tags.get("team"), Some(&"rustack".to_owned()));
 
         // Untag.
         client

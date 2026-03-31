@@ -1,7 +1,7 @@
 //! Integration tests for EventBridge service.
 //!
-//! These tests require a running RustStack server at `localhost:4566`.
-//! Run with: `cargo test -p ruststack-integration -- events --ignored`
+//! These tests require a running Rustack server at `localhost:4566`.
+//! Run with: `cargo test -p rustack-integration -- events --ignored`
 
 #[cfg(test)]
 mod tests {

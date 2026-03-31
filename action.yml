@@ -1,4 +1,4 @@
-name: "RustStack"
+name: "Rustack"
 description: "Start a high-performance AWS-compatible server (S3 + DynamoDB + SQS + SSM + SNS + Lambda) on localhost:4566 (drop-in replacement for LocalStack)"
 author: "Tyr Chen"
 
@@ -79,17 +79,22 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Pull RustStack image
+    - name: Pull Rustack image
       shell: bash
       run: |
-        docker pull "ghcr.io/tyrchen/ruststack:${{ inputs.image-tag }}"
+        IMAGE="ghcr.io/tyrchen/rustack:${{ inputs.image-tag }}"
+        if docker image inspect "$IMAGE" > /dev/null 2>&1; then
+          echo "Image $IMAGE already available locally"
+        else
+          docker pull "$IMAGE"
+        fi
 
-    - name: Start RustStack
+    - name: Start Rustack
       id: start
       shell: bash
       run: |
         CONTAINER_ID=$(docker run -d \
-          --name ruststack \
+          --name rustack \
           -p "${{ inputs.port }}:4566" \
           -e "DEFAULT_REGION=${{ inputs.default-region }}" \
           -e "LOG_LEVEL=${{ inputs.log-level }}" \
@@ -103,7 +108,7 @@ runs:
           -e "SECRET_KEY=${{ inputs.secret-key }}" \
           -e "PERSISTENCE=${{ inputs.persistence }}" \
           -e "SERVICES=${{ inputs.services }}" \
-          "ghcr.io/tyrchen/ruststack:${{ inputs.image-tag }}")
+          "ghcr.io/tyrchen/rustack:${{ inputs.image-tag }}")
 
         echo "container_id=$CONTAINER_ID" >> "$GITHUB_OUTPUT"
         echo "endpoint=http://localhost:${{ inputs.port }}" >> "$GITHUB_OUTPUT"
@@ -115,19 +120,19 @@ runs:
         TIMEOUT=${{ inputs.wait-timeout }}
         ELAPSED=0
 
-        echo "Waiting for RustStack at $ENDPOINT ..."
+        echo "Waiting for Rustack at $ENDPOINT ..."
 
         until curl -sf "$ENDPOINT/_localstack/health" > /dev/null 2>&1; do
           if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
-            echo "::error::RustStack did not become healthy within ${TIMEOUT}s"
-            docker logs ruststack
+            echo "::error::Rustack did not become healthy within ${TIMEOUT}s"
+            docker logs rustack
             exit 1
           fi
           sleep 0.5
           ELAPSED=$((ELAPSED + 1))
         done
 
-        echo "RustStack is ready at $ENDPOINT (S3 + DynamoDB + SQS + SSM + SNS + Lambda)"
+        echo "Rustack is ready at $ENDPOINT (S3 + DynamoDB + SQS + SSM + SNS + Lambda)"
 
     - name: Export environment
       shell: bash

@@ -13,7 +13,7 @@
 2. [Current Architecture Analysis](#2-current-architecture-analysis)
 3. [Feasibility Assessment](#3-feasibility-assessment)
 4. [Rust Ecosystem Readiness](#4-rust-ecosystem-readiness)
-5. [Architecture Design: RustStack](#5-architecture-design-ruststack)
+5. [Architecture Design: Rustack](#5-architecture-design-rustack)
 6. [Migration Strategy](#6-migration-strategy)
 7. [Phase 1: Core Framework](#7-phase-1-core-framework)
 8. [Phase 2: Priority Services](#8-phase-2-priority-services)
@@ -283,7 +283,7 @@ will be primarily in the HTTP/serialization layer.
 
 ---
 
-## 5. Architecture Design: RustStack
+## 5. Architecture Design: Rustack
 
 ### 5.1 High-Level Architecture
 
@@ -294,7 +294,7 @@ will be primarily in the HTTP/serialization layer.
                                     │ HTTPS :4566
                                     ▼
 ┌───────────────────────────────────────────────────────────────────┐
-│                     ruststack-gateway                             │
+│                     rustack-gateway                             │
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │  Hyper HTTP Server + Tower Middleware Stack                  │ │
 │  │                                                             │ │
@@ -341,10 +341,10 @@ will be primarily in the HTTP/serialization layer.
 ### 5.2 Crate Organization
 
 ```
-ruststack/
+rustack/
 ├── Cargo.toml                          # Workspace root
 ├── crates/
-│   ├── ruststack-core/                 # Core types, config, errors
+│   ├── rustack-core/                 # Core types, config, errors
 │   │   ├── src/
 │   │   │   ├── config.rs               # Configuration (env vars, defaults)
 │   │   │   ├── context.rs              # RequestContext (account, region, service)
@@ -353,7 +353,7 @@ ruststack/
 │   │   │   └── lib.rs
 │   │   └── Cargo.toml
 │   │
-│   ├── ruststack-gateway/              # HTTP gateway + routing
+│   ├── rustack-gateway/              # HTTP gateway + routing
 │   │   ├── src/
 │   │   │   ├── server.rs               # Hyper server setup + TLS
 │   │   │   ├── router.rs               # Service routing (signing name, path, host)
@@ -365,7 +365,7 @@ ruststack/
 │   │   │   └── lib.rs
 │   │   └── Cargo.toml
 │   │
-│   ├── ruststack-protocol/             # AWS protocol handling
+│   ├── rustack-protocol/             # AWS protocol handling
 │   │   ├── src/
 │   │   │   ├── query.rs                # AWS Query protocol
 │   │   │   ├── json.rs                 # AWS JSON protocol
@@ -376,45 +376,45 @@ ruststack/
 │   │   │   └── lib.rs
 │   │   └── Cargo.toml
 │   │
-│   ├── ruststack-state/                # State management + persistence
+│   ├── rustack-state/                # State management + persistence
 │   │   ├── src/
 │   │   │   ├── store.rs                # AccountRegionStore<T>
 │   │   │   ├── persistence.rs          # Snapshot save/load (serde + bincode)
 │   │   │   └── lib.rs
 │   │   └── Cargo.toml
 │   │
-│   ├── ruststack-bridge/               # PyO3 bridge for Python services
+│   ├── rustack-bridge/               # PyO3 bridge for Python services
 │   │   ├── src/
 │   │   │   ├── python_handler.rs       # Call Python handlers from Rust
 │   │   │   ├── state_bridge.rs         # Share state between Rust/Python
 │   │   │   └── lib.rs
 │   │   └── Cargo.toml
 │   │
-│   ├── ruststack-codegen/              # Build-time: Smithy model → Rust code
+│   ├── rustack-codegen/              # Build-time: Smithy model → Rust code
 │   │   ├── smithy-models/              # AWS Smithy model files
 │   │   ├── src/
 │   │   │   └── lib.rs                  # proc-macro or build.rs codegen
 │   │   └── Cargo.toml
 │   │
 │   │── services/
-│   │   ├── ruststack-sqs/              # SQS implementation
+│   │   ├── rustack-sqs/              # SQS implementation
 │   │   │   ├── src/
 │   │   │   │   ├── provider.rs         # SQS business logic
 │   │   │   │   ├── models.rs           # Queue, Message types
 │   │   │   │   ├── store.rs            # SqsStore
 │   │   │   │   └── lib.rs
 │   │   │   └── Cargo.toml
-│   │   ├── ruststack-s3/               # S3 implementation
-│   │   ├── ruststack-sns/              # SNS implementation
-│   │   ├── ruststack-kms/              # KMS implementation
-│   │   ├── ruststack-kinesis/          # Kinesis implementation
-│   │   ├── ruststack-sts/              # STS implementation
-│   │   ├── ruststack-iam/              # IAM implementation
-│   │   ├── ruststack-dynamodb/         # DynamoDB (proxy to DDB Local or native)
-│   │   ├── ruststack-lambda/           # Lambda runtime management
+│   │   ├── rustack-s3/               # S3 implementation
+│   │   ├── rustack-sns/              # SNS implementation
+│   │   ├── rustack-kms/              # KMS implementation
+│   │   ├── rustack-kinesis/          # Kinesis implementation
+│   │   ├── rustack-sts/              # STS implementation
+│   │   ├── rustack-iam/              # IAM implementation
+│   │   ├── rustack-dynamodb/         # DynamoDB (proxy to DDB Local or native)
+│   │   ├── rustack-lambda/           # Lambda runtime management
 │   │   └── .../
 │   │
-│   └── ruststack-cli/                  # CLI binary
+│   └── rustack-cli/                  # CLI binary
 │       ├── src/
 │       │   └── main.rs
 │       └── Cargo.toml
@@ -528,7 +528,7 @@ Phase 1 (Framework): [Rust Gateway] → [===== Python Services =====]
 Phase 2 (Services): [Rust Gateway] → [Rust SQS][Rust S3][Rust SNS] → [Python rest]
                      High-value services migrated to Rust
 
-Phase 3 (Complete): [============= Rust RustStack ==============]
+Phase 3 (Complete): [============= Rust Rustack ==============]
                      All services in Rust (Python bridge removed)
 ```
 
@@ -586,13 +586,13 @@ For each service:
 
 ### 7.1 Deliverables
 
-1. **ruststack-gateway**: Hyper-based HTTP server with Tower middleware
+1. **rustack-gateway**: Hyper-based HTTP server with Tower middleware
    - TLS termination (rustls)
    - CORS handling
    - Request logging + metrics
    - AWS SigV4 signature parsing (pass-through, not validation)
 
-2. **ruststack-protocol**: AWS protocol parsers/serializers
+2. **rustack-protocol**: AWS protocol parsers/serializers
    - Ideally auto-generated from Smithy models via smithy-rs
    - Manual implementation as fallback for protocols smithy-rs doesn't cover
 
@@ -601,19 +601,19 @@ For each service:
    - Route to appropriate service handler
    - Support all 6 AWS protocols
 
-4. **ruststack-state**: State management primitives
+4. **rustack-state**: State management primitives
    - `AccountRegionStore<T>` with DashMap
    - Snapshot persistence (serde + bincode)
    - State reset mechanism
 
-5. **ruststack-bridge**: PyO3 bridge
+5. **rustack-bridge**: PyO3 bridge
    - Call existing Python service providers from Rust gateway
    - Share RequestContext between Rust and Python
    - Async bridge (tokio ↔ asyncio via pyo3-async-runtimes)
 
-6. **ruststack-cli**: Single binary entry point
-   - `ruststack start` → start the server
-   - `ruststack status` → health check
+6. **rustack-cli**: Single binary entry point
+   - `rustack start` → start the server
+   - `rustack status` → health check
    - Environment variable configuration (same as LocalStack)
 
 ### 7.2 Validation Criteria
@@ -658,7 +658,7 @@ well-defined behavior, good test coverage, high performance sensitivity.
 **Implementation outline:**
 
 ```rust
-// ruststack-sqs/src/models.rs
+// rustack-sqs/src/models.rs
 
 pub struct SqsQueue {
     pub name: String,
@@ -823,7 +823,7 @@ migrated.
 
 ```
                         ┌───────────────────┐
-                        │  ruststack binary  │  ~15-30 MiB
+                        │  rustack binary  │  ~15-30 MiB
                         │  (single static)   │
                         └─────────┬─────────┘
                                   │

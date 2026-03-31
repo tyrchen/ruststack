@@ -1,7 +1,7 @@
 //! Integration tests for DynamoDB Streams service.
 //!
 //! Tests the full pipeline: DynamoDB writes -> stream records -> GetRecords.
-//! Requires a running RustStack server at `localhost:4566`.
+//! Requires a running Rustack server at `localhost:4566`.
 
 #[cfg(test)]
 mod tests {

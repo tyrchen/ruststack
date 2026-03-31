@@ -1,9 +1,9 @@
-# RustStack Kinesis Data Streams: Native Rust Implementation Design
+# Rustack Kinesis Data Streams: Native Rust Implementation Design
 
 **Date:** 2026-03-06
 **Status:** Draft / RFC
-**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-dynamodb-design.md](./ruststack-dynamodb-design.md), [ruststack-sqs-design.md](./ruststack-sqs-design.md)
-**Scope:** Add native Kinesis Data Streams support to RustStack using the same Smithy-based codegen approach as DynamoDB/SQS/SSM, with an actor-per-shard in-memory streaming engine. Supports awsJson1.1 protocol with CBOR wire format compatibility.
+**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-dynamodb-design.md](./rustack-dynamodb-design.md), [rustack-sqs-design.md](./rustack-sqs-design.md)
+**Scope:** Add native Kinesis Data Streams support to Rustack using the same Smithy-based codegen approach as DynamoDB/SQS/SSM, with an actor-per-shard in-memory streaming engine. Supports awsJson1.1 protocol with CBOR wire format compatibility.
 
 ---
 
@@ -30,10 +30,10 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding Kinesis Data Streams support to RustStack as a fully native Rust implementation. Key design decisions:
+This spec proposes adding Kinesis Data Streams support to Rustack as a fully native Rust implementation. Key design decisions:
 
 - **Native Rust streaming engine** -- unlike LocalStack which wraps kinesis-mock (a Scala/Http4s application) or kinesalite (a Node.js/LevelDB application), we build a purpose-built in-memory streaming engine with actor-per-shard concurrency. This maintains the ~10MB Docker image and millisecond startup.
-- **Smithy codegen reuse** -- extend the existing `codegen/` system to generate Kinesis model types from the official AWS Kinesis Smithy JSON AST, producing a `ruststack-kinesis-model` crate.
+- **Smithy codegen reuse** -- extend the existing `codegen/` system to generate Kinesis model types from the official AWS Kinesis Smithy JSON AST, producing a `rustack-kinesis-model` crate.
 - **awsJson1.1 protocol with CBOR support** -- Kinesis uses `awsJson1_1` (same as SSM), dispatched via `X-Amz-Target: Kinesis_20131202.*`. The AWS Java SDK sends CBOR-encoded requests (`application/x-amz-cbor-1.1`); we must support both JSON and CBOR wire formats.
 - **Actor-per-shard concurrency** -- each shard runs as an independent actor owning its record storage, sequence number generator, and iterator state. This follows the actor model established by SQS's actor-per-queue pattern.
 - **MD5-based partition key routing** -- the core data model. Partition keys are MD5-hashed to 128-bit integers. Each shard owns a contiguous range of the hash key space `[0, 2^128)`. Records are routed to the shard whose range contains the hash.
@@ -49,7 +49,7 @@ This spec proposes adding Kinesis Data Streams support to RustStack as a fully n
 Kinesis Data Streams is the core real-time streaming primitive on AWS. Developers need a local Kinesis for:
 
 - **Event-driven architecture testing** -- test producer/consumer patterns, event sourcing, and real-time pipelines without AWS costs
-- **KCL/KPL testing** -- the Kinesis Client Library (KCL) uses DynamoDB for checkpointing and Kinesis for reading; with both services in RustStack, full KCL integration tests become possible locally
+- **KCL/KPL testing** -- the Kinesis Client Library (KCL) uses DynamoDB for checkpointing and Kinesis for reading; with both services in Rustack, full KCL integration tests become possible locally
 - **Lambda event source mappings** -- Lambda triggers from Kinesis are one of the most common serverless patterns; local Kinesis enables testing these flows
 - **Apache Flink / Spark Streaming** -- local Kinesis enables testing streaming analytics pipelines
 - **CI/CD pipelines** -- fast, deterministic Kinesis in GitHub Actions for integration tests
@@ -97,7 +97,7 @@ A native Rust implementation provides:
 | kinesis-mock | Scala/JVM | ~300MB | Yes | No | Used by LocalStack |
 | kinesalite | Node.js | ~80MB | No | No | Dormant since 2023 |
 | LocalStack Kinesis | Python+kinesis-mock | ~1GB | Yes | Partial | Wraps kinesis-mock |
-| **RustStack Kinesis** | **Rust** | **~10MB** | **Yes** | **Deferred** | **This proposal** |
+| **Rustack Kinesis** | **Rust** | **~10MB** | **Yes** | **Deferred** | **This proposal** |
 
 No existing Rust-based Kinesis emulator exists. This would be the first.
 
@@ -117,7 +117,7 @@ No existing Rust-based Kinesis emulator exists. This would be the first.
 8. **Record retention** -- configurable 24h-365d retention with background cleanup
 9. **Shard splitting and merging** -- support resharding for testing scaling logic
 10. **Same Docker image** -- single binary serves S3, DynamoDB, SQS, SSM, and Kinesis on port 4566
-11. **KCL compatibility** -- with RustStack DynamoDB for lease tables, enable full KCL testing
+11. **KCL compatibility** -- with Rustack DynamoDB for lease tables, enable full KCL testing
 12. **Pass LocalStack Kinesis test suite** -- validate against vendored `test_kinesis.py`
 
 ### 3.2 Non-Goals
@@ -127,7 +127,7 @@ No existing Rust-based Kinesis emulator exists. This would be the first.
 3. **CloudWatch metrics integration** -- EnableEnhancedMonitoring/DisableEnhancedMonitoring accepted but no-op
 4. **Throughput enforcement** -- accept limits but do not throttle (1MB/s write, 2MB/s read per shard)
 5. **Cross-account access** -- all streams exist within a single account context
-6. **Data persistence across restarts** -- in-memory only, matching other RustStack services
+6. **Data persistence across restarts** -- in-memory only, matching other Rustack services
 7. **Server-side encryption at rest** -- metadata only, no actual data encryption
 8. **Resource policies enforcement** -- accept Put/Get/DeleteResourcePolicy, store but do not enforce
 9. **Account-level settings** -- DescribeAccountSettings/UpdateAccountSettings accepted but static defaults
@@ -165,8 +165,8 @@ No existing Rust-based Kinesis emulator exists. This would be the first.
       +--------+--------+--------+---------+
                        |
               +-----------------+
-              | ruststack-core  |  Shared: multi-account/region
-              | ruststack-auth  |  Shared: SigV4 authentication
+              | rustack-core  |  Shared: multi-account/region
+              | rustack-auth  |  Shared: SigV4 authentication
               +-----------------+
 ```
 
@@ -187,31 +187,31 @@ Routing logic: check `X-Amz-Target` header. If prefix is `Kinesis_20131202.`, ro
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app) <-- unified binary
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-{model,core,http}
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-sqs-{model,core,http}
-+-- ruststack-ssm-{model,core,http}
-+-- ruststack-kinesis-core       <-- NEW
-+-- ruststack-kinesis-http       <-- NEW
-+-- ruststack-kinesis-model      <-- NEW (auto-generated)
+rustack (app) <-- unified binary
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-{model,core,http}
++-- rustack-dynamodb-{model,core,http}
++-- rustack-sqs-{model,core,http}
++-- rustack-ssm-{model,core,http}
++-- rustack-kinesis-core       <-- NEW
++-- rustack-kinesis-http       <-- NEW
++-- rustack-kinesis-model      <-- NEW (auto-generated)
 
-ruststack-kinesis-http
-+-- ruststack-kinesis-model
-+-- ruststack-auth
+rustack-kinesis-http
++-- rustack-kinesis-model
++-- rustack-auth
 
-ruststack-kinesis-core
-+-- ruststack-core
-+-- ruststack-kinesis-model
-+-- ruststack-kinesis-http
-+-- ruststack-auth
+rustack-kinesis-core
++-- rustack-core
++-- rustack-kinesis-model
++-- rustack-kinesis-http
++-- rustack-auth
 +-- tokio (channels, timers)
 +-- dashmap
 +-- md-5 (partition key hashing)
 
-ruststack-kinesis-model (auto-generated, standalone)
+rustack-kinesis-model (auto-generated, standalone)
 ```
 
 ---
@@ -311,7 +311,7 @@ This is verified in LocalStack's test suite (`test_subscribe_to_shard_with_at_ti
 
 ### 6.1 Universal Codegen
 
-The `ruststack-kinesis-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
+The `rustack-kinesis-model` crate is generated from the official AWS Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
 
 **Smithy model:** `codegen/smithy-model/kinesis.json` (500KB, namespace `com.amazonaws.kinesis`, 29 operations)
 **Service config:** `codegen/services/kinesis.toml`
@@ -319,7 +319,7 @@ The `ruststack-kinesis-model` crate is generated from the official AWS Smithy JS
 
 ### 6.2 Generated Output
 
-The codegen produces 6 files in `crates/ruststack-kinesis-model/src/`:
+The codegen produces 6 files in `crates/rustack-kinesis-model/src/`:
 
 | File | Contents |
 |------|----------|
@@ -342,10 +342,10 @@ See [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design
 
 ### 7.1 New Crates
 
-#### `ruststack-kinesis-model` (auto-generated)
+#### `rustack-kinesis-model` (auto-generated)
 
 ```
-crates/ruststack-kinesis-model/
+crates/rustack-kinesis-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs                    # Module re-exports
@@ -376,10 +376,10 @@ crates/ruststack-kinesis-model/
 
 **Dependencies**: `serde`, `serde_json`, `bytes`, `http`
 
-#### `ruststack-kinesis-http`
+#### `rustack-kinesis-http`
 
 ```
-crates/ruststack-kinesis-http/
+crates/rustack-kinesis-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -393,17 +393,17 @@ crates/ruststack-kinesis-http/
     +-- body.rs                   # Response body type
 ```
 
-**Dependencies**: `ruststack-kinesis-model`, `ruststack-auth`, `hyper`, `serde_json`, `ciborium` (CBOR), `bytes`
+**Dependencies**: `rustack-kinesis-model`, `rustack-auth`, `hyper`, `serde_json`, `ciborium` (CBOR), `bytes`
 
-#### `ruststack-kinesis-core`
+#### `rustack-kinesis-core`
 
 ```
-crates/ruststack-kinesis-core/
+crates/rustack-kinesis-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs                 # KinesisConfig
-    +-- provider.rs               # RustStackKinesis (main provider, StreamManager)
+    +-- provider.rs               # RustackKinesis (main provider, StreamManager)
     +-- error.rs                  # KinesisServiceError
     +-- stream/
     |   +-- mod.rs
@@ -437,7 +437,7 @@ crates/ruststack-kinesis-core/
         +-- mode.rs               # UpdateStreamMode (store only)
 ```
 
-**Dependencies**: `ruststack-core`, `ruststack-kinesis-model`, `ruststack-kinesis-http`, `ruststack-auth`, `tokio` (mpsc, time, sync), `dashmap`, `md-5`, `uuid`, `tracing`, `chrono`, `thiserror`, `anyhow`
+**Dependencies**: `rustack-core`, `rustack-kinesis-model`, `rustack-kinesis-http`, `rustack-auth`, `tokio` (mpsc, time, sync), `dashmap`, `md-5`, `uuid`, `tracing`, `chrono`, `thiserror`, `anyhow`
 
 ### 7.2 Workspace Changes
 
@@ -445,9 +445,9 @@ crates/ruststack-kinesis-core/
 # Root Cargo.toml
 [workspace.dependencies]
 # ... existing deps ...
-ruststack-kinesis-model = { path = "crates/ruststack-kinesis-model" }
-ruststack-kinesis-http = { path = "crates/ruststack-kinesis-http" }
-ruststack-kinesis-core = { path = "crates/ruststack-kinesis-core" }
+rustack-kinesis-model = { path = "crates/rustack-kinesis-model" }
+rustack-kinesis-http = { path = "crates/rustack-kinesis-http" }
+rustack-kinesis-core = { path = "crates/rustack-kinesis-core" }
 ciborium = "0.2"               # CBOR serialization
 ciborium-ll = "0.2"            # Low-level CBOR for timestamp control
 ```
@@ -1355,7 +1355,7 @@ fn format_shard_id(index: u32) -> String {
 
 ```rust
 /// Main Kinesis provider. Manages all streams and their shards.
-pub struct RustStackKinesis {
+pub struct RustackKinesis {
     /// Stream registry: stream_name -> StreamState.
     streams: DashMap<String, StreamState>,
     /// Configuration.
@@ -1481,7 +1481,7 @@ impl KinesisConfig {
 ### 11.3 CreateStream Logic
 
 ```rust
-impl RustStackKinesis {
+impl RustackKinesis {
     pub async fn create_stream(
         &self,
         input: CreateStreamInput,
@@ -1579,7 +1579,7 @@ impl RustStackKinesis {
 ### 11.4 PutRecord Logic
 
 ```rust
-impl RustStackKinesis {
+impl RustackKinesis {
     pub async fn put_record(
         &self,
         input: PutRecordInput,
@@ -1637,7 +1637,7 @@ impl RustStackKinesis {
 ### 11.5 GetShardIterator Logic
 
 ```rust
-impl RustStackKinesis {
+impl RustackKinesis {
     pub async fn get_shard_iterator(
         &self,
         input: GetShardIteratorInput,
@@ -1708,7 +1708,7 @@ impl RustStackKinesis {
 ### 11.6 GetRecords Logic
 
 ```rust
-impl RustStackKinesis {
+impl RustackKinesis {
     pub async fn get_records(
         &self,
         input: GetRecordsInput,
@@ -1767,7 +1767,7 @@ impl RustStackKinesis {
 Kinesis operations accept either `StreamName` or `StreamARN`. We must handle both:
 
 ```rust
-impl RustStackKinesis {
+impl RustackKinesis {
     /// Resolve a stream name from either StreamName or StreamARN input.
     fn resolve_stream_name(
         &self,
@@ -1953,14 +1953,14 @@ pub use kinesis_router::KinesisServiceRouter;
 ### 13.2 Feature Gate
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs", "ssm", "kinesis"]
-s3 = ["dep:ruststack-s3-core", "dep:ruststack-s3-http", "dep:ruststack-s3-model"]
-dynamodb = ["dep:ruststack-dynamodb-core", "dep:ruststack-dynamodb-http"]
-sqs = ["dep:ruststack-sqs-core", "dep:ruststack-sqs-http"]
-ssm = ["dep:ruststack-ssm-core", "dep:ruststack-ssm-http"]
-kinesis = ["dep:ruststack-kinesis-core", "dep:ruststack-kinesis-http"]
+s3 = ["dep:rustack-s3-core", "dep:rustack-s3-http", "dep:rustack-s3-model"]
+dynamodb = ["dep:rustack-dynamodb-core", "dep:rustack-dynamodb-http"]
+sqs = ["dep:rustack-sqs-core", "dep:rustack-sqs-http"]
+ssm = ["dep:rustack-ssm-core", "dep:rustack-ssm-http"]
+kinesis = ["dep:rustack-kinesis-core", "dep:rustack-kinesis-http"]
 ```
 
 ### 13.3 Gateway Registration Order
@@ -2154,7 +2154,7 @@ The most comprehensive open-source Kinesis test suite. Already vendored at `vend
 - **`conftest.py`** -- fixtures for stream consumer management
 - **`helper_functions.py`** -- shard iterator helper functions
 
-Adaptation strategy: same approach as DynamoDB/SQS -- run the Python test suite against RustStack's Kinesis endpoint, track pass/fail counts, progressively fix failures.
+Adaptation strategy: same approach as DynamoDB/SQS -- run the Python test suite against Rustack's Kinesis endpoint, track pass/fail counts, progressively fix failures.
 
 ```makefile
 test-kinesis-localstack:
@@ -2175,7 +2175,7 @@ test-kinesis-localstack:
   - `addTagsToStream.js` / `listTagsForStream.js` / `removeTagsFromStream.js`
   - `connection.js` / `helpers.js`
 
-Adaptation strategy: run kinesalite's test suite against RustStack endpoint by configuring the test runner to use `http://localhost:4566`. Requires Node.js installed in CI.
+Adaptation strategy: run kinesalite's test suite against Rustack endpoint by configuring the test runner to use `http://localhost:4566`. Requires Node.js installed in CI.
 
 ```makefile
 test-kinesis-kinesalite:
@@ -2212,7 +2212,7 @@ ENDPOINT="--endpoint-url http://localhost:4566"
 # Create stream
 aws kinesis create-stream $ENDPOINT --stream-name test-stream --shard-count 1
 
-# Wait for ACTIVE (skip for RustStack -- immediate)
+# Wait for ACTIVE (skip for Rustack -- immediate)
 sleep 1
 
 # Put record
@@ -2241,7 +2241,7 @@ aws kinesis delete-stream $ENDPOINT --stream-name test-stream
 test-kinesis: test-kinesis-unit test-kinesis-integration
 
 test-kinesis-unit:
-    @cargo test -p ruststack-kinesis-model -p ruststack-kinesis-core -p ruststack-kinesis-http
+    @cargo test -p rustack-kinesis-model -p rustack-kinesis-core -p rustack-kinesis-http
 
 test-kinesis-integration:
     @cargo test -p integration-tests -- kinesis --ignored
@@ -2266,7 +2266,7 @@ test-kinesis-localstack:
 - Extend codegen `main.rs` to accept Kinesis Smithy model path
 - Add Kinesis namespace prefix to `shapes.rs`
 - Download Kinesis Smithy model JSON from `aws/api-models-aws`
-- Generate `ruststack-kinesis-model` crate (operations enum, input/output structs, error codes)
+- Generate `rustack-kinesis-model` crate (operations enum, input/output structs, error codes)
 - Generate serde derives with `#[serde(rename_all = "PascalCase")]`
 
 #### Step 0.2: HTTP Layer (JSON Protocol Only)
@@ -2286,7 +2286,7 @@ test-kinesis-localstack:
 
 #### Step 0.4: Stream State Management
 - Implement `StreamState` with shard creation and hash key space division
-- Implement `RustStackKinesis` provider with `DashMap<String, StreamState>`
+- Implement `RustackKinesis` provider with `DashMap<String, StreamState>`
 - Implement partition key routing (MD5 hash -> shard lookup)
 
 #### Step 0.5: Core Operations (10 ops)
@@ -2382,7 +2382,7 @@ test-kinesis-localstack:
 
 ### 16.3 Behavioral Differences
 
-| Behavior | kinesis-mock | kinesalite | RustStack | Justification |
+| Behavior | kinesis-mock | kinesalite | Rustack | Justification |
 |----------|-------------|------------|-----------|---------------|
 | Stream creation time | Configurable delay | Configurable delay | Immediate (ACTIVE) | Faster local dev; no CREATING wait |
 | Throughput limits | Not enforced | Not enforced | Not enforced | Not needed for local dev |
@@ -2433,7 +2433,7 @@ Kinesis is moderately more complex than SQS primarily due to the shard engine (h
 
 ## Appendix C: Kinesis Constraints and Limits
 
-| Resource | Limit | Enforced in RustStack? |
+| Resource | Limit | Enforced in Rustack? |
 |----------|-------|----------------------|
 | Max record data size | 1 MB | Yes |
 | Max PutRecords batch | 500 records or 5 MB total | Yes (record count), Yes (size) |

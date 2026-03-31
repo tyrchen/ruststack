@@ -1,9 +1,9 @@
-# RustStack SES: Native Rust Implementation Design
+# Rustack SES: Native Rust Implementation Design
 
 **Date:** 2026-03-19
 **Status:** Draft / RFC
-**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [ruststack-sns-design.md](./ruststack-sns-design.md)
-**Scope:** Add AWS Simple Email Service (SES) v1 support to RustStack as the primary implementation, plus core SES v2 operations. SES v1 uses the `awsQuery` protocol (same as SNS); SES v2 uses `restJson1`. The implementation captures all sent emails for retrospection via a `/_aws/ses` REST endpoint -- the primary value for local development and testing.
+**Depends on:** [smithy-s3-redesign-design.md](./smithy-s3-redesign-design.md), [rustack-sns-design.md](./rustack-sns-design.md)
+**Scope:** Add AWS Simple Email Service (SES) v1 support to Rustack as the primary implementation, plus core SES v2 operations. SES v1 uses the `awsQuery` protocol (same as SNS); SES v2 uses `restJson1`. The implementation captures all sent emails for retrospection via a `/_aws/ses` REST endpoint -- the primary value for local development and testing.
 
 ---
 
@@ -29,12 +29,12 @@
 
 ## 1. Executive Summary
 
-This spec proposes adding AWS Simple Email Service (SES) support to RustStack. Key points:
+This spec proposes adding AWS Simple Email Service (SES) support to Rustack. Key points:
 
 - **Universally needed** -- virtually every application sends emails, and SES is AWS's primary email-sending service. Adding SES unlocks local development and CI testing for any application that sends transactional emails, password resets, notifications, or marketing campaigns via AWS SES.
 - **Small API surface, high testing value** -- SES v1 has ~30 operations, but the core sending operations (SendEmail, SendRawEmail, SendTemplatedEmail) plus identity management cover 90%+ of local development needs. The implementation is simpler than services like DynamoDB or Secrets Manager because there is no complex state machine or versioning semantics.
 - **Email retrospection endpoint is the killer feature** -- the `/_aws/ses` REST endpoint allows tests to query all "sent" emails after calling the SES API. Tests send emails via the standard SES SDK, then assert on email content, recipients, and subjects via this endpoint. This is the primary differentiator from simply stubbing the API.
-- **No actual email delivery** -- RustStack never sends real emails. All emails are captured in memory and exposed via the retrospection endpoint. This makes it safe for CI/CD, development, and testing without risk of accidental email delivery.
+- **No actual email delivery** -- Rustack never sends real emails. All emails are captured in memory and exposed via the retrospection endpoint. This makes it safe for CI/CD, development, and testing without risk of accidental email delivery.
 - **Dual protocol: awsQuery (v1) + restJson1 (v2)** -- SES v1 uses `awsQuery` (identical to SNS), which is still the default for many tools. SES v2 uses `restJson1` with path-based routing under `/v2/email/`. We implement v1 as the primary API and add core v2 operations as a stretch goal.
 - **awsQuery protocol reuse** -- SES v1 uses the same `awsQuery` protocol as SNS: `application/x-www-form-urlencoded` request bodies with XML responses. The gateway routes SES v1 by inspecting the SigV4 `Credential` service name (`email` for SES) since the Content-Type and request shape overlap with SNS.
 - **Estimated effort** -- 3-4 days for Phase 0 (12 core operations), 6-8 days for full implementation (all 4 phases).
@@ -58,7 +58,7 @@ Without a local SES emulator, developers must either:
 3. Mock the SES SDK client in application code (misses integration bugs)
 4. Use a third-party SMTP capture tool like MailHog/MailPit (doesn't test the SES API surface)
 
-RustStack's SES fills this gap: applications use the real AWS SDK to send emails, and tests query the retrospection endpoint to verify email content. No code changes needed in the application under test.
+Rustack's SES fills this gap: applications use the real AWS SDK to send emails, and tests query the retrospection endpoint to verify email content. No code changes needed in the application under test.
 
 ### 2.2 Complexity Assessment
 
@@ -113,7 +113,7 @@ With all 4 phases implemented, the following tools work out of the box:
 9. **Tag validation** -- validate message tags on SendEmail per AWS rules (alphanumeric, max 255 chars)
 10. **SES v2 core operations** -- SendEmail (v2), CreateEmailIdentity, GetEmailIdentity, DeleteEmailIdentity, ListEmailIdentities, CreateEmailTemplate, GetEmailTemplate, GetAccount, PutAccountDetails. Shares underlying stores with v1.
 11. **Smithy-generated types** -- all types generated from official AWS Smithy model for SES v1
-12. **Shared infrastructure** -- reuse `ruststack-core`, `ruststack-auth`, and the awsQuery protocol layer from SNS
+12. **Shared infrastructure** -- reuse `rustack-core`, `rustack-auth`, and the awsQuery protocol layer from SNS
 13. **Same Docker image** -- single binary serves all existing services + SES on port 4566
 
 ### 3.2 Non-Goals
@@ -127,7 +127,7 @@ With all 4 phases implemented, the following tools work out of the box:
 7. **Dedicated IP pools** -- not applicable to local dev
 8. **Mail-from domain configuration** -- accept and store, do not enforce
 9. **Cross-account sending** -- no cross-account SES authorization
-10. **Data persistence across restarts** -- in-memory only, matching all other RustStack services
+10. **Data persistence across restarts** -- in-memory only, matching all other Rustack services
 11. **Real receipt rule processing** -- receipt rules accepted and stored but email is never actually received by SES
 
 ---
@@ -161,7 +161,7 @@ With all 4 phases implemented, the following tools work out of the box:
        +--------+--------+-------+-------+---------------+
                          |
                   +------+------+
-                  | ruststack-  |
+                  | rustack-  |
                   | core + auth |
                   +-------------+
 
@@ -212,35 +212,35 @@ For SES v1, the service name is `email`. For SNS, the service name is `sns`. The
 ### 4.3 Crate Dependency Graph
 
 ```
-ruststack-server (app)
-+-- ruststack-core
-+-- ruststack-auth
-+-- ruststack-s3-{model,core,http}
-+-- ruststack-dynamodb-{model,core,http}
-+-- ruststack-sqs-{model,core,http}
-+-- ruststack-ssm-{model,core,http}
-+-- ruststack-sns-{model,core,http}
-+-- ruststack-ses-model             <-- NEW (auto-generated from SES v1 Smithy model)
-+-- ruststack-ses-core              <-- NEW
-+-- ruststack-ses-http              <-- NEW
+rustack (app)
++-- rustack-core
++-- rustack-auth
++-- rustack-s3-{model,core,http}
++-- rustack-dynamodb-{model,core,http}
++-- rustack-sqs-{model,core,http}
++-- rustack-ssm-{model,core,http}
++-- rustack-sns-{model,core,http}
++-- rustack-ses-model             <-- NEW (auto-generated from SES v1 Smithy model)
++-- rustack-ses-core              <-- NEW
++-- rustack-ses-http              <-- NEW
 +-- ... (other services)
 
-ruststack-ses-http
-+-- ruststack-ses-model
-+-- ruststack-auth
+rustack-ses-http
++-- rustack-ses-model
++-- rustack-auth
 +-- quick-xml (XML response serialization, reuse from SNS)
 +-- serde_urlencoded (form request deserialization, reuse from SNS)
 +-- serde_json (for SES v2 restJson1)
 
-ruststack-ses-core
-+-- ruststack-core
-+-- ruststack-ses-model
+rustack-ses-core
++-- rustack-core
++-- rustack-ses-model
 +-- dashmap
 +-- serde_json (for template data, retrospection API)
 +-- tracing
 +-- uuid
 
-ruststack-ses-model (auto-generated, standalone)
+rustack-ses-model (auto-generated, standalone)
 +-- serde
 +-- serde_json
 ```
@@ -383,11 +383,11 @@ The SNS implementation provides the core awsQuery infrastructure that SES v1 nee
 | Form-urlencoded request parsing | Yes | `serde_urlencoded` + custom nested-param parser |
 | XML response serialization | Yes | `quick-xml` with response wrapper pattern |
 | XML error response formatting | Yes | Same `<ErrorResponse>` structure |
-| SigV4 auth | Yes | `ruststack-auth` is service-agnostic |
-| Multi-account/region state | Yes | `ruststack-core` unchanged |
+| SigV4 auth | Yes | `rustack-auth` is service-agnostic |
+| Multi-account/region state | Yes | `rustack-core` unchanged |
 | Form parameter list/map encoding | Yes | `member.N.Key`/`member.N.Value` patterns |
 
-The SES HTTP crate can import or duplicate the XML serialization helpers from the SNS HTTP crate. If the code is substantial enough, consider extracting into a shared `ruststack-query-protocol` crate.
+The SES HTTP crate can import or duplicate the XML serialization helpers from the SNS HTTP crate. If the code is substantial enough, consider extracting into a shared `rustack-query-protocol` crate.
 
 ---
 
@@ -395,7 +395,7 @@ The SES HTTP crate can import or duplicate the XML serialization helpers from th
 
 ### 6.1 Universal Codegen
 
-The `ruststack-ses-model` crate is generated from the official AWS SES v1 Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
+The `rustack-ses-model` crate is generated from the official AWS SES v1 Smithy JSON AST using the universal codegen tool at `codegen/`. The codegen reads a TOML service configuration and the Smithy model to produce all model types with correct serde attributes.
 
 **Smithy model:** `codegen/smithy-model/ses.json` (namespace `com.amazonaws.ses`)
 **Service config:** `codegen/services/ses.toml`
@@ -476,7 +476,7 @@ file_layout = "flat"
 
 ### 6.3 Generated Output
 
-The codegen produces 6 files in `crates/ruststack-ses-model/src/`:
+The codegen produces 6 files in `crates/rustack-ses-model/src/`:
 
 | File | Contents |
 |------|----------|
@@ -497,10 +497,10 @@ See [smithy-codegen-all-services-design.md](./smithy-codegen-all-services-design
 
 ## 7. Crate Structure
 
-### 7.1 `ruststack-ses-model` (auto-generated)
+### 7.1 `rustack-ses-model` (auto-generated)
 
 ```
-crates/ruststack-ses-model/
+crates/rustack-ses-model/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs              # Module re-exports
@@ -513,16 +513,16 @@ crates/ruststack-ses-model/
 
 **Dependencies:** `serde`, `serde_json`
 
-### 7.2 `ruststack-ses-core`
+### 7.2 `rustack-ses-core`
 
 ```
-crates/ruststack-ses-core/
+crates/rustack-ses-core/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
     +-- config.rs           # SesConfig
     +-- handler.rs          # SesHandler trait (all operation dispatch)
-    +-- provider.rs         # RustStackSes (main provider, all operation handlers)
+    +-- provider.rs         # RustackSes (main provider, all operation handlers)
     +-- storage.rs          # All stores: IdentityStore, EmailStore, TemplateStore, etc.
     +-- identity.rs         # Identity verification logic
     +-- template.rs         # Template rendering ({{variable}} substitution)
@@ -533,12 +533,12 @@ crates/ruststack-ses-core/
     +-- receipt_rule.rs     # Receipt rule set management
 ```
 
-**Dependencies:** `ruststack-core`, `ruststack-ses-model`, `dashmap`, `serde_json`, `tracing`, `uuid`, `chrono`
+**Dependencies:** `rustack-core`, `rustack-ses-model`, `dashmap`, `serde_json`, `tracing`, `uuid`, `chrono`
 
-### 7.3 `ruststack-ses-http`
+### 7.3 `rustack-ses-http`
 
 ```
-crates/ruststack-ses-http/
+crates/rustack-ses-http/
 +-- Cargo.toml
 +-- src/
     +-- lib.rs
@@ -553,17 +553,17 @@ crates/ruststack-ses-http/
         +-- handlers.rs     # Individual v2 operation handlers
 ```
 
-**Dependencies:** `ruststack-ses-model`, `ruststack-auth`, `hyper`, `http`, `serde_json`, `serde_urlencoded`, `quick-xml`, `bytes`
+**Dependencies:** `rustack-ses-model`, `rustack-auth`, `hyper`, `http`, `serde_json`, `serde_urlencoded`, `quick-xml`, `bytes`
 
-This crate is structurally similar to `ruststack-sns-http`. The router parses `Action=<SesOperation>` from the form body (v1) or matches path patterns (v2).
+This crate is structurally similar to `rustack-sns-http`. The router parses `Action=<SesOperation>` from the form body (v1) or matches path patterns (v2).
 
 ### 7.4 Workspace Changes
 
 ```toml
 [workspace.dependencies]
-ruststack-ses-model = { path = "crates/ruststack-ses-model" }
-ruststack-ses-http = { path = "crates/ruststack-ses-http" }
-ruststack-ses-core = { path = "crates/ruststack-ses-core" }
+rustack-ses-model = { path = "crates/rustack-ses-model" }
+rustack-ses-http = { path = "crates/rustack-ses-http" }
+rustack-ses-core = { path = "crates/rustack-ses-core" }
 ```
 
 ---
@@ -795,7 +795,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use dashmap::DashMap;
 
 /// Top-level SES state container.
-/// Keyed by (account_id, region) via ruststack-core.
+/// Keyed by (account_id, region) via rustack-core.
 pub struct SesState {
     pub identities: IdentityStore,
     pub emails: EmailStore,
@@ -1573,12 +1573,12 @@ No background processing is needed. All operations are synchronous request/respo
 
 ```rust
 /// Main SES provider implementing all operations.
-pub struct RustStackSes {
+pub struct RustackSes {
     pub(crate) state: Arc<SesState>,
     pub(crate) config: Arc<SesConfig>,
 }
 
-impl RustStackSes {
+impl RustackSes {
     pub fn new(config: SesConfig) -> Self {
         Self {
             state: Arc::new(SesState {
@@ -2108,10 +2108,10 @@ impl SesError {
 SES support is gated behind a cargo feature:
 
 ```toml
-# apps/ruststack-server/Cargo.toml
+# apps/rustack/Cargo.toml
 [features]
 default = ["s3", "dynamodb", "sqs", "ssm", "sns", "lambda", "events", "logs", "kms", "kinesis", "secretsmanager", "ses"]
-ses = ["dep:ruststack-ses-core", "dep:ruststack-ses-http"]
+ses = ["dep:rustack-ses-core", "dep:rustack-ses-http"]
 ```
 
 ### 12.2 Gateway Registration
@@ -2442,9 +2442,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -p ruststack-ses-model
-      - run: cargo test -p ruststack-ses-core
-      - run: cargo test -p ruststack-ses-http
+      - run: cargo test -p rustack-ses-model
+      - run: cargo test -p rustack-ses-core
+      - run: cargo test -p rustack-ses-http
 
   integration:
     runs-on: ubuntu-latest
@@ -2452,7 +2452,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release
-      - run: ./target/release/ruststack-server &
+      - run: ./target/release/rustack &
       - run: sleep 2
       - run: |
           # AWS CLI smoke tests
@@ -2482,13 +2482,13 @@ jobs:
 
 ### Phase 0: Core Sending + Identities (3-4 days)
 
-**Goal:** SendEmail, SendRawEmail, identity management, retrospection endpoint. Enough for any application that sends email via SES to work against RustStack, and for tests to verify sent emails.
+**Goal:** SendEmail, SendRawEmail, identity management, retrospection endpoint. Enough for any application that sends email via SES to work against Rustack, and for tests to verify sent emails.
 
 1. **Day 1: Smithy Model + Scaffolding**
    - Obtain SES v1 Smithy model (`ses-2010-12-01.json`)
    - Add `codegen/services/ses.toml`
-   - Generate `ruststack-ses-model` crate
-   - Create `ruststack-ses-core` and `ruststack-ses-http` crate scaffolding
+   - Generate `rustack-ses-model` crate
+   - Create `rustack-ses-core` and `rustack-ses-http` crate scaffolding
    - Implement `SesOperation` enum and awsQuery router (reuse SNS form-parsing pattern)
 
 2. **Day 2: Storage + Core Sending**
@@ -2570,7 +2570,7 @@ jobs:
 | awsQuery form parameter encoding differs from SNS | Low | Medium | SES v1 uses the same `member.N.Key/member.N.Value` encoding as SNS. Reuse the same form parser. Test with real AWS SDK requests to verify encoding correctness. |
 | Template rendering edge cases | Medium | Low | The `{{variable}}` substitution is intentionally simple. Document that we do not support Handlebars features (conditionals, loops, partials). If a variable is not in template_data, leave the placeholder as-is (matching basic Mustache behavior). |
 | SES v2 path routing conflicts with other services | Low | Medium | The `/v2/email/` prefix is unique to SES v2. No other service uses this path prefix. Register the SES v2 matcher before the S3 catch-all. |
-| SNS event destination integration | Medium | Medium | For MVP, event destinations are stored but events are not actually emitted to SNS topics. Future: call into `ruststack-sns-core` to publish events. This is a non-blocking enhancement. |
+| SNS event destination integration | Medium | Medium | For MVP, event destinations are stored but events are not actually emitted to SNS topics. Future: call into `rustack-sns-core` to publish events. This is a non-blocking enhancement. |
 | Large raw email bodies | Low | Low | MIME emails can be large. Store in memory as-is. For local dev, this is acceptable. Consider adding a configurable max email size limit if memory becomes a concern. |
 | AWS SDK sends SES requests without SigV4 in some configurations | Low | High | Some test setups use unsigned requests. The `matches()` method should handle the case where no `Authorization` header is present. In this case, fall through to SNS (or add a secondary check based on `Action=` parameter names unique to SES). |
 
@@ -2597,8 +2597,8 @@ fn is_ses_action(form_body: &str) -> bool {
 
 ### 15.3 Dependencies
 
-- `ruststack-core` -- no changes needed
-- `ruststack-auth` -- no changes needed (SigV4 with service=`email` for v1, service=`ses` for v2)
+- `rustack-core` -- no changes needed
+- `rustack-auth` -- no changes needed (SigV4 with service=`email` for v1, service=`ses` for v2)
 - `dashmap` -- already in workspace
 - `uuid` -- for message ID generation (already in workspace)
 - `chrono` -- for timestamp formatting (already in workspace)
@@ -2615,7 +2615,7 @@ fn is_ses_action(form_body: &str) -> bool {
 | Action-name fallback routing | As a safety net for unsigned requests, check `Action=` parameter names. SES and SNS have completely disjoint action names. |
 | Auto-verify all identities by default | Local dev should not require explicit verification. Most tests just need SendEmail to work. Configurable via `SES_REQUIRE_VERIFIED_IDENTITY=true` for testing verification workflows. |
 | Simple `{{variable}}` template rendering | Full Handlebars/Mustache is overkill. SES templates in the real service use a limited subset. Simple replacement covers 95%+ of use cases. |
-| Email retrospection as REST endpoint (not SQS/SNS) | REST endpoint is the simplest integration for tests. Any HTTP client can query it. No dependency on other RustStack services. Matches LocalStack's approach. |
+| Email retrospection as REST endpoint (not SQS/SNS) | REST endpoint is the simplest integration for tests. Any HTTP client can query it. No dependency on other Rustack services. Matches LocalStack's approach. |
 | Store raw MIME data as-is for SendRawEmail | Parsing MIME is complex and error-prone. Store the raw data and let tests inspect it directly. Only extract the `From:` header for the `source` field. |
-| No actual email delivery, ever | This is a fundamental design principle. RustStack SES is a capture-and-inspect tool. Adding real SMTP delivery would be a security risk and a different product entirely. |
+| No actual email delivery, ever | This is a fundamental design principle. Rustack SES is a capture-and-inspect tool. Adding real SMTP delivery would be a security risk and a different product entirely. |
 | SES v2 shares stores with v1 | v1 and v2 operate on the same underlying resources (identities, templates). A single set of stores ensures consistency regardless of which API version the client uses. |

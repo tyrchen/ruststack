@@ -1,4 +1,4 @@
-# RustStack S3: Rust-Native S3 Service for LocalStack
+# Rustack S3: Rust-Native S3 Service for LocalStack
 
 **Date:** 2026-02-26
 **Status:** Draft / RFC
@@ -30,7 +30,7 @@ as a standalone Docker image, and validate it in GitHub CI using LocalStack's ex
 
 ## 1. Executive Summary
 
-This spec describes building a Rust-native S3 service (`ruststack-s3`) that is
+This spec describes building a Rust-native S3 service (`rustack-s3`) that is
 API-compatible with LocalStack's current Python S3 provider. The Rust implementation
 will be validated in GitHub CI by running LocalStack's existing 463 S3 integration
 tests against it.
@@ -209,7 +209,7 @@ The current Python S3 provider calls these other services:
                              │
                              ▼
 ┌────────────────────────────────────────────────────────────┐
-│              RustStackS3 (implements s3s::S3 trait)         │
+│              RustackS3 (implements s3s::S3 trait)         │
 │                                                            │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │  Operation Dispatch (96 operations)                   │  │
@@ -266,7 +266,7 @@ The current Python S3 provider calls these other services:
    c. Deserialize XML/query body → S3Request<OperationInput>
    d. If presigned URL: validate SigV4 signature
    e. If auth header: validate SigV4 (or pass-through for local dev)
-4. Dispatch to RustStackS3::<operation>()
+4. Dispatch to RustackS3::<operation>()
 5. Business logic:
    a. Validate request (bucket exists, key valid, permissions)
    b. Execute operation (read/write state + storage)
@@ -320,13 +320,13 @@ Environment variables (same as LocalStack where applicable):
 ## 5. Crate Structure
 
 ```
-ruststack-s3/
+rustack-s3/
 ├── Cargo.toml                      # Workspace root
 ├── Cargo.lock
 ├── rust-toolchain.toml             # Pin Rust version (e.g., 1.83)
 │
 ├── crates/
-│   ├── ruststack-s3-server/        # Main binary crate
+│   ├── rustack-s3-server/        # Main binary crate
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── main.rs             # Entry point: parse config, start server
@@ -334,11 +334,11 @@ ruststack-s3/
 │   │       ├── health.rs           # Health check endpoints
 │   │       └── server.rs           # hyper server setup + TLS + middleware
 │   │
-│   ├── ruststack-s3-core/          # Core S3 implementation (the s3s::S3 trait impl)
+│   ├── rustack-s3-core/          # Core S3 implementation (the s3s::S3 trait impl)
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── provider.rs         # RustStackS3: implements s3s::S3 (96 operations)
+│   │       ├── provider.rs         # RustackS3: implements s3s::S3 (96 operations)
 │   │       │
 │   │       ├── ops/                # Operation implementations (grouped by category)
 │   │       │   ├── mod.rs
@@ -370,7 +370,7 @@ ruststack-s3/
 │   │       ├── error.rs            # S3-specific error types → s3s error mapping
 │   │       └── utils.rs            # Shared utilities (ETags, version IDs, etc.)
 │   │
-│   └── ruststack-s3-notify/        # Notification system (Phase 2)
+│   └── rustack-s3-notify/        # Notification system (Phase 2)
 │       ├── Cargo.toml
 │       └── src/
 │           ├── lib.rs
@@ -386,7 +386,7 @@ ruststack-s3/
 │
 ├── .github/
 │   └── workflows/
-│       └── ruststack-s3.yml        # CI workflow
+│       └── rustack-s3.yml        # CI workflow
 │
 └── tests/
     ├── integration/                # Rust integration tests (basic)
@@ -399,7 +399,7 @@ ruststack-s3/
 ### 5.1 Key Dependencies
 
 ```toml
-# ruststack-s3-core/Cargo.toml
+# rustack-s3-core/Cargo.toml
 [dependencies]
 s3s = "0.12"                   # S3 trait, routing, XML, auth
 s3s-aws = "0.12"               # AWS SDK type conversions (optional)
@@ -423,9 +423,9 @@ thiserror = "2"
 rand = "0.8"
 tempfile = "3"                 # Large object spill-to-disk
 
-# ruststack-s3-server/Cargo.toml
+# rustack-s3-server/Cargo.toml
 [dependencies]
-ruststack-s3-core = { path = "../ruststack-s3-core" }
+rustack-s3-core = { path = "../rustack-s3-core" }
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 tower = { version = "0.5", features = ["util"] }
@@ -737,12 +737,12 @@ impl CorsMiddleware {
 s3s already handles SigV4 verification via the `S3Auth` trait. Our implementation:
 
 ```rust
-struct RustStackAuth {
+struct RustackAuth {
     skip_validation: bool, // S3_SKIP_SIGNATURE_VALIDATION
 }
 
 #[async_trait]
-impl S3Auth for RustStackAuth {
+impl S3Auth for RustackAuth {
     async fn get_secret_key(&self, access_key: &str) -> S3Result<SecretKey> {
         if self.skip_validation {
             // Return a dummy key that will match any signature
@@ -765,22 +765,22 @@ verification. We just need to provide the credential lookup.
 
 ## 8. CI/CD Pipeline Design
 
-### 8.1 Workflow: `.github/workflows/ruststack-s3.yml`
+### 8.1 Workflow: `.github/workflows/rustack-s3.yml`
 
 ```yaml
-name: RustStack S3 / Build & Test
+name: Rustack S3 / Build & Test
 
 on:
   push:
     paths:
-      - 'ruststack-s3/**'
-      - '.github/workflows/ruststack-s3.yml'
+      - 'rustack-s3/**'
+      - '.github/workflows/rustack-s3.yml'
       - 'tests/aws/services/s3/**'
     branches: [main]
   pull_request:
     paths:
-      - 'ruststack-s3/**'
-      - '.github/workflows/ruststack-s3.yml'
+      - 'rustack-s3/**'
+      - '.github/workflows/rustack-s3.yml'
       - 'tests/aws/services/s3/**'
   workflow_dispatch:
     inputs:
@@ -805,7 +805,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ruststack-s3
+        working-directory: rustack-s3
     steps:
       - uses: actions/checkout@v4
 
@@ -815,7 +815,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: ruststack-s3 -> target
+          workspaces: rustack-s3 -> target
 
       - name: Format check
         run: cargo fmt --all -- --check
@@ -842,7 +842,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
-        working-directory: ruststack-s3
+        working-directory: rustack-s3
     steps:
       - uses: actions/checkout@v4
 
@@ -852,7 +852,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: ruststack-s3 -> target
+          workspaces: rustack-s3 -> target
           key: ${{ matrix.target }}
 
       - name: Install musl tools
@@ -862,13 +862,13 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Strip binary
-        run: strip target/${{ matrix.target }}/release/ruststack-s3-server
+        run: strip target/${{ matrix.target }}/release/rustack-s3-server
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ruststack-s3-${{ matrix.arch }}
-          path: ruststack-s3/target/${{ matrix.target }}/release/ruststack-s3-server
+          name: rustack-s3-${{ matrix.arch }}
+          path: rustack-s3/target/${{ matrix.target }}/release/rustack-s3-server
           retention-days: 1
 
   # ─── Job 3: Build Docker images ────────────────────────────────────
@@ -889,11 +889,11 @@ jobs:
       - name: Download binary
         uses: actions/download-artifact@v4
         with:
-          name: ruststack-s3-${{ matrix.arch }}
-          path: ruststack-s3/docker/bin/
+          name: rustack-s3-${{ matrix.arch }}
+          path: rustack-s3/docker/bin/
 
       - name: Make binary executable
-        run: chmod +x ruststack-s3/docker/bin/ruststack-s3-server
+        run: chmod +x rustack-s3/docker/bin/rustack-s3-server
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -901,18 +901,18 @@ jobs:
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ruststack-s3/docker
-          file: ruststack-s3/docker/Dockerfile
+          context: rustack-s3/docker
+          file: rustack-s3/docker/Dockerfile
           platforms: ${{ matrix.platform }}
-          tags: ruststack-s3:test-${{ matrix.arch }}
-          outputs: type=docker,dest=/tmp/ruststack-s3-${{ matrix.arch }}.tar
+          tags: rustack-s3:test-${{ matrix.arch }}
+          outputs: type=docker,dest=/tmp/rustack-s3-${{ matrix.arch }}.tar
           load: false
 
       - name: Upload Docker image
         uses: actions/upload-artifact@v4
         with:
-          name: ruststack-s3-image-${{ matrix.arch }}
-          path: /tmp/ruststack-s3-${{ matrix.arch }}.tar
+          name: rustack-s3-image-${{ matrix.arch }}
+          path: /tmp/rustack-s3-${{ matrix.arch }}.tar
           retention-days: 1
 
   # ─── Job 4: Run LocalStack S3 tests against Rust S3 ───────────────
@@ -936,21 +936,21 @@ jobs:
       - name: Download Rust S3 Docker image
         uses: actions/download-artifact@v4
         with:
-          name: ruststack-s3-image-${{ matrix.arch }}
+          name: rustack-s3-image-${{ matrix.arch }}
           path: /tmp/
 
       - name: Load Docker image
-        run: docker load -i /tmp/ruststack-s3-${{ matrix.arch }}.tar
+        run: docker load -i /tmp/rustack-s3-${{ matrix.arch }}.tar
 
       - name: Start Rust S3 server
         run: |
           docker run -d \
-            --name ruststack-s3 \
+            --name rustack-s3 \
             -p 4566:4566 \
             -e S3_SKIP_SIGNATURE_VALIDATION=true \
             -e LOG_LEVEL=info \
-            -e RUST_LOG=ruststack_s3=debug \
-            ruststack-s3:test-${{ matrix.arch }}
+            -e RUST_LOG=rustack_s3=debug \
+            rustack-s3:test-${{ matrix.arch }}
 
       - name: Wait for server to be ready
         run: |
@@ -962,7 +962,7 @@ jobs:
             sleep 1
           done
           echo "Server failed to start"
-          docker logs ruststack-s3
+          docker logs rustack-s3
           exit 1
 
       - name: Set up Python
@@ -986,7 +986,7 @@ jobs:
           PYTEST_ARGS: >-
             -x --timeout=60
             -o junit_family=legacy
-            --junitxml=target/pytest-junit-ruststack-s3-${{ matrix.arch }}.xml
+            --junitxml=target/pytest-junit-rustack-s3-${{ matrix.arch }}.xml
             -k "not (notification or lambda or eventbridge or sqs or sns)"
         run: |
           mkdir -p target
@@ -996,23 +996,23 @@ jobs:
 
       - name: Dump server logs on failure
         if: failure()
-        run: docker logs ruststack-s3
+        run: docker logs rustack-s3
 
       - name: Stop Rust S3 server
         if: always()
-        run: docker stop ruststack-s3 && docker rm ruststack-s3
+        run: docker stop rustack-s3 && docker rm rustack-s3
 
       - name: Archive test results
         uses: actions/upload-artifact@v4
         if: success() || failure()
         with:
-          name: test-results-ruststack-s3-${{ matrix.arch }}
-          path: target/pytest-junit-ruststack-s3-${{ matrix.arch }}.xml
+          name: test-results-rustack-s3-${{ matrix.arch }}
+          path: target/pytest-junit-rustack-s3-${{ matrix.arch }}.xml
           retention-days: 30
 
   # ─── Job 5: Publish test results ───────────────────────────────────
   publish-test-results:
-    name: "Publish RustStack S3 Test Results"
+    name: "Publish Rustack S3 Test Results"
     needs: integration-test
     runs-on: ubuntu-latest
     if: success() || failure()
@@ -1025,14 +1025,14 @@ jobs:
       - name: Download test results
         uses: actions/download-artifact@v4
         with:
-          pattern: test-results-ruststack-s3-*
+          pattern: test-results-rustack-s3-*
           merge-multiple: true
 
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@v2
         with:
-          files: pytest-junit-ruststack-s3-*.xml
-          check_name: "RustStack S3 Test Results (AMD64 / ARM64)"
+          files: pytest-junit-rustack-s3-*.xml
+          check_name: "Rustack S3 Test Results (AMD64 / ARM64)"
           action_fail_on_inconclusive: true
 
   # ─── Job 6: Comparison report ──────────────────────────────────────
@@ -1047,18 +1047,18 @@ jobs:
       - name: Download Rust S3 results
         uses: actions/download-artifact@v4
         with:
-          name: test-results-ruststack-s3-amd64
+          name: test-results-rustack-s3-amd64
           path: results/rust/
 
       # If Python S3 image tests ran in the same workflow, download those too
       - name: Generate comparison report
         run: |
-          echo "## RustStack S3 vs Python S3 Test Comparison" > comparison.md
+          echo "## Rustack S3 vs Python S3 Test Comparison" > comparison.md
           echo "" >> comparison.md
           echo "### Rust S3 Results" >> comparison.md
           python3 -c "
           import xml.etree.ElementTree as ET
-          tree = ET.parse('results/rust/pytest-junit-ruststack-s3-amd64.xml')
+          tree = ET.parse('results/rust/pytest-junit-rustack-s3-amd64.xml')
           root = tree.getroot()
           ts = root.find('.//testsuite') or root
           tests = ts.get('tests', '0')
@@ -1083,7 +1083,7 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           path: comparison.md
-          header: ruststack-s3-comparison
+          header: rustack-s3-comparison
 ```
 
 ### 8.2 CI Pipeline Visualization
@@ -1168,7 +1168,7 @@ run them against the Rust server:
 
 ```bash
 # Start Rust S3 server
-docker run -d -p 4566:4566 ruststack-s3:latest
+docker run -d -p 4566:4566 rustack-s3:latest
 
 # Run the existing LocalStack S3 tests
 # The tests use AWS_ENDPOINT_URL=http://localhost:4566 to connect
@@ -1213,13 +1213,13 @@ Some LocalStack S3 tests may need adjustments:
 ### 10.1 Dockerfile
 
 ```dockerfile
-# ruststack-s3/docker/Dockerfile
+# rustack-s3/docker/Dockerfile
 
 # Minimal image: just the static binary
 FROM scratch
 
 # Copy the statically-linked musl binary
-COPY bin/ruststack-s3-server /ruststack-s3-server
+COPY bin/rustack-s3-server /rustack-s3-server
 
 # Copy CA certificates for HTTPS (if needed for notifications in Phase 2)
 COPY --from=alpine:3.19 /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
@@ -1227,23 +1227,23 @@ COPY --from=alpine:3.19 /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 # Create required directories
 # Note: scratch doesn't have mkdir, so we use VOLUME for runtime
 VOLUME /var/lib/localstack
-VOLUME /tmp/ruststack-s3
+VOLUME /tmp/rustack-s3
 
 # Expose the S3 port (same as LocalStack)
 EXPOSE 4566
 
 # Health check
 HEALTHCHECK --interval=5s --start-period=2s --retries=3 --timeout=3s \
-  CMD ["/ruststack-s3-server", "health"]
+  CMD ["/rustack-s3-server", "health"]
 
 # Labels
-LABEL org.opencontainers.image.title="RustStack S3"
+LABEL org.opencontainers.image.title="Rustack S3"
 LABEL org.opencontainers.image.description="High-performance S3 emulator in Rust"
 
 # Run as non-root (UID 1000 = localstack convention)
 USER 1000
 
-ENTRYPOINT ["/ruststack-s3-server"]
+ENTRYPOINT ["/rustack-s3-server"]
 ```
 
 ### 10.2 Image Size Comparison
@@ -1252,7 +1252,7 @@ ENTRYPOINT ["/ruststack-s3-server"]
 |--------------------------------|----------|--------------|---------------|
 | LocalStack full                | ~1.5 GiB | ~15-30s      | ~250 MiB      |
 | LocalStack S3-only (Python)    | ~500 MiB | ~10s         | ~120 MiB      |
-| **RustStack S3 (projected)**   | **~20 MiB** | **<1s**   | **~5-10 MiB** |
+| **Rustack S3 (projected)**   | **~20 MiB** | **<1s**   | **~5-10 MiB** |
 
 ### 10.3 Health Endpoint
 
@@ -1263,7 +1263,7 @@ impl S3Route for HealthRoute {
         let path = req.uri().path();
         path == "/_localstack/health"
             || path == "/health"
-            || path == "/_ruststack/health"
+            || path == "/_rustack/health"
     }
 
     async fn call(&self, _req: Request) -> Result<Response> {
@@ -1271,7 +1271,7 @@ impl S3Route for HealthRoute {
             "services": {
                 "s3": "running"
             },
-            "edition": "ruststack",
+            "edition": "rustack",
             "version": env!("CARGO_PKG_VERSION"),
         });
         Ok(Response::builder()
@@ -1295,7 +1295,7 @@ User code (boto3/awscli)
     │
     ▼ port 4566
 ┌───────────────┐
-│ RustStack S3  │  ← standalone, no Python
+│ Rustack S3  │  ← standalone, no Python
 └───────────────┘
 ```
 
@@ -1311,13 +1311,13 @@ User code (boto3/awscli)
 │  LocalStack Gateway (Python)             │
 │  ┌────────────────┐ ┌─────────────────┐  │
 │  │ S3 → proxy to  │ │ Other services  │  │
-│  │ RustStack :4577│ │ (SQS, SNS, etc) │  │
+│  │ Rustack :4577│ │ (SQS, SNS, etc) │  │
 │  └───────┬────────┘ └─────────────────┘  │
 └──────────┼───────────────────────────────┘
            │ port 4577
            ▼
 ┌──────────────────┐
-│  RustStack S3    │
+│  Rustack S3    │
 └──────────────────┘
 ```
 
@@ -1331,11 +1331,11 @@ Embed the Rust S3 as a native Python module loaded by LocalStack:
 
 ```python
 # In localstack's service provider
-import ruststack_s3  # PyO3 native module
+import rustack_s3  # PyO3 native module
 
 @aws_provider(api="s3", name="rust")
 def s3_rust():
-    provider = ruststack_s3.RustS3Provider(port=0)  # random port
+    provider = rustack_s3.RustS3Provider(port=0)  # random port
     return Service.for_provider(provider)
 ```
 
@@ -1421,11 +1421,11 @@ def s3_rust():
 
 ### 14.1 Requires Decision Before Starting
 
-1. **Repository location:** Should `ruststack-s3/` live inside the localstack repo
+1. **Repository location:** Should `rustack-s3/` live inside the localstack repo
    (monorepo) or in a separate repository?
    - **Monorepo pro:** Shared CI, test co-location, single PR for test fixes
    - **Separate repo pro:** Independent release cadence, cleaner Rust workspace
-   - **Recommendation:** Monorepo (inside `localstack/ruststack-s3/`), matching the
+   - **Recommendation:** Monorepo (inside `localstack/rustack-s3/`), matching the
      existing pattern of `Dockerfile.s3` living in the main repo.
 
 2. **Test runner approach:** How to run LocalStack's pytest tests against Rust S3?
@@ -1436,9 +1436,9 @@ def s3_rust():
    - **Recommendation:** Option A is faster and ensures real parity. The test runner
      Docker image can include Python + localstack-core as test deps.
 
-3. **Naming:** `ruststack-s3`? `localstack-s3-rs`? `localstack-s3-native`?
-   - **Recommendation:** `ruststack-s3` -- clear, distinct from the Python impl,
-     establishes the "ruststack" namespace for future Rust services.
+3. **Naming:** `rustack-s3`? `localstack-s3-rs`? `localstack-s3-native`?
+   - **Recommendation:** `rustack-s3` -- clear, distinct from the Python impl,
+     establishes the "rustack" namespace for future Rust services.
 
 ### 14.2 Can Be Decided During Implementation
 
@@ -1501,9 +1501,9 @@ Session:              create_session
 
 ## Appendix D: Existing CI Workflow Comparison
 
-| Aspect | Python S3 Image CI | RustStack S3 CI |
+| Aspect | Python S3 Image CI | Rustack S3 CI |
 |--------|-------------------|-----------------|
-| Workflow | `aws-tests-s3-image.yml` | `ruststack-s3.yml` |
+| Workflow | `aws-tests-s3-image.yml` | `rustack-s3.yml` |
 | Build time | ~5 min (Docker multi-stage) | ~7 min (Rust compile + Docker) |
 | Test time | ~10 min | ~15-20 min (more thorough) |
 | Image size | ~500 MiB | ~20-30 MiB |

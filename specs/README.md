@@ -7,20 +7,20 @@ All specs that for AI to generate code.
 | Spec | Type | Status | Description |
 |------|------|--------|-------------|
 | [rust-rewrite-feasibility](./rust-rewrite-feasibility.md) | Feasibility | Draft | Full codebase analysis of LocalStack with Rust rewrite strategy |
-| [ruststack-s3-implementation](./ruststack-s3-implementation.md) | Design | Superseded | S3 implementation using s3s crate (replaced by smithy redesign) |
+| [rustack-s3-implementation](./rustack-s3-implementation.md) | Design | Superseded | S3 implementation using s3s crate (replaced by smithy redesign) |
 | [smithy-s3-redesign-design](./smithy-s3-redesign-design.md) | Design | Draft | Smithy-based S3 redesign replacing s3s with self-owned HTTP/XML/auth stack |
-| [ruststack-dynamodb-design](./ruststack-dynamodb-design.md) | Design | Draft | Native Rust DynamoDB implementation with Smithy codegen, in-memory storage engine, and expression parser |
-| [ruststack-sqs-design](./ruststack-sqs-design.md) | Design | Draft | Native Rust SQS implementation -- 23 operations, dual protocol (awsJson1.0 + awsQuery), actor-per-queue architecture, FIFO support |
-| [ruststack-ssm-design](./ruststack-ssm-design.md) | Design | Draft | Native Rust SSM Parameter Store implementation -- 13 operations, Smithy codegen, in-memory versioned parameter storage |
-| [ruststack-sns-design](./ruststack-sns-design.md) | Design | Draft | Native Rust SNS implementation -- 42 operations, awsQuery protocol, SNS-to-SQS fan-out, filter policies, FIFO topics |
-| [ruststack-secretsmanager-design](./ruststack-secretsmanager-design.md) | Design | Draft | Native Rust Secrets Manager implementation -- 23 operations, awsJson1.1, version staging labels, rotation lifecycle, scheduled deletion |
-| [ruststack-logs-design](./ruststack-logs-design.md) | Design | Draft | Native Rust CloudWatch Logs implementation -- ~40 operations, awsJson1.1, append-only log storage, retention policies, filter patterns |
-| [ruststack-lambda-design](./ruststack-lambda-design.md) | Design | Draft | Native Rust Lambda (invoke-only) implementation -- 27 operations, restJson1 protocol, Docker-based execution engine, warm container pooling |
-| [ruststack-events-design](./ruststack-events-design.md) | Design | Draft | Native Rust EventBridge implementation -- 57 operations, event pattern matching engine, actor-per-bus architecture, SQS target delivery |
-| [ruststack-kms-design](./ruststack-kms-design.md) | Design | Draft | Native Rust KMS implementation -- ~35 operations, AES-256-GCM/RSA/ECC/HMAC crypto engine, envelope encryption, key state machine, alias management |
-| [ruststack-kinesis-design](./ruststack-kinesis-design.md) | Design | Draft | Native Rust Kinesis Data Streams implementation -- ~40 operations, actor-per-shard architecture, MD5 partition key routing, shard iterators, CBOR+JSON wire formats |
-| [ruststack-iam-design](./ruststack-iam-design.md) | Design | Draft | Native Rust IAM implementation -- ~60 operations, awsQuery protocol, users/roles/groups/policies/instance-profiles/access-keys, global service model, SigV4-based gateway routing |
+| [rustack-dynamodb-design](./rustack-dynamodb-design.md) | Design | Draft | Native Rust DynamoDB implementation with Smithy codegen, in-memory storage engine, and expression parser |
+| [rustack-sqs-design](./rustack-sqs-design.md) | Design | Draft | Native Rust SQS implementation -- 23 operations, dual protocol (awsJson1.0 + awsQuery), actor-per-queue architecture, FIFO support |
+| [rustack-ssm-design](./rustack-ssm-design.md) | Design | Draft | Native Rust SSM Parameter Store implementation -- 13 operations, Smithy codegen, in-memory versioned parameter storage |
+| [rustack-sns-design](./rustack-sns-design.md) | Design | Draft | Native Rust SNS implementation -- 42 operations, awsQuery protocol, SNS-to-SQS fan-out, filter policies, FIFO topics |
+| [rustack-secretsmanager-design](./rustack-secretsmanager-design.md) | Design | Draft | Native Rust Secrets Manager implementation -- 23 operations, awsJson1.1, version staging labels, rotation lifecycle, scheduled deletion |
+| [rustack-logs-design](./rustack-logs-design.md) | Design | Draft | Native Rust CloudWatch Logs implementation -- ~40 operations, awsJson1.1, append-only log storage, retention policies, filter patterns |
+| [rustack-lambda-design](./rustack-lambda-design.md) | Design | Draft | Native Rust Lambda (invoke-only) implementation -- 27 operations, restJson1 protocol, Docker-based execution engine, warm container pooling |
+| [rustack-events-design](./rustack-events-design.md) | Design | Draft | Native Rust EventBridge implementation -- 57 operations, event pattern matching engine, actor-per-bus architecture, SQS target delivery |
+| [rustack-kms-design](./rustack-kms-design.md) | Design | Draft | Native Rust KMS implementation -- ~35 operations, AES-256-GCM/RSA/ECC/HMAC crypto engine, envelope encryption, key state machine, alias management |
+| [rustack-kinesis-design](./rustack-kinesis-design.md) | Design | Draft | Native Rust Kinesis Data Streams implementation -- ~40 operations, actor-per-shard architecture, MD5 partition key routing, shard iterators, CBOR+JSON wire formats |
+| [rustack-iam-design](./rustack-iam-design.md) | Design | Draft | Native Rust IAM implementation -- ~60 operations, awsQuery protocol, users/roles/groups/policies/instance-profiles/access-keys, global service model, SigV4-based gateway routing |
 | [s3-checksum-parity-design](./s3-checksum-parity-design.md) | Design | Draft | S3 checksum parity -- CRC64NVME, ChecksumMode gating, aws-chunked trailing headers, multipart checksum combination, upload validation |
-| [ruststack-ses-design](./ruststack-ses-design.md) | Design | Draft | Native Rust SES implementation -- ~30 v1 operations (awsQuery) + ~10 v2 operations (restJson1), email retrospection endpoint, template rendering, identity management |
+| [rustack-ses-design](./rustack-ses-design.md) | Design | Draft | Native Rust SES implementation -- ~30 v1 operations (awsQuery) + ~10 v2 operations (restJson1), email retrospection endpoint, template rendering, identity management |
 | [smithy-codegen-all-services-design](./smithy-codegen-all-services-design.md) | Design | Draft | Universal Smithy codegen -- extend S3-only codegen to all 7+ services with TOML configs, protocol-aware serde, error extraction, overlay system |
 | [service-operations-gap-impl-plan](./service-operations-gap-impl-plan.md) | Design | Draft | Operations gap analysis and implementation plan -- 44 Tier 1 ops (DynamoDB transactions/TTL/tagging, Lambda layers/ESM, IAM OIDC), 56 Tier 2 ops, phased delivery across 6 phases |

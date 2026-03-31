@@ -1,9 +1,9 @@
-# RustStack Service Operations Gap: Implementation Plan
+# Rustack Service Operations Gap: Implementation Plan
 
 **Date:** 2026-03-26
 **Status:** Draft
 **Depends on:** All existing service design specs
-**Scope:** Concrete plan to close the operations gap between RustStack (17 services, ~586 ops) and LocalStack (34+ services, ~2,300+ ops) for shared services, based on analysis of which missing operations matter for local development.
+**Scope:** Concrete plan to close the operations gap between Rustack (17 services, ~586 ops) and LocalStack (34+ services, ~2,300+ ops) for shared services, based on analysis of which missing operations matter for local development.
 
 ---
 
@@ -30,7 +30,7 @@
 
 ## 1. Executive Summary
 
-RustStack implements 17 AWS services with ~586 operations. LocalStack implements 34+ services with ~2,300+ operations. For the 17 shared services, RustStack covers ~586 of LocalStack's ~1,100 operations (53%).
+Rustack implements 17 AWS services with ~586 operations. LocalStack implements 34+ services with ~2,300+ operations. For the 17 shared services, Rustack covers ~586 of LocalStack's ~1,100 operations (53%).
 
 This spec proposes closing the gap strategically — not by implementing every operation, but by categorizing the ~514 missing operations into priority tiers based on real-world local development usage. The core finding:
 
@@ -39,7 +39,7 @@ This spec proposes closing the gap strategically — not by implementing every o
 - **Tier 3 (Nice-to-Have):** ~80 operations. Advanced features with niche usage — IAM MFA/SAML, SES bounce handling, CloudWatch Logs anomaly detection.
 - **Tier 4 (Skip):** ~334 operations. Production infrastructure concerns with zero value in local emulation — SSM patch management, IAM Organizations, DynamoDB global tables/backup, CloudWatch Logs delivery pipelines.
 
-Implementing Tiers 1 + 2 (100 operations) would bring RustStack to ~686 operations and cover effectively 100% of common local-development API calls across all 17 services. This spec provides concrete designs for the highest-impact additions.
+Implementing Tiers 1 + 2 (100 operations) would bring Rustack to ~686 operations and cover effectively 100% of common local-development API calls across all 17 services. This spec provides concrete designs for the highest-impact additions.
 
 ---
 
@@ -300,7 +300,7 @@ CloudWatch Logs is already well-covered. No Tier 1 gaps.
 | KMS (38 → 53) | 15 | 0 | 3 (ImportKeyMaterial, GetParametersForImport, DeleteImportedKeyMaterial) | Custom key stores and multi-region are Tier 4 |
 | Kinesis (27 → 39) | 12 | 0 | 2 (UpdateStreamMode, UpdateShardCount are already implemented; TagResource/UntagResource) | Enhanced monitoring and account settings are Tier 4 |
 | SES (44 → 71) | 27 | 0 | 3 (SendBulkTemplatedEmail, TestRenderTemplate, PutConfigurationSetDeliveryOptions) | Custom verification and bounce ops are Tier 3-4 |
-| SNS (47 → 42) | -5 | 0 | 0 | RustStack already has MORE ops than LocalStack |
+| SNS (47 → 42) | -5 | 0 | 0 | Rustack already has MORE ops than LocalStack |
 | SQS (23 → 23) | 0 | 0 | 0 | Full parity |
 | EventBridge (43 → 57) | 14 | 0 | 0 | All 43 operation types are defined; 22 are implemented. Remaining 21 are already in the model, just need handler code |
 | CloudWatch Metrics (31 → 39) | 8 | 0 | 0 | Missing ops are managed insight rules and metric streams, Tier 3-4 |
@@ -380,7 +380,7 @@ CloudWatch Logs is already well-covered. No Tier 1 gaps.
 
 **Operations:** CreateArchive, DeleteArchive, DescribeArchive, ListArchives, UpdateArchive, StartReplay, CancelReplay, DescribeReplay, ListReplays, CreateApiDestination, DeleteApiDestination, DescribeApiDestination, ListApiDestinations, UpdateApiDestination, CreateConnection, DeleteConnection, DescribeConnection, ListConnections, UpdateConnection, DeauthorizeConnection, CreateEndpoint, DeleteEndpoint, DescribeEndpoint, ListEndpoints, UpdateEndpoint
 
-**Why Must-Have:** These operations are already defined in the RustStack EventBridge model enum. The types are generated. The HTTP routing is in place. Only the handler dispatch and provider methods need implementation. This is low-effort, high-value work — approximately 50-100 lines per operation since the infrastructure exists.
+**Why Must-Have:** These operations are already defined in the Rustack EventBridge model enum. The types are generated. The HTTP routing is in place. Only the handler dispatch and provider methods need implementation. This is low-effort, high-value work — approximately 50-100 lines per operation since the infrastructure exists.
 
 ---
 
@@ -996,7 +996,7 @@ Where applicable, port relevant LocalStack test cases:
 - `tests/aws/services/lambda_/test_lambda_api.py` — layer and ESM tests
 - `tests/aws/services/iam/test_iam.py` — OIDC provider tests
 
-Run these against RustStack to validate behavioral parity.
+Run these against Rustack to validate behavioral parity.
 
 ---
 
@@ -1022,7 +1022,7 @@ Run these against RustStack to validate behavioral parity.
 
 ### 15.3 Behavioral Differences
 
-| Behavior | AWS | RustStack | Justification |
+| Behavior | AWS | Rustack | Justification |
 |---|---|---|---|
 | TTL deletion timing | Items deleted within 48 hours | Items not deleted (metadata only) | Background deletion adds complexity with minimal local dev value |
 | Transaction conflict window | Strict serializable isolation | Partition-level lock ordering | Sufficient for local dev correctness |

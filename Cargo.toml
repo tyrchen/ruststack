@@ -4,11 +4,11 @@ exclude = ["codegen"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.6.0"
 edition = "2024"
 license = "MIT"
 authors = ["Tyr Chen <tyr.chen@gmail.com>"]
-repository = "https://github.com/tyrchen/ruststack"
+repository = "https://github.com/tyrchen/rustack"
 
 [workspace.lints.rust]
 missing_docs = "warn"
@@ -24,60 +24,60 @@ collapsible_if = "allow"
 
 [workspace.dependencies]
 # Internal crates
-ruststack-core = { path = "crates/ruststack-core" }
-ruststack-auth = { path = "crates/ruststack-auth" }
-ruststack-s3-core = { path = "crates/ruststack-s3-core" }
-ruststack-s3-http = { path = "crates/ruststack-s3-http" }
-ruststack-s3-model = { path = "crates/ruststack-s3-model" }
-ruststack-s3-xml = { path = "crates/ruststack-s3-xml" }
-ruststack-dynamodb-model = { path = "crates/ruststack-dynamodb-model" }
-ruststack-dynamodb-http = { path = "crates/ruststack-dynamodb-http" }
-ruststack-dynamodb-core = { path = "crates/ruststack-dynamodb-core" }
-ruststack-sqs-model = { path = "crates/ruststack-sqs-model" }
-ruststack-sqs-http = { path = "crates/ruststack-sqs-http" }
-ruststack-sqs-core = { path = "crates/ruststack-sqs-core" }
-ruststack-ssm-model = { path = "crates/ruststack-ssm-model" }
-ruststack-ssm-http = { path = "crates/ruststack-ssm-http" }
-ruststack-ssm-core = { path = "crates/ruststack-ssm-core" }
-ruststack-sns-model = { path = "crates/ruststack-sns-model" }
-ruststack-sns-http = { path = "crates/ruststack-sns-http" }
-ruststack-sns-core = { path = "crates/ruststack-sns-core" }
-ruststack-lambda-model = { path = "crates/ruststack-lambda-model" }
-ruststack-lambda-http = { path = "crates/ruststack-lambda-http" }
-ruststack-lambda-core = { path = "crates/ruststack-lambda-core" }
-ruststack-events-model = { path = "crates/ruststack-events-model" }
-ruststack-logs-model = { path = "crates/ruststack-logs-model" }
-ruststack-logs-http = { path = "crates/ruststack-logs-http" }
-ruststack-logs-core = { path = "crates/ruststack-logs-core" }
-ruststack-events-http = { path = "crates/ruststack-events-http" }
-ruststack-events-core = { path = "crates/ruststack-events-core" }
-ruststack-kms-model = { path = "crates/ruststack-kms-model" }
-ruststack-kms-http = { path = "crates/ruststack-kms-http" }
-ruststack-kms-core = { path = "crates/ruststack-kms-core" }
-ruststack-kinesis-model = { path = "crates/ruststack-kinesis-model" }
-ruststack-kinesis-http = { path = "crates/ruststack-kinesis-http" }
-ruststack-kinesis-core = { path = "crates/ruststack-kinesis-core" }
-ruststack-secretsmanager-model = { path = "crates/ruststack-secretsmanager-model" }
-ruststack-secretsmanager-http = { path = "crates/ruststack-secretsmanager-http" }
-ruststack-secretsmanager-core = { path = "crates/ruststack-secretsmanager-core" }
-ruststack-ses-model = { path = "crates/ruststack-ses-model" }
-ruststack-ses-http = { path = "crates/ruststack-ses-http" }
-ruststack-ses-core = { path = "crates/ruststack-ses-core" }
-ruststack-apigatewayv2-model = { path = "crates/ruststack-apigatewayv2-model" }
-ruststack-apigatewayv2-http = { path = "crates/ruststack-apigatewayv2-http" }
-ruststack-apigatewayv2-core = { path = "crates/ruststack-apigatewayv2-core" }
-ruststack-cloudwatch-model = { path = "crates/ruststack-cloudwatch-model" }
-ruststack-cloudwatch-http = { path = "crates/ruststack-cloudwatch-http" }
-ruststack-cloudwatch-core = { path = "crates/ruststack-cloudwatch-core" }
-ruststack-dynamodbstreams-model = { path = "crates/ruststack-dynamodbstreams-model" }
-ruststack-dynamodbstreams-http = { path = "crates/ruststack-dynamodbstreams-http" }
-ruststack-dynamodbstreams-core = { path = "crates/ruststack-dynamodbstreams-core" }
-ruststack-iam-model = { path = "crates/ruststack-iam-model" }
-ruststack-iam-http = { path = "crates/ruststack-iam-http" }
-ruststack-iam-core = { path = "crates/ruststack-iam-core" }
-ruststack-sts-model = { path = "crates/ruststack-sts-model" }
-ruststack-sts-http = { path = "crates/ruststack-sts-http" }
-ruststack-sts-core = { path = "crates/ruststack-sts-core" }
+rustack-core = { version = "0.6.0", path = "crates/rustack-core" }
+rustack-auth = { version = "0.6.0", path = "crates/rustack-auth" }
+rustack-s3-core = { version = "0.6.0", path = "crates/rustack-s3-core" }
+rustack-s3-http = { version = "0.6.0", path = "crates/rustack-s3-http" }
+rustack-s3-model = { version = "0.6.0", path = "crates/rustack-s3-model" }
+rustack-s3-xml = { version = "0.6.0", path = "crates/rustack-s3-xml" }
+rustack-dynamodb-model = { version = "0.6.0", path = "crates/rustack-dynamodb-model" }
+rustack-dynamodb-http = { version = "0.6.0", path = "crates/rustack-dynamodb-http" }
+rustack-dynamodb-core = { version = "0.6.0", path = "crates/rustack-dynamodb-core" }
+rustack-sqs-model = { version = "0.6.0", path = "crates/rustack-sqs-model" }
+rustack-sqs-http = { version = "0.6.0", path = "crates/rustack-sqs-http" }
+rustack-sqs-core = { version = "0.6.0", path = "crates/rustack-sqs-core" }
+rustack-ssm-model = { version = "0.6.0", path = "crates/rustack-ssm-model" }
+rustack-ssm-http = { version = "0.6.0", path = "crates/rustack-ssm-http" }
+rustack-ssm-core = { version = "0.6.0", path = "crates/rustack-ssm-core" }
+rustack-sns-model = { version = "0.6.0", path = "crates/rustack-sns-model" }
+rustack-sns-http = { version = "0.6.0", path = "crates/rustack-sns-http" }
+rustack-sns-core = { version = "0.6.0", path = "crates/rustack-sns-core" }
+rustack-lambda-model = { version = "0.6.0", path = "crates/rustack-lambda-model" }
+rustack-lambda-http = { version = "0.6.0", path = "crates/rustack-lambda-http" }
+rustack-lambda-core = { version = "0.6.0", path = "crates/rustack-lambda-core" }
+rustack-events-model = { version = "0.6.0", path = "crates/rustack-events-model" }
+rustack-logs-model = { version = "0.6.0", path = "crates/rustack-logs-model" }
+rustack-logs-http = { version = "0.6.0", path = "crates/rustack-logs-http" }
+rustack-logs-core = { version = "0.6.0", path = "crates/rustack-logs-core" }
+rustack-events-http = { version = "0.6.0", path = "crates/rustack-events-http" }
+rustack-events-core = { version = "0.6.0", path = "crates/rustack-events-core" }
+rustack-kms-model = { version = "0.6.0", path = "crates/rustack-kms-model" }
+rustack-kms-http = { version = "0.6.0", path = "crates/rustack-kms-http" }
+rustack-kms-core = { version = "0.6.0", path = "crates/rustack-kms-core" }
+rustack-kinesis-model = { version = "0.6.0", path = "crates/rustack-kinesis-model" }
+rustack-kinesis-http = { version = "0.6.0", path = "crates/rustack-kinesis-http" }
+rustack-kinesis-core = { version = "0.6.0", path = "crates/rustack-kinesis-core" }
+rustack-secretsmanager-model = { version = "0.6.0", path = "crates/rustack-secretsmanager-model" }
+rustack-secretsmanager-http = { version = "0.6.0", path = "crates/rustack-secretsmanager-http" }
+rustack-secretsmanager-core = { version = "0.6.0", path = "crates/rustack-secretsmanager-core" }
+rustack-ses-model = { version = "0.6.0", path = "crates/rustack-ses-model" }
+rustack-ses-http = { version = "0.6.0", path = "crates/rustack-ses-http" }
+rustack-ses-core = { version = "0.6.0", path = "crates/rustack-ses-core" }
+rustack-apigatewayv2-model = { version = "0.6.0", path = "crates/rustack-apigatewayv2-model" }
+rustack-apigatewayv2-http = { version = "0.6.0", path = "crates/rustack-apigatewayv2-http" }
+rustack-apigatewayv2-core = { version = "0.6.0", path = "crates/rustack-apigatewayv2-core" }
+rustack-cloudwatch-model = { version = "0.6.0", path = "crates/rustack-cloudwatch-model" }
+rustack-cloudwatch-http = { version = "0.6.0", path = "crates/rustack-cloudwatch-http" }
+rustack-cloudwatch-core = { version = "0.6.0", path = "crates/rustack-cloudwatch-core" }
+rustack-dynamodbstreams-model = { version = "0.6.0", path = "crates/rustack-dynamodbstreams-model" }
+rustack-dynamodbstreams-http = { version = "0.6.0", path = "crates/rustack-dynamodbstreams-http" }
+rustack-dynamodbstreams-core = { version = "0.6.0", path = "crates/rustack-dynamodbstreams-core" }
+rustack-iam-model = { version = "0.6.0", path = "crates/rustack-iam-model" }
+rustack-iam-http = { version = "0.6.0", path = "crates/rustack-iam-http" }
+rustack-iam-core = { version = "0.6.0", path = "crates/rustack-iam-core" }
+rustack-sts-model = { version = "0.6.0", path = "crates/rustack-sts-model" }
+rustack-sts-http = { version = "0.6.0", path = "crates/rustack-sts-http" }
+rustack-sts-core = { version = "0.6.0", path = "crates/rustack-sts-core" }
 
 # Async runtime
 tokio = { version = "1.50", features = [
