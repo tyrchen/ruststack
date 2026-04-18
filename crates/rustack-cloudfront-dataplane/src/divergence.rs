@@ -88,6 +88,36 @@ pub fn handle_function(
     Ok(())
 }
 
+/// Emit or fail on `ViewerProtocolPolicy` that requires HTTPS — Rustack is HTTP-only.
+pub fn handle_viewer_protocol(
+    tracker: &DivergenceTracker,
+    fail: bool,
+    distribution_id: &str,
+    policy: &str,
+) -> Result<(), DataPlaneError> {
+    let requires_https = matches!(policy, "https-only" | "redirect-to-https");
+    if !requires_https {
+        return Ok(());
+    }
+    if fail {
+        if policy == "https-only" {
+            return Err(DataPlaneError::BehaviorResolution(format!(
+                "ViewerProtocolPolicy is 'https-only' but Rustack is HTTP-only ({distribution_id})"
+            )));
+        }
+        // redirect-to-https under FAIL_ON_FUNCTION: upgrade is a no-op locally.
+    }
+    let key = format!("{distribution_id}:vpp-{policy}");
+    if tracker.should_log(&key) {
+        warn!(
+            distribution_id = %distribution_id,
+            policy = %policy,
+            "ViewerProtocolPolicy requires HTTPS but Rustack is HTTP-only — serving over HTTP"
+        );
+    }
+    Ok(())
+}
+
 /// Emit or fail on signed-URL protected behaviors.
 pub fn handle_signed_url(
     tracker: &DivergenceTracker,

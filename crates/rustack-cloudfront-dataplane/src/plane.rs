@@ -17,7 +17,10 @@ use crate::{
     behavior::select_behavior,
     config::DataPlaneConfig,
     dispatch::{OriginKind, classify_origin, dispatch_s3_origin, extract_s3_bucket},
-    divergence::{DivergenceTracker, handle_function, handle_lambda_edge, handle_signed_url},
+    divergence::{
+        DivergenceTracker, handle_function, handle_lambda_edge, handle_signed_url,
+        handle_viewer_protocol,
+    },
     error::DataPlaneError,
     host::match_host,
     transform::{
@@ -331,6 +334,14 @@ impl DataPlane {
             || (behavior.trusted_signers_enabled && !behavior.trusted_signers.is_empty())
         {
             handle_signed_url(&self.divergence, fail, distribution_id)?;
+        }
+        if !behavior.viewer_protocol_policy.is_empty() {
+            handle_viewer_protocol(
+                &self.divergence,
+                fail,
+                distribution_id,
+                &behavior.viewer_protocol_policy,
+            )?;
         }
         Ok(())
     }

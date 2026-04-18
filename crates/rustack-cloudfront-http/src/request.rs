@@ -124,14 +124,10 @@ fn parse_origin_group(n: &Node) -> OriginGroup {
             })
             .unwrap_or_default(),
         member_origins: n
-            .child("Members")
-            .map(|m| {
-                m.items_named("Members", "OriginGroupMember")
-                    .into_iter()
-                    .map(|x| x.child_text("OriginId").to_owned())
-                    .collect()
-            })
-            .unwrap_or_default(),
+            .items_named("Members", "OriginGroupMember")
+            .into_iter()
+            .map(|x| x.child_text("OriginId").to_owned())
+            .collect(),
         selection_criteria: n.child_text("SelectionCriteria").to_owned(),
     }
 }
@@ -143,12 +139,12 @@ fn parse_cache_behavior(n: &Node) -> CacheBehavior {
         viewer_protocol_policy: n.child_text("ViewerProtocolPolicy").to_owned(),
         allowed_methods: n
             .child("AllowedMethods")
-            .map(|a| a.string_items("Items", "Method"))
+            .map(|a| a.direct_string_items("Method"))
             .unwrap_or_default(),
         cached_methods: n
             .child("AllowedMethods")
             .and_then(|a| a.child("CachedMethods"))
-            .map(|c| c.string_items("Items", "Method"))
+            .map(|c| c.direct_string_items("Method"))
             .unwrap_or_default(),
         smooth_streaming: n.child_bool("SmoothStreaming"),
         compress: n.child_bool("Compress"),
@@ -163,7 +159,7 @@ fn parse_cache_behavior(n: &Node) -> CacheBehavior {
             .unwrap_or(false),
         trusted_signers: n
             .child("TrustedSigners")
-            .map(|t| t.string_items("Items", "AwsAccountNumber"))
+            .map(|t| t.direct_string_items("AwsAccountNumber"))
             .unwrap_or_default(),
         trusted_signers_enabled: n
             .child("TrustedSigners")
@@ -171,7 +167,7 @@ fn parse_cache_behavior(n: &Node) -> CacheBehavior {
             .unwrap_or(false),
         trusted_key_groups: n
             .child("TrustedKeyGroups")
-            .map(|t| t.string_items("Items", "KeyGroup"))
+            .map(|t| t.direct_string_items("KeyGroup"))
             .unwrap_or_default(),
         trusted_key_groups_enabled: n
             .child("TrustedKeyGroups")
@@ -202,11 +198,11 @@ fn parse_cache_behavior(n: &Node) -> CacheBehavior {
                 .unwrap_or_default(),
             headers: fv
                 .child("Headers")
-                .map(|h| h.string_items("Items", "Name"))
+                .map(|h| h.direct_string_items("Name"))
                 .unwrap_or_default(),
             query_string_cache_keys: fv
                 .child("QueryStringCacheKeys")
-                .map(|q| q.string_items("Items", "Name"))
+                .map(|q| q.direct_string_items("Name"))
                 .unwrap_or_default(),
         }),
         min_ttl: n.child_i64("MinTTL"),
@@ -220,7 +216,7 @@ fn parse_cookie_preference(n: &Node) -> CookiePreference {
         forward: n.child_text("Forward").to_owned(),
         whitelisted_names: n
             .child("WhitelistedNames")
-            .map(|w| w.string_items("Items", "Name"))
+            .map(|w| w.direct_string_items("Name"))
             .unwrap_or_default(),
     }
 }
@@ -261,7 +257,7 @@ fn parse_restrictions(n: &Node) -> Restrictions {
             .child("GeoRestriction")
             .map(|g| GeoRestriction {
                 restriction_type: g.child_text("RestrictionType").to_owned(),
-                locations: g.string_items("Items", "Location"),
+                locations: g.direct_string_items("Location"),
             })
             .unwrap_or_default(),
     }
@@ -270,10 +266,7 @@ fn parse_restrictions(n: &Node) -> Restrictions {
 /// Parse `<InvalidationBatch>`.
 pub fn parse_invalidation_batch(n: &Node) -> InvalidationBatch {
     InvalidationBatch {
-        paths: n
-            .child("Paths")
-            .map(|p| p.string_items("Items", "Path"))
-            .unwrap_or_default(),
+        paths: n.string_items("Paths", "Path"),
         caller_reference: n.child_text("CallerReference").to_owned(),
     }
 }
@@ -401,7 +394,7 @@ pub fn parse_response_headers_policy_config(n: &Node) -> ResponseHeadersPolicyCo
 pub fn parse_key_group_config(n: &Node) -> KeyGroupConfig {
     KeyGroupConfig {
         name: n.child_text("Name").to_owned(),
-        items: n.string_items("Items", "PublicKey"),
+        items: n.direct_string_items("PublicKey"),
         comment: n.child_text("Comment").to_owned(),
     }
 }
@@ -423,7 +416,7 @@ pub fn parse_function_config(n: &Node) -> FunctionConfig {
         runtime: n.child_text("Runtime").to_owned(),
         key_value_store_associations: n
             .child("KeyValueStoreAssociations")
-            .map(|k| k.string_items("Items", "KeyValueStoreAssociation"))
+            .map(|k| k.direct_string_items("KeyValueStoreAssociation"))
             .unwrap_or_default(),
     }
 }

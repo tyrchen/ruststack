@@ -70,6 +70,26 @@ impl Node {
             .map(|n| n.text.clone())
             .collect()
     }
+
+    /// Parse a `<Items>...<Item/>...</Items>` list where `Items` is a *direct* child.
+    ///
+    /// Use this when you have already descended into the wrapper node and the
+    /// current node looks like `<Wrapper><Quantity/><Items><Item/></Items></Wrapper>`.
+    #[must_use]
+    pub fn direct_items<'a>(&'a self, item_name: &'a str) -> Vec<&'a Node> {
+        self.child("Items")
+            .map(|items| items.children_named(item_name).collect())
+            .unwrap_or_default()
+    }
+
+    /// String variant of `direct_items`: returns the text of every matching item.
+    #[must_use]
+    pub fn direct_string_items(&self, item_name: &str) -> Vec<String> {
+        self.direct_items(item_name)
+            .into_iter()
+            .map(|n| n.text.clone())
+            .collect()
+    }
 }
 
 /// Parse an XML document into a tree rooted at the first element.

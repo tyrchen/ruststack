@@ -31,13 +31,22 @@ use crate::{
 /// Handler trait — exists for symmetry with other services. The built-in
 /// implementation dispatches directly to `RustackCloudFront`.
 pub trait CloudFrontHandler: Send + Sync + 'static {
-    /// Get the underlying provider.
-    fn provider(&self) -> &Arc<RustackCloudFront>;
+    /// Get the underlying provider as an owned `Arc`.
+    ///
+    /// `create_distribution`, `copy_distribution`, `update_distribution`,
+    /// and `create_invalidation` take `self: &Arc<Self>` so they can spawn
+    /// propagation tasks that outlive the caller. The service layer stores
+    /// an `Arc<H>`; this method converts that into the owning `Arc<RustackCloudFront>`
+    /// needed by the provider.
+    fn provider_arc(&self) -> Arc<RustackCloudFront>;
 }
 
+/// The canonical handler: an `Arc<RustackCloudFront>` wrapped in the service's
+/// outer `Arc`. The double-Arc is required because the hyper service owns the
+/// handler by `Arc<H>` while the provider's methods need `Arc<RustackCloudFront>`.
 impl CloudFrontHandler for Arc<RustackCloudFront> {
-    fn provider(&self) -> &Arc<RustackCloudFront> {
-        self
+    fn provider_arc(&self) -> Arc<RustackCloudFront> {
+        Arc::clone(self)
     }
 }
 
@@ -52,8 +61,8 @@ pub async fn dispatch(
     body: Bytes,
     request_id: &str,
 ) -> Response<HttpBody> {
-    let provider = handler.provider();
-    match handle(provider, route, uri, if_match, body).await {
+    let provider = handler.provider_arc();
+    match handle(&provider, route, uri, if_match, body).await {
         Ok(resp) => resp,
         Err(err) => error_response(&err, request_id),
     }

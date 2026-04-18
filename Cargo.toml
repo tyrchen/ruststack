@@ -179,6 +179,7 @@ aws-sdk-ses = "1"
 aws-sdk-apigatewayv2 = "1"
 aws-sdk-iam = "1"
 aws-sdk-sts = "1"
+aws-sdk-cloudfront = "1"
 reqwest = { version = "0.13", features = ["json"] }
 aws-credential-types = "1.2"
 aws-smithy-runtime-api = "1.11"
