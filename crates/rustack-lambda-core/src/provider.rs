@@ -5,7 +5,7 @@
 //! implemented; later phases (versions, aliases, permissions, tags, URLs)
 //! return appropriate errors until implemented.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use tracing::info;
@@ -43,6 +43,9 @@ use rustack_lambda_model::{
 use crate::{
     config::LambdaConfig,
     error::LambdaServiceError,
+    executor::{
+        Executor, ExecutorBackend, InvokeRequest, NativeExecutor, NoopExecutor, PackageType,
+    },
     resolver::{
         alias_arn, function_arn, function_version_arn, layer_arn, layer_version_arn,
         parse_layer_version_arn, resolve_function_ref, resolve_version,
@@ -54,6 +57,57 @@ use crate::{
     },
 };
 
+/// Selects the AWS `Invoke` invocation type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvokeKind {
+    /// Synchronous — wait for the function and return its response.
+    RequestResponse,
+    /// Fire-and-forget — return 202 immediately, run in the background.
+    Event,
+    /// Validate only — no execution, return 204.
+    DryRun,
+}
+
+/// Build the executor backend for the given configuration.
+///
+/// `Disabled` and `Auto`-without-native-support fall back to [`NoopExecutor`]
+/// (echoes the payload). `Native` constructs a real process backend.
+/// `Docker` (Phase 4) is not yet wired and likewise falls back with a
+/// warning.
+fn build_executor(config: &LambdaConfig) -> Arc<dyn Executor> {
+    match config.executor {
+        ExecutorBackend::Disabled => Arc::new(NoopExecutor::new()),
+        ExecutorBackend::Native | ExecutorBackend::Auto => Arc::new(NativeExecutor::new(
+            config.max_warm_instances,
+            config.idle_timeout,
+            config.init_timeout,
+        )),
+        ExecutorBackend::Docker => {
+            tracing::warn!(
+                "LAMBDA_EXECUTOR=docker requested but the Docker backend is not wired in this \
+                 build yet; falling back to no-op executor (echoes payload). Use \
+                 LAMBDA_EXECUTOR=native for real execution of Rust/Go provided.* lambdas."
+            );
+            Arc::new(NoopExecutor::new())
+        }
+    }
+}
+
+/// Outcome of an [`RustackLambda::invoke`] call, mapping cleanly to AWS
+/// `Invoke` response codes.
+#[derive(Debug, Clone)]
+pub enum InvokeOutcome {
+    /// `DryRun` succeeded — return 204.
+    DryRun,
+    /// `Event` queued for asynchronous execution — return 202.
+    Async {
+        /// Synthetic request id for log correlation.
+        request_id: String,
+    },
+    /// `RequestResponse` completed.
+    Sync(crate::executor::InvokeResponse),
+}
+
 /// Lambda business logic provider.
 ///
 /// Holds the function store, layer store, and service configuration.
@@ -64,17 +118,25 @@ pub struct RustackLambda {
     layer_store: LayerStore,
     esm_store: EventSourceMappingStore,
     config: LambdaConfig,
+    executor: Arc<dyn Executor>,
 }
 
 impl RustackLambda {
     /// Create a new Lambda provider with the given store and config.
+    ///
+    /// The executor is selected from `config.executor`. Future phases (Native,
+    /// Docker) will branch here; today everything but `Disabled` falls back to
+    /// the no-op echo so the rest of the wiring can be exercised without a
+    /// runtime backend yet.
     #[must_use]
     pub fn with_store(store: FunctionStore, config: LambdaConfig) -> Self {
+        let executor = build_executor(&config);
         Self {
             store,
             layer_store: LayerStore::new(),
             esm_store: EventSourceMappingStore::new(),
             config,
+            executor,
         }
     }
 
@@ -83,12 +145,43 @@ impl RustackLambda {
     pub fn new(config: LambdaConfig) -> Self {
         let code_dir = std::env::temp_dir().join("rustack-lambda-code");
         let store = FunctionStore::new(code_dir);
+        let executor = build_executor(&config);
         Self {
             store,
             layer_store: LayerStore::new(),
             esm_store: EventSourceMappingStore::new(),
             config,
+            executor,
         }
+    }
+
+    /// Construct the provider with an explicit executor (tests + integration
+    /// harnesses).
+    #[must_use]
+    pub fn with_executor(
+        store: FunctionStore,
+        config: LambdaConfig,
+        executor: Arc<dyn Executor>,
+    ) -> Self {
+        Self {
+            store,
+            layer_store: LayerStore::new(),
+            esm_store: EventSourceMappingStore::new(),
+            config,
+            executor,
+        }
+    }
+
+    /// Borrow the executor (e.g. for tests asserting backend behavior).
+    #[must_use]
+    pub fn executor(&self) -> &Arc<dyn Executor> {
+        &self.executor
+    }
+
+    /// Stop all warm executor instances. Wired into the rustack server's
+    /// graceful shutdown path.
+    pub async fn shutdown(&self) {
+        self.executor.shutdown().await;
     }
 
     /// Returns a reference to the underlying function store.
@@ -633,15 +726,17 @@ impl RustackLambda {
 
     /// Invoke a function.
     ///
-    /// Currently returns a Docker-not-available error when Docker is
-    /// disabled, or a DryRun 204 for `DryRun` invocation type.
-    pub fn invoke(
+    /// Resolves the target version, validates the payload size, then routes
+    /// to the configured [`Executor`]. `DryRun` short-circuits before the
+    /// executor is touched. `Event` returns immediately with a synthetic
+    /// request id; the actual run happens on a detached `tokio::spawn`.
+    pub async fn invoke(
         &self,
         function_ref: &str,
         qualifier: Option<&str>,
         payload: &[u8],
-        is_dry_run: bool,
-    ) -> Result<(u16, Bytes), LambdaServiceError> {
+        invocation_type: InvokeKind,
+    ) -> Result<InvokeOutcome, LambdaServiceError> {
         // Validate synchronous payload size (Appendix C: 6 MB).
         if payload.len() > MAX_SYNC_PAYLOAD {
             let payload_len = payload.len();
@@ -658,27 +753,76 @@ impl RustackLambda {
 
         // Validate function exists and qualifier resolves.
         let record = self.get_record(&name)?;
-        let _version = resolve_version(&record, qualifier)?;
+        let version = resolve_version(&record, qualifier)?;
 
-        if is_dry_run {
-            return Ok((204, Bytes::new()));
+        if invocation_type == InvokeKind::DryRun {
+            return Ok(InvokeOutcome::DryRun);
         }
 
-        if !self.config.docker_enabled {
-            return Err(LambdaServiceError::DockerNotAvailable);
+        let req = self.build_invoke_request(&record, version, payload);
+
+        if invocation_type == InvokeKind::Event {
+            let executor = Arc::clone(&self.executor);
+            let request_id = uuid::Uuid::new_v4().to_string();
+            let function_name = req.function_name.clone();
+            let rid = request_id.clone();
+            tokio::spawn(async move {
+                if let Err(err) = executor.invoke(req).await {
+                    tracing::warn!(
+                        function = %function_name,
+                        request_id = %rid,
+                        error = %err,
+                        "async lambda invocation failed"
+                    );
+                }
+            });
+            return Ok(InvokeOutcome::Async { request_id });
         }
 
-        // Docker execution will be implemented in a future phase.
-        // For now, return a stub response with the payload echoed back.
-        let response = serde_json::json!({
-            "statusCode": 200,
-            "body": String::from_utf8_lossy(payload),
-        });
-        let body = serde_json::to_vec(&response).map_err(|e| LambdaServiceError::Internal {
-            message: format!("Failed to serialize invoke response: {e}"),
-        })?;
+        let response = self.executor.invoke(req).await?;
+        Ok(InvokeOutcome::Sync(response))
+    }
 
-        Ok((200, Bytes::from(body)))
+    /// Build the executor request from a resolved function/version record.
+    fn build_invoke_request(
+        &self,
+        record: &FunctionRecord,
+        version: &VersionRecord,
+        payload: &[u8],
+    ) -> InvokeRequest {
+        let function_arn = if version.version == "$LATEST" {
+            record.arn.clone()
+        } else {
+            function_version_arn(
+                &self.config.default_region,
+                &self.config.account_id,
+                &record.name,
+                &version.version,
+            )
+        };
+        let mut env = version.environment.clone();
+        // Always make the rustack region/account visible inside the runtime so
+        // SDK calls back to the same rustack instance work without extra setup.
+        env.entry("AWS_REGION".to_owned())
+            .or_insert_with(|| self.config.default_region.clone());
+        env.entry("AWS_DEFAULT_REGION".to_owned())
+            .or_insert_with(|| self.config.default_region.clone());
+        InvokeRequest {
+            function_arn,
+            function_name: record.name.clone(),
+            qualifier: version.version.clone(),
+            runtime: version.runtime.clone(),
+            handler: version.handler.clone(),
+            architectures: version.architectures.clone(),
+            package_type: PackageType::from_wire(&version.package_type),
+            code_root: version.code_path.clone(),
+            image_uri: version.image_uri.clone(),
+            environment: env,
+            timeout: Duration::from_secs(u64::from(version.timeout)),
+            memory_mb: version.memory_size,
+            payload: Bytes::copy_from_slice(payload),
+            capture_logs: false,
+        }
     }
 
     // ---------------------------------------------------------------
@@ -2695,21 +2839,54 @@ mod tests {
             .await
             .unwrap();
 
-        let (status, body) = provider.invoke("my-func", None, b"{}", true).unwrap();
-        assert_eq!(status, 204);
-        assert!(body.is_empty());
+        let outcome = provider
+            .invoke("my-func", None, b"{}", InvokeKind::DryRun)
+            .await
+            .unwrap();
+        assert!(matches!(outcome, InvokeOutcome::DryRun));
     }
 
     #[tokio::test]
-    async fn test_should_error_invoke_without_docker() {
+    async fn test_should_invoke_sync_via_noop_executor() {
+        // Default test provider uses ExecutorBackend::Disabled => NoopExecutor,
+        // which echoes the request body back wrapped in a fake API GW shape.
         let provider = test_provider();
         provider
             .create_function(sample_create_input("my-func"))
             .await
             .unwrap();
 
-        let err = provider.invoke("my-func", None, b"{}", false).unwrap_err();
-        assert!(matches!(err, LambdaServiceError::DockerNotAvailable));
+        let outcome = provider
+            .invoke("my-func", None, b"{\"hi\":1}", InvokeKind::RequestResponse)
+            .await
+            .unwrap();
+        let resp = match outcome {
+            InvokeOutcome::Sync(r) => r,
+            other => panic!("expected Sync, got {other:?}"),
+        };
+        assert_eq!(resp.status, 200);
+        assert_eq!(resp.executed_version, "$LATEST");
+        let body: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
+        assert_eq!(body["statusCode"], 200);
+        assert_eq!(body["body"], "{\"hi\":1}");
+    }
+
+    #[tokio::test]
+    async fn test_should_invoke_event_returns_async_outcome() {
+        let provider = test_provider();
+        provider
+            .create_function(sample_create_input("my-func"))
+            .await
+            .unwrap();
+
+        let outcome = provider
+            .invoke("my-func", None, b"{}", InvokeKind::Event)
+            .await
+            .unwrap();
+        assert!(
+            matches!(outcome, InvokeOutcome::Async { .. }),
+            "expected Async, got {outcome:?}"
+        );
     }
 
     #[tokio::test]

@@ -496,6 +496,7 @@ mod test_iam;
 mod test_kinesis;
 mod test_kms;
 mod test_lambda;
+mod test_lambda_invoke;
 mod test_list;
 mod test_logs;
 mod test_multipart;

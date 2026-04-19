@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/*", "apps/*", "tests/integration"]
+members = [
+  "crates/*",
+  "apps/*",
+  "tests/integration",
+  "tests/lambda-fixtures/echo-bootstrap",
+]
 exclude = ["codegen"]
 resolver = "3"
 
@@ -93,6 +98,7 @@ tokio = { version = "1.50", features = [
   "io-util",
   "fs",
   "net",
+  "process",
 ] }
 
 # HTTP / networking
@@ -152,6 +158,7 @@ regex = "1.12"
 bytes = "1.11"
 rand = "0.9"
 tempfile = "3.27"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 percent-encoding = "2.3"
 mime = "0.3"
 futures = "0.3"

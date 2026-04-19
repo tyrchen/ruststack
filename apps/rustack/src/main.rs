@@ -980,6 +980,7 @@ fn build_services(is_enabled: impl Fn(&str) -> bool) -> Vec<Box<dyn ServiceRoute
         info!(
             lambda_skip_signature_validation = lambda_config.skip_signature_validation,
             lambda_docker_enabled = lambda_config.docker_enabled,
+            lambda_executor = ?lambda_config.executor,
             "initializing Lambda service",
         );
         let lambda_provider = RustackLambda::new(lambda_config.clone());

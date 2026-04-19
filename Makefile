@@ -123,6 +123,11 @@ codegen-download:
 integration:
 	@cargo test -p rustack-integration -- --ignored
 
+# Real-execution Lambda invoke tests (native backend).
+# Builds a Rust bootstrap fixture and invokes it through the rustack provider.
+test-lambda-invoke-native:
+	@RUSTACK_LAMBDA_NATIVE_TESTS=1 cargo test -p rustack-integration test_lambda_invoke -- --ignored --test-threads=1
+
 mint: mint-start mint-run
 
 mint-build:

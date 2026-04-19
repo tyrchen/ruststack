@@ -30,7 +30,7 @@ use rustack_lambda_model::{
     types::InvocationType,
 };
 
-use crate::provider::RustackLambda;
+use crate::provider::{InvokeKind, InvokeOutcome, RustackLambda};
 
 /// Handler that bridges the HTTP layer to the Lambda provider.
 #[derive(Debug)]
@@ -206,44 +206,46 @@ async fn dispatch(
                 .and_then(|v| v.to_str().ok())
                 .and_then(InvocationType::from_str_value)
                 .unwrap_or(InvocationType::RequestResponse);
+            let kind = match invocation_type {
+                InvocationType::RequestResponse => InvokeKind::RequestResponse,
+                InvocationType::Event => InvokeKind::Event,
+                InvocationType::DryRun => InvokeKind::DryRun,
+            };
 
-            if invocation_type == InvocationType::DryRun {
-                // DryRun: validate function exists, return 204.
-                let (status, _) = provider
-                    .invoke(function_name, qualifier, body, true)
-                    .map_err(LambdaError::from)?;
-                return wrap_empty_response(status);
-            }
-
-            // For Event invocation, validate and return 202 immediately.
-            // Actual async execution would be queued (not yet implemented).
-            if invocation_type == InvocationType::Event {
-                // Validate the function exists and qualifier resolves.
-                provider
-                    .invoke(function_name, qualifier, body, true)
-                    .map_err(LambdaError::from)?;
-                return wrap_empty_response(202);
-            }
-
-            // RequestResponse: synchronous invocation.
-            let (status, response_body) = provider
-                .invoke(function_name, qualifier, body, false)
+            let outcome = provider
+                .invoke(function_name, qualifier, body, kind)
+                .await
                 .map_err(LambdaError::from)?;
 
-            // Build response with proper invoke headers.
-            let mut response = http::Response::builder()
-                .status(status)
-                .body(LambdaResponseBody::from_bytes(response_body))
-                .map_err(|e| {
-                    LambdaError::service_error(format!("Failed to build invoke response: {e}"))
-                })?;
-
-            // Set X-Amz-Executed-Version header.
-            if let Ok(hv) = http::HeaderValue::from_str(qualifier.unwrap_or("$LATEST")) {
-                response.headers_mut().insert("x-amz-executed-version", hv);
+            match outcome {
+                InvokeOutcome::DryRun => wrap_empty_response(204),
+                InvokeOutcome::Async { .. } => wrap_empty_response(202),
+                InvokeOutcome::Sync(resp) => {
+                    let mut response = http::Response::builder()
+                        .status(resp.status)
+                        .body(LambdaResponseBody::from_bytes(resp.payload))
+                        .map_err(|e| {
+                            LambdaError::service_error(format!(
+                                "Failed to build invoke response: {e}"
+                            ))
+                        })?;
+                    let headers = response.headers_mut();
+                    if let Ok(hv) = http::HeaderValue::from_str(&resp.executed_version) {
+                        headers.insert("x-amz-executed-version", hv);
+                    }
+                    if let Some(err) = resp.function_error {
+                        if let Ok(hv) = http::HeaderValue::from_str(&err) {
+                            headers.insert("x-amz-function-error", hv);
+                        }
+                    }
+                    if let Some(tail) = resp.log_tail {
+                        if let Ok(hv) = http::HeaderValue::from_str(&tail) {
+                            headers.insert("x-amz-log-result", hv);
+                        }
+                    }
+                    Ok(response)
+                }
             }
-
-            Ok(response)
         }
 
         // ---- Phase 1: Versions + Aliases ----

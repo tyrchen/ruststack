@@ -1,6 +1,8 @@
 //! Lambda service configuration.
 
-use std::env;
+use std::{env, time::Duration};
+
+use crate::executor::ExecutorBackend;
 
 /// Lambda service configuration.
 #[derive(Debug, Clone)]
@@ -15,8 +17,17 @@ pub struct LambdaConfig {
     pub host: String,
     /// Port for URL generation.
     pub port: u16,
-    /// Whether Docker execution is enabled for Invoke.
+    /// Whether Docker execution is enabled for Invoke (legacy alias for
+    /// `executor = Docker`).
     pub docker_enabled: bool,
+    /// Selected execution backend.
+    pub executor: ExecutorBackend,
+    /// Maximum number of warm instances kept per `(function, qualifier)` key.
+    pub max_warm_instances: usize,
+    /// Idle window before a warm instance is reaped.
+    pub idle_timeout: Duration,
+    /// Time the bootstrap has to call `/runtime/invocation/next` after spawn.
+    pub init_timeout: Duration,
 }
 
 impl LambdaConfig {
@@ -28,9 +39,30 @@ impl LambdaConfig {
     /// - `DEFAULT_ACCOUNT_ID` (default: `000000000000`)
     /// - `GATEWAY_HOST` (default: `localhost`)
     /// - `GATEWAY_PORT` (default: `4566`)
-    /// - `LAMBDA_DOCKER_ENABLED` (default: `false`)
+    /// - `LAMBDA_DOCKER_ENABLED` (default: `false` — legacy alias for
+    ///   `LAMBDA_EXECUTOR=docker`).
+    /// - `LAMBDA_EXECUTOR` (default: `native`; `docker` if
+    ///   `LAMBDA_DOCKER_ENABLED=true`). Accepts `disabled`, `auto`, `native`,
+    ///   `docker`. The native backend runs `provided.*` bootstraps (Rust /
+    ///   Go / C++) directly on the host with no Docker requirement.
+    /// - `LAMBDA_MAX_WARM_INSTANCES` (default: `1`)
+    /// - `LAMBDA_IDLE_TIMEOUT_SECS` (default: `600`)
+    /// - `LAMBDA_INIT_TIMEOUT_SECS` (default: `5`)
     #[must_use]
     pub fn from_env() -> Self {
+        let docker_enabled = env_bool("LAMBDA_DOCKER_ENABLED", false);
+        let executor = env::var("LAMBDA_EXECUTOR")
+            .ok()
+            .and_then(|raw| raw.parse::<ExecutorBackend>().ok())
+            .unwrap_or(if docker_enabled {
+                ExecutorBackend::Docker
+            } else {
+                // Default to the native backend — zero-setup for Rust / Go /
+                // C++ `provided.*` lambdas. Users can opt into docker with
+                // `LAMBDA_EXECUTOR=docker` or disable execution entirely with
+                // `LAMBDA_EXECUTOR=disabled`.
+                ExecutorBackend::Native
+            });
         Self {
             skip_signature_validation: env_bool("LAMBDA_SKIP_SIGNATURE_VALIDATION", true),
             default_region: env::var("DEFAULT_REGION").unwrap_or_else(|_| "us-east-1".to_owned()),
@@ -41,7 +73,24 @@ impl LambdaConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(4566),
-            docker_enabled: env_bool("LAMBDA_DOCKER_ENABLED", false),
+            docker_enabled,
+            executor,
+            max_warm_instances: env::var("LAMBDA_MAX_WARM_INSTANCES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1),
+            idle_timeout: Duration::from_secs(
+                env::var("LAMBDA_IDLE_TIMEOUT_SECS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(600),
+            ),
+            init_timeout: Duration::from_secs(
+                env::var("LAMBDA_INIT_TIMEOUT_SECS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(5),
+            ),
         }
     }
 }
@@ -55,6 +104,10 @@ impl Default for LambdaConfig {
             host: "localhost".to_owned(),
             port: 4566,
             docker_enabled: false,
+            executor: ExecutorBackend::Disabled,
+            max_warm_instances: 1,
+            idle_timeout: Duration::from_secs(600),
+            init_timeout: Duration::from_secs(5),
         }
     }
 }
