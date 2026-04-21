@@ -1028,4 +1028,84 @@ mod tests {
             result.expect("task panicked");
         }
     }
+
+    // ---------------------------------------------------------------------------
+    // Bug: ChangeMessageVisibility doesn't wake long-poll waiters
+    // ---------------------------------------------------------------------------
+    //
+    // When a consumer calls ChangeMessageVisibility with a short timeout (e.g.
+    // 1 second) to retry a message quickly, the message becomes available after
+    // the timeout expires but any pending ReceiveMessage long-poll is not woken
+    // up. The periodic_cleanup (1s interval) moves expired in-flight messages
+    // back to the available queue and calls notify_waiters(), but the
+    // notification is lost because the notified() future in the actor's
+    // tokio::select! loop is not being polled at that moment.
+
+    #[tokio::test]
+    #[ignore = "requires running server"]
+    async fn test_change_visibility_wakes_long_poll() {
+        let client = sqs_client();
+        let (_, url) = create_test_queue(&client, "vis-wake").await;
+
+        // Send a message.
+        client
+            .send_message()
+            .queue_url(&url)
+            .message_body("retry me")
+            .send()
+            .await
+            .unwrap();
+
+        // Receive it with a long visibility timeout.
+        let recv = client
+            .receive_message()
+            .queue_url(&url)
+            .visibility_timeout(60)
+            .wait_time_seconds(0)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(recv.messages().len(), 1);
+        let receipt_handle = recv.messages()[0].receipt_handle().unwrap().to_owned();
+
+        // Change visibility to 1 second — simulates a consumer requesting
+        // a quick retry after a transient error.
+        client
+            .change_message_visibility()
+            .queue_url(&url)
+            .receipt_handle(&receipt_handle)
+            .visibility_timeout(1)
+            .send()
+            .await
+            .unwrap();
+
+        // Start a long-poll that should pick up the message after the 1s
+        // visibility timeout expires.
+        let start = std::time::Instant::now();
+        let recv2 = client
+            .receive_message()
+            .queue_url(&url)
+            .max_number_of_messages(1)
+            .wait_time_seconds(10)
+            .send()
+            .await
+            .unwrap();
+
+        let elapsed = start.elapsed();
+
+        assert_eq!(
+            recv2.messages().len(),
+            1,
+            "expected message to be redelivered after visibility timeout"
+        );
+        assert_eq!(recv2.messages()[0].body().unwrap(), "retry me");
+        assert!(
+            elapsed.as_secs() < 5,
+            "long-poll took {elapsed:?} — should have returned within ~2s \
+             (1s visibility + 1s cleanup interval), not waited for the full \
+             WaitTimeSeconds"
+        );
+
+        delete_test_queue(&client, &url).await;
+    }
 }

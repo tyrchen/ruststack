@@ -30,7 +30,7 @@ use rustack_sqs_model::{
         StartMessageMoveTaskOutput, TagQueueOutput, UntagQueueOutput,
     },
 };
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::mpsc;
 
 use crate::{
     config::SqsConfig,
@@ -73,19 +73,17 @@ impl RustackSqs {
             })
     }
 
-    /// Get a clone of a queue handle by URL.
-    ///
-    /// Returns an owned [`QueueHandle`] so that no `DashMap` guard is held
-    /// across `.await` points — holding a guard across an await can deadlock
-    /// the runtime when concurrent operations touch the same shard.
-    fn get_queue(&self, queue_url_str: &str) -> Result<QueueHandle, SqsError> {
+    /// Get a reference to a queue handle by URL.
+    fn get_queue(
+        &self,
+        queue_url_str: &str,
+    ) -> Result<dashmap::mapref::one::Ref<'_, String, QueueHandle>, SqsError> {
         let name = Self::resolve_queue_name(queue_url_str)?;
-        let entry = self.queues.get(&name).ok_or_else(|| {
+        self.queues.get(&name).ok_or_else(|| {
             SqsError::non_existent_queue(
                 "The specified queue does not exist for this wsdl version.",
             )
-        })?;
-        Ok(entry.value().clone())
+        })
     }
 
     // ---- Queue Management Operations ----
@@ -120,8 +118,7 @@ impl RustackSqs {
 
         // Idempotent create: if queue exists with same attributes, return existing URL.
         // If attributes differ, return QueueAlreadyExists.
-        // Clone the handle out of the DashMap guard to avoid holding it across await.
-        if let Some(existing) = self.queues.get(queue_name).map(|e| e.value().clone()) {
+        if let Some(existing) = self.queues.get(queue_name) {
             if !input.attributes.is_empty() {
                 let existing_attrs = existing
                     .get_attributes(vec!["All".to_owned()])
@@ -164,7 +161,6 @@ impl RustackSqs {
 
         // Spawn queue actor.
         let (sender, receiver) = mpsc::channel(256);
-        let notify = Arc::new(Notify::new());
         let now = now_epoch_seconds();
 
         let actor = QueueActor::new(
@@ -173,7 +169,6 @@ impl RustackSqs {
             is_fifo,
             attributes,
             receiver,
-            Arc::clone(&notify),
             input.tags,
             self.config.account_id.clone(),
             now,
@@ -182,7 +177,6 @@ impl RustackSqs {
 
         let handle = QueueHandle {
             sender,
-            message_notify: notify,
             metadata: QueueMetadata {
                 name: queue_name.clone(),
                 url: url.clone(),
@@ -190,7 +184,7 @@ impl RustackSqs {
                 is_fifo,
                 created_at: now,
             },
-            task: Arc::new(task),
+            task,
             shutdown: Arc::new(AtomicBool::new(false)),
         };
 
@@ -222,17 +216,13 @@ impl RustackSqs {
         &self,
         input: GetQueueUrlInput,
     ) -> Result<GetQueueUrlOutput, SqsError> {
-        let url = self
-            .queues
-            .get(&input.queue_name)
-            .map(|e| e.metadata.url.clone())
-            .ok_or_else(|| {
-                SqsError::non_existent_queue(
-                    "The specified queue does not exist for this wsdl version.",
-                )
-            })?;
+        let handle = self.queues.get(&input.queue_name).ok_or_else(|| {
+            SqsError::non_existent_queue(
+                "The specified queue does not exist for this wsdl version.",
+            )
+        })?;
         Ok(GetQueueUrlOutput {
-            queue_url: Some(url),
+            queue_url: Some(handle.metadata.url.clone()),
         })
     }
 
@@ -516,14 +506,12 @@ impl RustackSqs {
     ) -> Result<ListDeadLetterSourceQueuesOutput, SqsError> {
         let target_handle = self.get_queue(&input.queue_url)?;
         let target_arn = target_handle.metadata.arn.clone();
-
-        // Collect owned handles first so we don't hold DashMap guards across await.
-        let handles: Vec<QueueHandle> =
-            self.queues.iter().map(|e| e.value().clone()).collect();
+        drop(target_handle);
 
         let mut source_urls = Vec::new();
-        for handle in &handles {
-            let attrs: Result<HashMap<String, String>, SqsError> = handle
+        for entry in &self.queues {
+            let attrs: Result<HashMap<String, String>, SqsError> = entry
+                .value()
                 .get_attributes(vec!["RedrivePolicy".to_owned()])
                 .await;
             if let Ok(attrs) = attrs {
@@ -532,7 +520,7 @@ impl RustackSqs {
                         serde_json::from_str::<rustack_sqs_model::types::RedrivePolicy>(policy_json)
                     {
                         if policy.dead_letter_target_arn == target_arn {
-                            source_urls.push(handle.metadata.url.clone());
+                            source_urls.push(entry.value().metadata.url.clone());
                         }
                     }
                 }
@@ -567,7 +555,7 @@ impl RustackSqs {
         &self,
         input: RemovePermissionInput,
     ) -> Result<RemovePermissionOutput, SqsError> {
-        let _ = self.get_queue(&input.queue_url)?;
+        let _handle = self.get_queue(&input.queue_url)?;
         Ok(RemovePermissionOutput {})
     }
 
